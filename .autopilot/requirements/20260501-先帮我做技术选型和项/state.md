@@ -11,7 +11,7 @@ plan_mode: "deep"
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260501-先帮我做技术选型和项"
 session_id: d9dad1e2-350b-4456-b324-30d2681ad4d6
 started_at: "2026-05-01T15:04:21Z"
@@ -67,3 +67,4 @@ started_at: "2026-05-01T15:04:21Z"
 - [2026-05-01T15:40:00Z] 实施完成：5 步全部完成，pnpm install/typecheck/lint/test 全部通过，后端 API 健康检查 OK，前端首页返回 200，8 张 SQLite 表创建成功
 - [2026-05-01T15:45:00Z] QA 全部通过，git initial commit 完成 (70 files, 8041 insertions)
 - [2026-05-01T15:45:00Z] 项目脚手架搭建完成
+- [2026-05-02T00:00:00Z] 知识提取完成：1 决策 (tech-stack) + 3 模式 (pnpm/vitest/biome) 写入 .autopilot/
