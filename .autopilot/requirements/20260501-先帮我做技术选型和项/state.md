@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 3
 max_iterations: 30
@@ -68,3 +68,4 @@ started_at: "2026-05-01T15:04:21Z"
 - [2026-05-01T15:45:00Z] QA 全部通过，git initial commit 完成 (70 files, 8041 insertions)
 - [2026-05-01T15:45:00Z] 项目脚手架搭建完成
 - [2026-05-02T00:00:00Z] 知识提取完成：1 决策 (tech-stack) + 3 模式 (pnpm/vitest/biome) 写入 .autopilot/
+- [2026-05-02T00:05:00Z] commit-agent 收尾完成，merge 阶段结束
