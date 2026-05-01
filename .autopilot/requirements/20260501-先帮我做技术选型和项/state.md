@@ -2,7 +2,7 @@
 active: true
 phase: "merge"
 gate: ""
-iteration: 2
+iteration: 3
 max_iterations: 30
 max_retries: 3
 retry_count: 0
