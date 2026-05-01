@@ -1,0 +1,38 @@
+{
+  "name": "@relight/backend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.1",
+    "@relight/shared": "workspace:*",
+    "bullmq": "^5.46.0",
+    "dotenv": "^16.5.0",
+    "drizzle-orm": "^0.41.0",
+    "hono": "^4.7.7",
+    "ioredis": "^5.6.1",
+    "openai": "^4.95.0",
+    "sharp": "^0.33.5",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.14.0",
+    "better-sqlite3": "^11.9.1",
+    "drizzle-kit": "^0.30.6",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.3",
+    "typescript": "~5.8.3",
+    "vitest": "^3.1.1"
+  }
+}
