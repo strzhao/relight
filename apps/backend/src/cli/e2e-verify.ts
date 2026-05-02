@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import sharp from "sharp";
 import { aiClient } from "../ai/client";
+import { evaluateResponse } from "../ai/evaluation/evaluator";
 import { loadPrompts } from "../ai/prompts";
 import { parseAnalysisResponse } from "../ai/response-parser";
-import { evaluateResponse } from "../ai/evaluation/evaluator";
 
 async function main(): Promise<void> {
   const photoPath = process.argv[2];
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
 
   // Step 3: 调用 AI 视觉模型
   const fullPrompt = `${prompts.system}\n\n${prompts.user}`;
-  console.log(`\n--- 正在调用 AI 模型 (qwen3.6-35b) ---`);
+  console.log("\n--- 正在调用 AI 模型 (qwen3.6-35b) ---");
   const startTime = Date.now();
 
   const rawResponse = await aiClient.analyzePhoto(base64, "image/jpeg", fullPrompt);
@@ -65,10 +65,12 @@ async function main(): Promise<void> {
 
   const data = parseResult.parsed || parseResult.fallback;
   const usedFallback = parseResult.parsed === null;
-  console.log(`\n${usedFallback ? "⚠️ 使用容错结果" : "✅ 解析成功"} (${usedFallback ? "部分字段回退默认值" : "Zod 校验通过"})`);
+  console.log(
+    `\n${usedFallback ? "⚠️ 使用容错结果" : "✅ 解析成功"} (${usedFallback ? "部分字段回退默认值" : "Zod 校验通过"})`,
+  );
 
   // Step 5: 展示分析结果
-  console.log("\n" + "─".repeat(60));
+  console.log(`\n${"─".repeat(60)}`);
   console.log("  📸 分析结果");
   console.log("─".repeat(60));
 
@@ -82,7 +84,7 @@ async function main(): Promise<void> {
     console.log(`  • ${t.name} (${t.category}) — 置信度: ${(t.confidence * 100).toFixed(0)}%`);
   }
 
-  console.log(`\n【构图分析】`);
+  console.log("\n【构图分析】");
   console.log(`  类型: ${data.composition.type}`);
   console.log(`  评分: ${data.composition.score}/10`);
   console.log(`  描述: ${data.composition.description}`);
@@ -90,23 +92,25 @@ async function main(): Promise<void> {
   const subjects = (data.composition as Record<string, unknown>).subjects as string[] | undefined;
   if (subjects?.length) console.log(`  主体: ${subjects.join(", ")}`);
 
-  console.log(`\n【色彩分析】`);
+  console.log("\n【色彩分析】");
   console.log(`  色板: ${data.colorAnalysis.palette.join(", ")}`);
   console.log(`  主调: ${data.colorAnalysis.dominant}`);
   console.log(`  氛围: ${data.colorAnalysis.mood}`);
 
-  console.log(`\n【情感分析】`);
+  console.log("\n【情感分析】");
   console.log(`  主要情感: ${data.emotionalAnalysis.primary}`);
   console.log(`  次要情感: ${data.emotionalAnalysis.secondary}`);
   console.log(`  强度: ${data.emotionalAnalysis.intensity}/10`);
-  const keywords = (data.emotionalAnalysis as Record<string, unknown>).keywords as string[] | undefined;
+  const keywords = (data.emotionalAnalysis as Record<string, unknown>).keywords as
+    | string[]
+    | undefined;
   if (keywords?.length) console.log(`  关键词: ${keywords.join(", ")}`);
 
-  console.log(`\n【使用建议】`);
+  console.log("\n【使用建议】");
   console.log(`  ${data.usageSuggestions}`);
 
   // Step 6: 量化评估
-  console.log("\n" + "─".repeat(60));
+  console.log(`\n${"─".repeat(60)}`);
   console.log("  📊 量化验收 (5维度 × 20分 = 100分)");
   console.log("─".repeat(60));
 
@@ -121,7 +125,7 @@ async function main(): Promise<void> {
   }
 
   // 最终结论
-  console.log("\n" + "=".repeat(60));
+  console.log(`\n${"=".repeat(60)}`);
   console.log("  验收结论");
   console.log("=".repeat(60));
 
@@ -129,12 +133,18 @@ async function main(): Promise<void> {
     { label: "AI 服务可达 (qwen3.6-35b multimodal)", ok: true },
     { label: "响应 JSON 解析成功", ok: !parseResult.error?.includes("未能从响应中提取") },
     { label: "标签 ≥ 7 个 (7 类覆盖)", ok: data.tags.length >= 7 },
-    { label: "叙事描述 50-200 中文", ok: data.narrative.length >= 50 && data.narrative.length <= 200 },
+    {
+      label: "叙事描述 50-200 中文",
+      ok: data.narrative.length >= 50 && data.narrative.length <= 200,
+    },
     { label: "美学评分 1-10", ok: data.aestheticScore >= 1 && data.aestheticScore <= 10 },
-    { label: "标签类别有效", ok: data.tags.every((t) => {
-      const valid = ["scene", "emotion", "people", "color", "event", "object", "style"];
-      return valid.includes(t.category);
-    })},
+    {
+      label: "标签类别有效",
+      ok: data.tags.every((t) => {
+        const valid = ["scene", "emotion", "people", "color", "event", "object", "style"];
+        return valid.includes(t.category);
+      }),
+    },
     { label: "量化评分 ≥ 60", ok: result.totalScore >= 60 },
     { label: "Zod 校验通过", ok: !usedFallback },
   ];

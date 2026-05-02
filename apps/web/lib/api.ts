@@ -3,6 +3,8 @@ import type {
   DailyPick,
   PaginatedResponse,
   Photo,
+  QueueInfo,
+  QueueJobDetail,
   ScanLog,
   StorageSource,
   Tag,
@@ -56,5 +58,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ key, value }),
       }),
+  },
+
+  queues: {
+    list: () => fetchApi<ApiResponse<QueueInfo[]>>(API_ROUTES.queues.list),
+    job: (name: string, jobId: string) =>
+      fetchApi<ApiResponse<QueueJobDetail>>(API_ROUTES.queues.job(name, jobId)),
   },
 };

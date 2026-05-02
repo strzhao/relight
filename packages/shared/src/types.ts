@@ -132,3 +132,51 @@ export interface PaginatedResponse<T> {
 export interface TagWithCount extends Tag {
   photoCount: number;
 }
+
+/** 队列作业计数 */
+export interface QueueJobCounts {
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  delayed: number;
+  paused: number;
+}
+
+/** 队列作业摘要 */
+export interface QueueJobSummary {
+  id: string;
+  name: string;
+  state: "waiting" | "active" | "completed" | "failed" | "delayed" | "paused" | "unknown";
+  timestamp: number;
+  processedOn: number | null;
+  finishedOn: number | null;
+  attemptsMade: number;
+  failedReason: string | null;
+}
+
+/** 队列作业详情（含 data 和 stacktrace） */
+export interface QueueJobDetail extends QueueJobSummary {
+  data: unknown;
+  progress: number | object;
+  returnvalue: unknown;
+  opts: Record<string, unknown>;
+  stacktrace: string[];
+}
+
+/** 队列快照（SSE 推送） */
+export interface QueueSnapshot {
+  timestamp: string;
+  counts: QueueJobCounts;
+  recentJobs: QueueJobSummary[];
+}
+
+/** 队列信息（侧边栏） */
+export interface QueueInfo {
+  name: string;
+  label: string;
+  description: string;
+  isActive: boolean;
+  badge: string | null;
+  counts: QueueJobCounts | null;
+}

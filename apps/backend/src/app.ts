@@ -4,6 +4,7 @@ import {
   dailyRouter,
   healthRouter,
   photosRouter,
+  queuesRouter,
   scanRouter,
   settingsRouter,
   tagsRouter,
@@ -20,6 +21,7 @@ export function createApp(): Hono {
   app.route("/api/tags", tagsRouter);
   app.route("/api/scan", scanRouter);
   app.route("/api/settings", settingsRouter);
+  app.route("/api/queues", queuesRouter);
 
   return app;
 }
