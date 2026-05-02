@@ -34,11 +34,47 @@ export interface PhotoTag {
   confidence: number;
 }
 
+/** AI 分析标签 */
+export interface AnalysisTag {
+  name: string;
+  category: TagCategory;
+  confidence: number;
+}
+
+/** 构图分析 */
+export interface CompositionAnalysis {
+  type: string;
+  score: number;
+  description: string;
+}
+
+/** 色彩分析 */
+export interface ColorAnalysis {
+  palette: string[];
+  dominant: string;
+  mood: string;
+}
+
+/** 情感分析 */
+export interface EmotionalAnalysis {
+  primary: string;
+  secondary: string;
+  intensity: number;
+}
+
 /** AI 分析记录 */
 export interface PhotoAnalysis {
   id: string;
   photoId: string;
   aiModel: string;
+  narrative?: string | null;
+  aestheticScore?: number | null;
+  tags?: AnalysisTag[] | null;
+  composition?: CompositionAnalysis | null;
+  colorAnalysis?: ColorAnalysis | null;
+  emotionalAnalysis?: EmotionalAnalysis | null;
+  usageSuggestions?: string | null;
+  promptVersion?: string | null;
   rawResponse: string;
   processedAt: string;
 }
@@ -90,4 +126,9 @@ export interface PaginatedResponse<T> {
   total: number;
   page: number;
   pageSize: number;
+}
+
+/** 带计数标签 */
+export interface TagWithCount extends Tag {
+  photoCount: number;
 }

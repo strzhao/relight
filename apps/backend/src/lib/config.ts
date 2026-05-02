@@ -9,6 +9,6 @@ export const config = {
     baseUrl: process.env.AI_BASE_URL ?? "http://127.0.0.1:8001/v1",
     apiKey: process.env.AI_API_KEY ?? "qwen-local-key",
     model: process.env.AI_MODEL ?? "qwen3.6-35b",
-    visionModel: process.env.AI_VISION_MODEL ?? "qwen2.5-vl-7b",
+    visionModel: process.env.AI_VISION_MODEL ?? "qwen3.6-35b",
   },
 } as const;

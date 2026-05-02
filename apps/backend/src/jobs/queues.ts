@@ -3,6 +3,23 @@ import { config } from "../lib/config";
 
 const connection = { url: config.redisUrl };
 
-export const scanQueue = new Queue("scan:storage", { connection });
-export const analyzeQueue = new Queue("analyze:photo", { connection });
-export const dailyQueue = new Queue("daily:selection", { connection });
+/** 默认任务选项：重试 3 次，指数退避 */
+const defaultJobOptions = {
+  attempts: 3,
+  backoff: { type: "exponential" as const, delay: 1000 },
+};
+
+export const scanQueue = new Queue("scan:storage", {
+  connection,
+  defaultJobOptions,
+});
+
+export const analyzeQueue = new Queue("analyze:photo", {
+  connection,
+  defaultJobOptions,
+});
+
+export const dailyQueue = new Queue("daily:selection", {
+  connection,
+  defaultJobOptions,
+});
