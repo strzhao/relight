@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -95,6 +96,82 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".mkv",
 ]);
 
+export const VIDEO_EXTENSIONS = new Set([".mov", ".mp4", ".avi", ".mkv"]);
+
+export async function getVideoMetadata(
+  filePath: string,
+): Promise<{ width?: number; height?: number; takenAt?: Date }> {
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        "ffprobe",
+        ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", filePath],
+        { timeout: 30000 },
+        (err, stdout) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(stdout);
+          }
+        },
+      );
+    });
+
+    const probe = JSON.parse(stdout);
+
+    // 从第一个 video stream 获取宽高
+    let width: number | undefined;
+    let height: number | undefined;
+    let rotation = 0;
+
+    const videoStream = probe.streams?.find(
+      (s: { codec_type?: string }) => s.codec_type === "video",
+    );
+
+    if (videoStream) {
+      width = videoStream.width;
+      height = videoStream.height;
+
+      // 检查 side_data_list 中的 rotation
+      if (videoStream.side_data_list) {
+        for (const data of videoStream.side_data_list) {
+          if (data.rotation !== undefined && data.rotation !== null) {
+            rotation = data.rotation;
+            break;
+          }
+        }
+      }
+
+      // 如果是 -90 或 90 度旋转，交换宽高（竖拍视频修正）
+      if (rotation === -90 || rotation === 90) {
+        [width, height] = [height, width];
+      }
+    } else {
+      return {};
+    }
+
+    // 从 format.tags.creation_time 解析 takenAt
+    let takenAt: Date | undefined;
+    const creationTime = probe.format?.tags?.creation_time;
+    if (creationTime) {
+      const parsed = new Date(creationTime);
+      if (!Number.isNaN(parsed.getTime())) {
+        takenAt = parsed;
+      }
+    }
+
+    return { width, height, takenAt };
+  } catch (err: unknown) {
+    const nodeErr = err as NodeJS.ErrnoException;
+    if (nodeErr.code === "ENOENT") {
+      console.warn("ffprobe 未找到，请安装 ffmpeg 以获取视频元数据");
+    } else {
+      console.warn("ffprobe 执行失败，视频元数据不可用:", nodeErr.message ?? err);
+    }
+    return {};
+  }
+}
+
 export class LocalFilesystemAdapter implements IStorageAdapter {
   async listFiles(rootPath: string): Promise<FileInfo[]> {
     const files: FileInfo[] = [];
@@ -152,9 +229,9 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
     filePath: string,
   ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
     const ext = path.extname(filePath).toLowerCase();
-    // 视频格式无 sharp 元数据
-    if ([".mov", ".mp4", ".avi", ".mkv"].includes(ext)) {
-      return {};
+    // 视频格式用 ffprobe 提取元数据
+    if (VIDEO_EXTENSIONS.has(ext)) {
+      return getVideoMetadata(filePath);
     }
 
     try {
