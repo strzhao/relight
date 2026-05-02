@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 2
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260502-已知限制"
 session_id: 87350b0c-f80b-406e-a5eb-676d85971977
 started_at: "2026-05-02T11:25:25Z"
@@ -128,3 +128,4 @@ started_at: "2026-05-02T11:25:25Z"
 - [2026-05-02T14:50:00Z] 蓝队实现完成：local.ts (getVideoMetadata + VIDEO_EXTENSIONS)、thumbnail.ts (generateVideoThumbnail)、package.json (workers 脚本)
 - [2026-05-02T14:55:00Z] 红队验收测试完成：24/24 全部通过，Redis 8.6.2 已安装并启动
 - [2026-05-02T15:00:00Z] QA 阶段完成：全部 ✅，gate=review-accept 等待审批
+- [2026-05-03T10:00:00Z] Merge 完成：commit 2f1c64a + 知识提取 commit 617ab81，autopilot 闭环完成

@@ -308,4 +308,106 @@ export const adminRouter = new Hono()
         500,
       );
     }
+  })
+
+  /**
+   * GET /api/admin/storage-sources/:id/photos
+   * 存储源下的照片列表（含分析状态，分页）
+   */
+  .get("/storage-sources/:id/photos", async (c) => {
+    const id = c.req.param("id");
+    const page = Number(c.req.query("page")) || 1;
+    const pageSize = Math.min(Number(c.req.query("pageSize")) || 20, 100);
+
+    const [source] = await db
+      .select({ id: schema.storageSources.id })
+      .from(schema.storageSources)
+      .where(eq(schema.storageSources.id, id));
+
+    if (!source) {
+      return c.json({ success: false, error: "存储源不存在" }, 404);
+    }
+
+    const [countResult] = await db
+      .select({ total: count() })
+      .from(schema.photos)
+      .where(eq(schema.photos.storageSourceId, id));
+
+    const total = countResult?.total ?? 0;
+    const offset = (page - 1) * pageSize;
+
+    const rows = await db
+      .select({
+        id: schema.photos.id,
+        storageSourceId: schema.photos.storageSourceId,
+        filePath: schema.photos.filePath,
+        fileHash: schema.photos.fileHash,
+        width: schema.photos.width,
+        height: schema.photos.height,
+        fileSize: schema.photos.fileSize,
+        thumbnailPath: schema.photos.thumbnailPath,
+        takenAt: schema.photos.takenAt,
+        createdAt: schema.photos.createdAt,
+        analysesCount: sql<number>`
+          (SELECT COUNT(*) FROM photo_analyses
+           WHERE photo_analyses.photo_id = photos.id)
+        `,
+      })
+      .from(schema.photos)
+      .where(eq(schema.photos.storageSourceId, id))
+      .orderBy(desc(schema.photos.createdAt))
+      .limit(pageSize)
+      .offset(offset);
+
+    return c.json({
+      success: true,
+      data: {
+        data: rows,
+        total,
+        page,
+        pageSize,
+      },
+    });
+  })
+
+  /**
+   * GET /api/admin/storage-sources/:id
+   * 单个存储源详情（含照片/分析统计）
+   */
+  .get("/storage-sources/:id", async (c) => {
+    const id = c.req.param("id");
+
+    const [source] = await db
+      .select()
+      .from(schema.storageSources)
+      .where(eq(schema.storageSources.id, id));
+
+    if (!source) {
+      return c.json({ success: false, error: "存储源不存在" }, 404);
+    }
+
+    const [photoCountResult] = await db
+      .select({ total: count() })
+      .from(schema.photos)
+      .where(eq(schema.photos.storageSourceId, id));
+
+    const [analyzedCountResult] = await db
+      .select({ total: count() })
+      .from(schema.photoAnalyses)
+      .innerJoin(schema.photos, eq(schema.photoAnalyses.photoId, schema.photos.id))
+      .where(eq(schema.photos.storageSourceId, id));
+
+    return c.json({
+      success: true,
+      data: {
+        id: source.id,
+        name: source.name,
+        type: source.type,
+        rootPath: source.rootPath,
+        enabled: source.enabled,
+        lastScanAt: source.lastScanAt,
+        photoCount: photoCountResult?.total ?? 0,
+        analyzedCount: analyzedCountResult?.total ?? 0,
+      },
+    });
   });

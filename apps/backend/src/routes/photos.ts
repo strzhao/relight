@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
-import { photoQuerySchema } from "@relight/shared";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { analyzePhotosSchema, photoQuerySchema } from "@relight/shared";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
+import { analyzeQueue } from "../jobs/queues";
 
 export const photosRouter = new Hono()
   /** 照片列表（分页 + 过滤 + 排序） */
@@ -146,4 +147,44 @@ export const photosRouter = new Hono()
     } catch {
       return c.text("Thumbnail file not found", 404);
     }
+  })
+
+  /** 批量触发 AI 分析 */
+  .post("/analyze", async (c) => {
+    let body: Record<string, unknown> = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ success: false, error: "请求体不能为空" }, 400);
+    }
+
+    const parsed = analyzePhotosSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ success: false, error: parsed.error.message }, 400);
+    }
+
+    const { photoIds } = parsed.data;
+
+    // 验证照片存在
+    const existingPhotos = await db
+      .select({ id: schema.photos.id })
+      .from(schema.photos)
+      .where(inArray(schema.photos.id, photoIds));
+
+    const existingIds = new Set(existingPhotos.map((p) => p.id));
+    const validIds = photoIds.filter((id) => existingIds.has(id));
+
+    if (validIds.length === 0) {
+      return c.json({ success: false, error: "所有照片都不存在" }, 400);
+    }
+
+    const jobs = validIds.map((photoId) =>
+      analyzeQueue.add(`analyze:${photoId}`, { photoId }),
+    );
+    await Promise.all(jobs);
+
+    return c.json({
+      success: true,
+      data: { enqueued: validIds.length },
+    });
   });

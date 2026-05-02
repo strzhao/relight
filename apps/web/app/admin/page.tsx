@@ -97,8 +97,14 @@ export default async function AdminDashboardPage() {
                         ? new Date(source.lastScanAt).toLocaleString("zh-CN")
                         : "从未"}
                     </p>
-                    <div className="pt-2">
+                    <div className="flex items-center justify-between pt-2">
                       <ScanTriggerButton storageSourceId={source.id} />
+                      <Link
+                        href={`/admin/storage-sources/${source.id}`}
+                        className="text-sm text-primary hover:underline"
+                      >
+                        查看详情
+                      </Link>
                     </div>
                   </CardContent>
                 </Card>

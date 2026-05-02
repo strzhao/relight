@@ -35,8 +35,14 @@ export const photoQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).default("desc"),
 });
 
+/** 批量触发分析 */
+export const analyzePhotosSchema = z.object({
+  photoIds: z.array(z.string().uuid()).min(1).max(50),
+});
+
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;
 export type UpdateSettings = z.infer<typeof updateSettingsSchema>;
 export type ScanNow = z.infer<typeof scanNowSchema>;
 export type DailyPickQuery = z.infer<typeof dailyPickQuerySchema>;
 export type PhotoQuery = z.infer<typeof photoQuerySchema>;
+export type AnalyzePhotos = z.infer<typeof analyzePhotosSchema>;

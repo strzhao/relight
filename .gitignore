@@ -35,3 +35,7 @@ playwright-report/
 
 # Logs
 *.log
+
+# Runtime data
+apps/backend/photos/
+apps/backend/data/
