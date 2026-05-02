@@ -33,10 +33,15 @@ export class RelightAIClient {
           ],
         },
       ],
-      max_tokens: 1024,
+      max_tokens: 4096,
+      // qwen3.6 是推理模型，默认输出到 reasoning_content 而非 content
+      // 禁用思考模式以确保 JSON 输出在 content 字段
+      // @ts-expect-error thinking 尚未进入 OpenAI 官方类型定义
+      thinking: { type: "disabled" },
     });
 
-    return response.choices[0]?.message?.content ?? "";
+    const msg = response.choices[0]?.message;
+    return msg?.content || (msg as Record<string, string>).reasoning_content || "";
   }
 
   /**
@@ -53,10 +58,13 @@ export class RelightAIClient {
     const response = await client.chat.completions.create({
       model: config.ai.model,
       messages,
-      max_tokens: 2048,
+      max_tokens: 4096,
+      // @ts-expect-error thinking 尚未进入 OpenAI 官方类型定义
+      thinking: { type: "disabled" },
     });
 
-    return response.choices[0]?.message?.content ?? "";
+    const msg = response.choices[0]?.message;
+    return msg?.content || (msg as Record<string, string>).reasoning_content || "";
   }
 }
 
