@@ -2,7 +2,7 @@
 active: true
 phase: "done"
 gate: ""
-iteration: 3
+iteration: 4
 max_iterations: 30
 max_retries: 3
 retry_count: 1
@@ -12,7 +12,7 @@ plan_mode: "deep"
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260502-帮我开发一个前端页面"
 session_id: fd927237-5d2f-48b3-b1fa-3d23ed8ee9ae
 started_at: "2026-05-02T02:52:23Z"
