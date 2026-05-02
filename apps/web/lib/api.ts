@@ -1,8 +1,12 @@
 import type {
+  AdminStats,
   ApiResponse,
   DailyPick,
+  HealthDetails,
   PaginatedResponse,
   Photo,
+  PhotoAnalysisItem,
+  QueuesStatus,
   ScanLog,
   StorageSource,
   Tag,
@@ -56,5 +60,13 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ key, value }),
       }),
+  },
+
+  admin: {
+    stats: () => fetchApi<ApiResponse<AdminStats>>(API_ROUTES.admin.stats),
+    queues: () => fetchApi<ApiResponse<QueuesStatus>>(API_ROUTES.admin.queues),
+    health: () => fetchApi<ApiResponse<HealthDetails>>(API_ROUTES.admin.health),
+    photos: (params?: URLSearchParams) =>
+      fetchApi<PaginatedResponse<PhotoAnalysisItem>>(`${API_ROUTES.admin.photos}?${params ?? ""}`),
   },
 };

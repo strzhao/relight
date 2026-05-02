@@ -9,17 +9,17 @@ const defaultJobOptions = {
   backoff: { type: "exponential" as const, delay: 1000 },
 };
 
-export const scanQueue = new Queue("scan:storage", {
+export const scanQueue = new Queue("scan-storage", {
   connection,
   defaultJobOptions,
 });
 
-export const analyzeQueue = new Queue("analyze:photo", {
+export const analyzeQueue = new Queue("analyze-photo", {
   connection,
   defaultJobOptions,
 });
 
-export const dailyQueue = new Queue("daily:selection", {
+export const dailyQueue = new Queue("daily-selection", {
   connection,
   defaultJobOptions,
 });

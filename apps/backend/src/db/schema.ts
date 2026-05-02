@@ -30,6 +30,7 @@ export const photos = sqliteTable("photos", {
   fileSize: integer("file_size").notNull().default(0),
   thumbnailPath: text("thumbnail_path"),
   takenAt: text("taken_at"),
+  fileMtime: integer("file_mtime"),
   createdAt: text("created_at").notNull(),
 });
 

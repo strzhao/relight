@@ -132,3 +132,70 @@ export interface PaginatedResponse<T> {
 export interface TagWithCount extends Tag {
   photoCount: number;
 }
+
+/** ===== Admin Panel Types ===== */
+
+/** 存储源统计 */
+export interface StorageSourceStats {
+  id: string;
+  name: string;
+  type: "local" | "smb" | "webdav";
+  photoCount: number;
+  analyzedCount: number;
+  lastScanAt: string | null;
+}
+
+/** 管理后台综合统计 */
+export interface AdminStats {
+  totalPhotos: number;
+  analyzedPhotos: number;
+  avgAestheticScore: number;
+  passRate: number;
+  storageSources: StorageSourceStats[];
+  recentAnalyses: {
+    id: string;
+    filePath: string;
+    aiModel: string;
+    aestheticScore: number | null;
+    narrative: string | null;
+    processedAt: string;
+  }[];
+}
+
+/** 单个队列状态 */
+export interface QueueStatus {
+  name: string;
+  counts: {
+    waiting: number;
+    active: number;
+    completed: number;
+    failed: number;
+    delayed: number;
+  };
+}
+
+/** 所有队列状态 */
+export type QueuesStatus = QueueStatus[];
+
+/** 健康检查组件状态 */
+export interface HealthComponentStatus {
+  component: string;
+  status: "healthy" | "degraded" | "unhealthy";
+  message?: string;
+}
+
+/** 健康检查详情 */
+export interface HealthDetails {
+  overall: "healthy" | "degraded" | "unhealthy";
+  components: HealthComponentStatus[];
+}
+
+/** 照片分析列表项 */
+export interface PhotoAnalysisItem {
+  id: string;
+  filePath: string;
+  aiModel: string;
+  aestheticScore: number | null;
+  narrative: string | null;
+  processedAt: string;
+}

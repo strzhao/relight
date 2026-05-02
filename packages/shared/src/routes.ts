@@ -21,4 +21,10 @@ export const API_ROUTES = {
     list: "/api/settings",
     update: "/api/settings",
   },
+  admin: {
+    stats: "/api/admin/stats",
+    queues: "/api/admin/queues",
+    health: "/api/admin/health",
+    photos: "/api/admin/photos",
+  },
 } as const;
