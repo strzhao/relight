@@ -63,6 +63,28 @@ new Worker("scan:storage", scanStorageWorker, { connection, concurrency: 1 });
 ```
 
 ### [2026-05-02] serverFetch<T> 的 as T 断言掩盖运行时 API 契约偏差
+
+（内容省略）
+
+### [2026-05-03] 视频文件元数据提取用 child_process.execFile 调用 ffprobe，无需额外依赖
+<!-- tags: video, ffprobe, metadata, child-process, storage -->
+
+**Scenario**: 视频文件 (.mov/.mp4/.avi/.mkv) 在 `listFiles` 中已支持，但 `getMetadata` 硬编码 `return {}` 因为 `sharp` 无法解码视频容器格式。需要提取 width/height/takenAt 元数据。
+
+**Lesson**: 使用 Node.js 内置 `child_process.execFile` 调用 `ffprobe -v quiet -print_format json -show_format -show_streams <file>`，解析 JSON 输出提取元数据：
+- 从第一个 `codec_type === "video"` stream 取 width/height
+- 检查 `side_data_list[].rotation`：-90/90 时交换宽高（竖拍视频修正）
+- 从 `format.tags.creation_time` 用 `new Date()` 解析 takenAt
+- ENOENT 时 `console.warn` 提示安装 ffmpeg，返回 `{}`；超时/非零退出码同样降级
+
+**Evidence**: 无需新增 npm 依赖（`fluent-ffmpeg` 等），直接使用 Node.js 内置模块。`execFile` 不通过 shell 执行，安全无命令注入风险。
+
+### [2026-05-03] 跨模块常量共享：VIDEO_EXTENSIONS 从 storage/local.ts 导出，thumbnail.ts 引用
+<!-- tags: constants, module, sharing, video, thumbnail -->
+
+**Scenario**: 视频扩展名列表 `[".mov", ".mp4", ".avi", ".mkv"]` 原先在 `getMetadata()` 和 `getMimeType()` 中分别硬编码，且缩略图生成也需要判断视频类型。
+
+**Lesson**: 在 `storage/local.ts` 中定义 `export const VIDEO_EXTENSIONS = new Set([...])`，`thumbnail.ts` 通过 `import { VIDEO_EXTENSIONS } from "../storage/local"` 引用。单一真相源，添加新视频格式只需修改一处。
 <!-- tags: api, types, runtime, serverfetch, contract -->
 
 **Scenario**: 管理后台 photos 端点返回 `{ data: [...rows...], total, page }`（data 是数组），前端 `getPhotoAnalyses` 预期 `data` 为 `{ data: PhotoAnalysisItem[], total, page }` 嵌套对象。`serverFetch<T>` 使用 `return body.data as T` 直接断言，tsc 无法检测到运行时结构不匹配。前端页面渲染时 `data.data.length` 抛出 `TypeError: Cannot read properties of undefined (reading 'length')`，返回 HTTP 500。
