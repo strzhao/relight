@@ -61,3 +61,13 @@ const scanQueue = new Queue("scan:storage", {
 // Worker 侧不需要重试参数
 new Worker("scan:storage", scanStorageWorker, { connection, concurrency: 1 });
 ```
+
+### [2026-05-02] serverFetch<T> 的 as T 断言掩盖运行时 API 契约偏差
+<!-- tags: api, types, runtime, serverfetch, contract -->
+
+**Scenario**: 管理后台 photos 端点返回 `{ data: [...rows...], total, page }`（data 是数组），前端 `getPhotoAnalyses` 预期 `data` 为 `{ data: PhotoAnalysisItem[], total, page }` 嵌套对象。`serverFetch<T>` 使用 `return body.data as T` 直接断言，tsc 无法检测到运行时结构不匹配。前端页面渲染时 `data.data.length` 抛出 `TypeError: Cannot read properties of undefined (reading 'length')`，返回 HTTP 500。
+
+**Lesson**: `serverFetch<T>` 的 `as T` 断言创建了一个信任边界——编译器假定 `body.data` 在运行时满足类型 T，但实际上没有运行时校验。当后端和前端对 API 契约理解不一致时（本案例中 data 是数组 vs data 是嵌套对象），`tsc --noEmit` 零错误但页面在浏览器中崩溃。必须在集成测试中使用 curl 实际调用端点来验证契约。
+
+**Evidence**: `curl http://localhost:3001/admin/photos` → HTTP 500, Next.js error page 显示 `TypeError: Cannot read properties of undefined (reading 'length')` at AdminPhotosPage。后端修正 `c.json({ data: { data: rows, total, page } })` 后修复。修改前后 tsc 均通过，无法区分。
+```
