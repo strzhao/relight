@@ -31,3 +31,17 @@
 - 人工抽检：人力和时间成本高，不可规模化
 
 **Trade-offs**: 纯规则只能验证格式和结构合规性，无法评估语义质量（如叙事是否生动、标签是否贴切）。语义质量仍需人工抽检或后续引入用户反馈闭环。但当前阶段格式合规是必要前提，且零成本、可复现、可 CI 集成。
+
+### [2026-05-03] 队列监控实时推送选用 SSE 而非 WebSocket/轮询
+<!-- tags: sse, websocket, monitoring, realtime, design -->
+
+**Background**: admin/queues 页面需要实时展示队列状态。评估了三种方案：WebSocket（双向长连接）、纯轮询（5s interval fetch）、SSE（单向推送）。
+
+**Choice**: 选用 SSE (Server-Sent Events)，per-queue 独立 EventSource 连接，3 秒推送一次快照。
+
+**Alternatives rejected**:
+- WebSocket：BullMQ 支持 QueueEvents 的 WebSocket 推送，但需要额外服务端库（如 `@bull-board/ws`）且前端需维护双向连接。监控场景只需后端→前端单向数据流，WebSocket 是过度设计。
+- 纯轮询：侧边栏 5s 轮询 GET /api/queues 已满足列表更新需求。但详情面板的作业列表需要更低延迟，3s SSE 推送可以让用户感知到"实时"而无需每 3 秒发送 HTTP 请求。
+- 混合方案（侧边栏轮询 + SSE 详情面板）：最终选择此方案——侧边栏轻量轮询减少连接数，详情面板 SSE 推送保证实时性。断开时 EventSource 自动重连，无需额外恢复逻辑。
+
+**Trade-offs**: SSE 在多个浏览器 tab 打开时会创建多条连接，当前无连接数限制。后续可添加 `maxConnections` 限制或切换为单条 broadcast SSE 通道。Hono `streamSSE()` 是 HTTP 长连接，某些反向代理可能需要配置禁用缓冲。
