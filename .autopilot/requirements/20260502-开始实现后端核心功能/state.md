@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 3
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: "deep"
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260502-开始实现后端核心功能"
 session_id: edbedb47-df8b-4877-a58b-29cf676b5903
 started_at: "2026-05-01T16:17:37Z"
@@ -221,6 +221,7 @@ AI_VISION_MODEL=qwen2.5-vl-7b → qwen3.6-35b
 
 ## 变更日志
 - [2026-05-02T01:31:05Z] 用户批准验收，进入合并阶段
+- [2026-05-02T01:35:00Z] commit-agent 提交完成 (63c7801)，知识提取完成（2 条目），phase: done
 - [2026-05-01T16:17:37Z] autopilot 初始化
 - [2026-05-02T00:30:00Z] Deep Design Q&A 完成：确认多模态已可用、全维度分析、纯规则验收、fileHash去重、BullMQ管线
 - [2026-05-02T00:45:00Z] Plan Reviewer 审查通过（7项BLOCKER已纳入修复计划）、验收场景生成器产出11个场景

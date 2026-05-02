@@ -27,6 +27,19 @@
 
 **Evidence**: `biome check .` → `Found an unknown key assist. Known keys: $schema, extends, vcs, files, formatter, organizeImports, linter...`；修改后 lint 通过。
 
+### [2026-05-02] 增量文件扫描：mtime+size 快速路径避免全量 SHA256 重复计算
+<!-- tags: scan, performance, hash, filesystem, dedup -->
+
+**Scenario**: 照片扫描 worker 每次运行都需要遍历存储源下的所有文件并计算 SHA256 去重。首次扫描 6000+ 文件需 10+ 分钟。后续每次扫描仍重新读取全部文件并计算 hash，即使 99% 文件未变更。
+
+**Lesson**: 在 photos 表存储 `file_mtime` 字段，扫描时先查询已有记录构建 path→{mtime, size, hash} 缓存。遍历文件时先匹配 path + mtime + size，三者命中则直接复用已有 hash 跳过 SHA256。仅对新增/变更文件执行完整 hash 计算。
+
+**Evidence**: NAS 照片目录 6077 个文件 ~36GB，首次扫描预估 10 分钟，增量扫描（无变更）<1 秒。修改前后流程对比：
+```
+修改前: listFiles() → 每个文件 getFileBuffer() → SHA256 → 查询去重 → 插入
+修改后: listFiles() → 查询已有缓存 → mtime+size 匹配跳过 → 仅新文件 SHA256 → 插入/更新分流
+```
+
 ### [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数
 <!-- tags: bullmq, queue, worker, retry -->
 
