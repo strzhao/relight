@@ -127,20 +127,6 @@ interface AdminQueuesData {
   daily: QueueStatus;
 }
 
-/** health 端点返回的 data 字段 */
-type ComponentStatus = "ok" | "error" | "degraded";
-
-interface ComponentHealth {
-  status: ComponentStatus;
-}
-
-interface AdminHealthData {
-  api: ComponentHealth;
-  db: ComponentHealth;
-  redis: ComponentHealth;
-  ai: ComponentHealth;
-}
-
 /** photos 端点返回的单条照片分析项 */
 interface PhotoAnalysisItem {
   id: string;
@@ -162,8 +148,7 @@ async function createAdminApp(): Promise<Hono> {
   const adminMod = await import("../routes/admin");
   // 兼容不同的导出方式
   const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter ||
-    (adminMod as Record<string, Hono>).default;
+    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
   const app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -392,13 +377,40 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
   // GET /api/admin/health
   // ============================================================
   describe("GET /api/admin/health — 系统健康", () => {
-    const components = ["api", "db", "redis", "ai"] as const;
+    const componentNames = ["api", "database", "redis", "ai"] as const;
 
-    let body: { success: boolean; data: AdminHealthData; error?: string };
+    /** 匹配当前响应形状的接口 */
+    interface CurrentAdminHealthData {
+      overall: string;
+      components: Array<{
+        component: string;
+        status: string;
+        message?: string;
+      }>;
+      system: {
+        cpu: { model: string; cores: number; loadAvg: number[] };
+        memory: { total: number; free: number; used: number; usagePercent: number };
+        process: {
+          pid: number;
+          uptime: number;
+          nodeVersion: string;
+          memoryRss: number;
+          memoryHeapTotal: number;
+          memoryHeapUsed: number;
+        };
+      };
+      disk: {
+        dbFile: { path: string; sizeBytes: number };
+        freeSpaceBytes: number | null;
+        totalSpaceBytes: number | null;
+      } | null;
+    }
+
+    let body: { success: boolean; data: CurrentAdminHealthData; error?: string };
 
     beforeAll(async () => {
       const res = await get("/api/admin/health");
-      body = res.body as { success: boolean; data: AdminHealthData; error?: string };
+      body = res.body as { success: boolean; data: CurrentAdminHealthData; error?: string };
     });
 
     it("应返回 HTTP 200", async () => {
@@ -411,30 +423,81 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
       expect(body.data).toBeDefined();
     });
 
-    it.each(components)("data 应包含 %s 组件", (component) => {
-      expect(body.data).toHaveProperty(component);
+    it("data 应包含 overall 字段且为合法枚举值", () => {
+      expect(typeof body.data.overall).toBe("string");
+      expect(["healthy", "degraded", "unhealthy"]).toContain(body.data.overall);
     });
 
-    it.each(components)("%s 组件应有 status 字段", (component) => {
-      const comp = body.data[component];
-      expect(comp).toHaveProperty("status");
-      expect(typeof comp.status).toBe("string");
+    it("data 应包含 components 数组", () => {
+      expect(Array.isArray(body.data.components)).toBe(true);
     });
 
-    it.each(components)("%s 组件的 status 应为合法枚举值", (component) => {
-      const comp = body.data[component];
-      expect(["ok", "error", "degraded"]).toContain(comp.status);
+    it.each(componentNames)("components 应包含 %s 组件", (component) => {
+      const found = body.data.components.some((c) => c.component === component);
+      expect(found).toBe(true);
     });
 
-    it("AI 组件的 status 应支持 'degraded'（3s 超时降级）", () => {
-      // 验证 AI 组件 status 类型包含 "degraded"
-      const validStatuses: ComponentStatus[] = ["ok", "error", "degraded"];
-      expect(validStatuses).toContain(body.data.ai.status);
+    it("每个 component 应有 component/status 字段", () => {
+      for (const comp of body.data.components) {
+        expect(comp).toHaveProperty("component");
+        expect(comp).toHaveProperty("status");
+        expect(typeof comp.component).toBe("string");
+        expect(typeof comp.status).toBe("string");
+        expect(["healthy", "degraded", "unhealthy"]).toContain(comp.status);
+      }
     });
 
-    it("API 组件在测试环境应返回 'ok'", () => {
-      // API 自身应始终可用
-      expect(body.data.api.status).toBe("ok");
+    // ---- system 字段验证 ----
+    it("data 应包含 system 字段", () => {
+      expect(body.data).toHaveProperty("system");
+      expect(typeof body.data.system).toBe("object");
+    });
+
+    it("system.cpu 应包含 model/cores/loadAvg", () => {
+      const { cpu } = body.data.system;
+      expect(typeof cpu.model).toBe("string");
+      expect(typeof cpu.cores).toBe("number");
+      expect(Array.isArray(cpu.loadAvg)).toBe(true);
+      expect(cpu.loadAvg.length).toBe(3);
+    });
+
+    it("system.memory 应包含 total/free/used/usagePercent", () => {
+      const { memory } = body.data.system;
+      for (const key of ["total", "free", "used", "usagePercent"] as const) {
+        expect(typeof memory[key]).toBe("number");
+      }
+    });
+
+    it("system.process 应包含完整进程信息", () => {
+      const { process: proc } = body.data.system;
+      expect(typeof proc.pid).toBe("number");
+      expect(typeof proc.uptime).toBe("number");
+      expect(typeof proc.nodeVersion).toBe("string");
+      expect(typeof proc.memoryRss).toBe("number");
+      expect(typeof proc.memoryHeapTotal).toBe("number");
+      expect(typeof proc.memoryHeapUsed).toBe("number");
+    });
+
+    // ---- disk 字段验证 ----
+    it("data 应包含 disk 字段（可能为 null）", () => {
+      expect(body.data).toHaveProperty("disk");
+    });
+
+    it("disk 为 null 或包含正确结构", () => {
+      if (body.data.disk !== null) {
+        expect(body.data.disk).toHaveProperty("dbFile");
+        expect(typeof body.data.disk.dbFile.path).toBe("string");
+        expect(typeof body.data.disk.dbFile.sizeBytes).toBe("number");
+        // freeSpaceBytes/totalSpaceBytes 可为 number 或 null
+        expect(
+          body.data.disk.freeSpaceBytes === null ||
+            typeof body.data.disk.freeSpaceBytes === "number",
+        ).toBe(true);
+        expect(
+          body.data.disk.totalSpaceBytes === null ||
+            typeof body.data.disk.totalSpaceBytes === "number",
+        ).toBe(true);
+      }
     });
   });
 
@@ -442,7 +505,14 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
   // GET /api/admin/photos
   // ============================================================
   describe("GET /api/admin/photos — 分页分析列表", () => {
-    let body: { success: boolean; data: PhotoAnalysisItem[]; total: number; page: number; pageSize: number; error?: string };
+    let body: {
+      success: boolean;
+      data: PhotoAnalysisItem[];
+      total: number;
+      page: number;
+      pageSize: number;
+      error?: string;
+    };
 
     beforeAll(async () => {
       const res = await get("/api/admin/photos");

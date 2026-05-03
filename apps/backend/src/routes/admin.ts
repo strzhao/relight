@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import path from "node:path";
 import { count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
@@ -12,14 +15,10 @@ export const adminRouter = new Hono()
   .get("/stats", async (c) => {
     try {
       // 照片总数
-      const [photoCounts] = await db
-        .select({ total: count() })
-        .from(schema.photos);
+      const [photoCounts] = await db.select({ total: count() }).from(schema.photos);
 
       // 已分析数
-      const [analyzedCounts] = await db
-        .select({ total: count() })
-        .from(schema.photoAnalyses);
+      const [analyzedCounts] = await db.select({ total: count() }).from(schema.photoAnalyses);
 
       // 平均美学评分
       const [avgScore] = await db
@@ -33,8 +32,12 @@ export const adminRouter = new Hono()
         .where(sql`${schema.photoAnalyses.aestheticScore} >= 8`);
 
       const analyzedTotal = analyzedCounts?.total ?? 0;
-      const avgAestheticScore = avgScore?.avg != null ? Math.round(Number(avgScore.avg) * 100) / 100 : 0;
-      const passRate = analyzedTotal > 0 ? Math.round((Number(passCount?.total ?? 0) / analyzedTotal) * 100) / 100 : 0;
+      const avgAestheticScore =
+        avgScore?.avg != null ? Math.round(Number(avgScore.avg) * 100) / 100 : 0;
+      const passRate =
+        analyzedTotal > 0
+          ? Math.round((Number(passCount?.total ?? 0) / analyzedTotal) * 100) / 100
+          : 0;
 
       // 存储源统计
       const sources = await db
@@ -64,9 +67,7 @@ export const adminRouter = new Hono()
         .innerJoin(schema.photos, eq(schema.photoAnalyses.photoId, schema.photos.id))
         .groupBy(schema.photos.storageSourceId);
 
-      const photoCountMap = new Map(
-        photoCountsBySource.map((r) => [r.storageSourceId, r.total]),
-      );
+      const photoCountMap = new Map(photoCountsBySource.map((r) => [r.storageSourceId, r.total]));
       const analyzedCountMap = new Map(
         analyzedCountsBySource.map((r) => [r.storageSourceId, r.total]),
       );
@@ -123,9 +124,7 @@ export const adminRouter = new Hono()
       const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
         Promise.race([
           promise,
-          new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error("Redis 连接超时")), ms),
-          ),
+          new Promise<T>((_, reject) => setTimeout(() => reject(new Error("Redis 连接超时")), ms)),
         ]);
 
       const [scanCounts, analyzeCounts, dailyCounts] = await Promise.all([
@@ -249,10 +248,64 @@ export const adminRouter = new Hono()
         ? "degraded"
         : "healthy";
 
-    return c.json({
-      success: true,
-      data: { overall, components },
-    }, overall === "unhealthy" ? 503 : 200);
+    // 5. System 信息（Node.js 内置 API）
+    const memUsage = process.memoryUsage();
+    const system = {
+      cpu: {
+        model: os.cpus()[0]?.model ?? "unknown",
+        cores: os.cpus().length,
+        loadAvg: os.loadavg(),
+      },
+      memory: {
+        total: os.totalmem(),
+        free: os.freemem(),
+        used: os.totalmem() - os.freemem(),
+        usagePercent: Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 10000) / 100,
+      },
+      process: {
+        pid: process.pid,
+        uptime: process.uptime(),
+        nodeVersion: process.version,
+        memoryRss: memUsage.rss,
+        memoryHeapTotal: memUsage.heapTotal,
+        memoryHeapUsed: memUsage.heapUsed,
+      },
+    };
+
+    // 6. Disk 信息（嵌套 try-catch）
+    let disk: {
+      dbFile: { path: string; sizeBytes: number };
+      freeSpaceBytes: number | null;
+      totalSpaceBytes: number | null;
+    } | null = null;
+    try {
+      const dbPath = path.resolve(config.databasePath);
+      const dbStats = fs.statSync(dbPath);
+      const dbFile = { path: dbPath, sizeBytes: dbStats.size };
+
+      let freeSpaceBytes: number | null = null;
+      let totalSpaceBytes: number | null = null;
+      try {
+        const statfs = fs.statfsSync(path.resolve(path.dirname(config.databasePath)));
+        totalSpaceBytes = statfs.blocks * statfs.bsize;
+        freeSpaceBytes = statfs.bavail * statfs.bsize;
+      } catch {
+        // statfs 不可用（某些平台/权限不足），保持 null
+      }
+
+      disk = { dbFile, freeSpaceBytes, totalSpaceBytes };
+    } catch {
+      // DB 文件缺失时 disk 为 null
+      disk = null;
+    }
+
+    return c.json(
+      {
+        success: true,
+        data: { overall, components, system, disk },
+      },
+      overall === "unhealthy" ? 503 : 200,
+    );
   })
   /**
    * GET /api/admin/photos
@@ -267,9 +320,7 @@ export const adminRouter = new Hono()
       const offset = (page - 1) * pageSize;
 
       // 总数
-      const [countResult] = await db
-        .select({ total: count() })
-        .from(schema.photoAnalyses);
+      const [countResult] = await db.select({ total: count() }).from(schema.photoAnalyses);
 
       const total = countResult?.total ?? 0;
 

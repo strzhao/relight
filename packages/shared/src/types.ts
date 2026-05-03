@@ -184,10 +184,33 @@ export interface HealthComponentStatus {
   message?: string;
 }
 
+/** 系统资源信息 */
+export interface SystemInfo {
+  cpu: { model: string; cores: number; loadAvg: number[] };
+  memory: { total: number; free: number; used: number; usagePercent: number };
+  process: {
+    pid: number;
+    uptime: number;
+    nodeVersion: string;
+    memoryRss: number;
+    memoryHeapTotal: number;
+    memoryHeapUsed: number;
+  };
+}
+
+/** 磁盘信息 */
+export interface DiskInfo {
+  dbFile: { path: string; sizeBytes: number };
+  freeSpaceBytes: number | null;
+  totalSpaceBytes: number | null;
+}
+
 /** 健康检查详情 */
 export interface HealthDetails {
   overall: "healthy" | "degraded" | "unhealthy";
   components: HealthComponentStatus[];
+  system: SystemInfo;
+  disk: DiskInfo | null;
 }
 
 /** 照片分析列表项 */
