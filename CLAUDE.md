@@ -84,10 +84,15 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **配置** (`src/lib/config.ts`): 所有环境变量集中管理，带默认值。AI 服务默认 `http://127.0.0.1:8001/v1`（本地部署的 qwen 兼容服务）。
 
-**HEIC 解码器** (`src/lib/heic-decoder.ts`): 通过系统 `heif-convert` CLI 将 HEIC/HEIF 文件转换为 JPEG。`createHeicDecoder()` 返回 `HeicDecoder` 对象，`available` 属性（memoized）检测 CLI 是否安装，`convertToJpeg(input, output)` 执行带 30s 超时的两步转换（HEIC → 临时 JPEG → 目标路径）。
+**HEIC 支持** (`src/lib/heic.ts`): 通过 `heic-decode` (WASM，纯 JS，无原生依赖) 将 HEIC/HEIF 解码为 RGBA 像素数据，再经 sharp resize + JPEG 编码。导出 `isHeicFile(filePath)` 和 `heicFileToJpeg(buffer, options?)` / `convertHeicToJpeg(buffer, options?)`。macOS 上 sharp 预编译的 libvips 不包含 HEIC 解码支持，因此选择 heic-decode 而非依赖 sharp。
+
+**缩略图生成** (`src/lib/thumbnail.ts`): 800px max (`fit: "inside"`)，quality 85，HEIC 文件先经 heic-decode 解码。输出统一 `.jpg` 扩展名。
 
 **CLI 工具** (`src/cli/`):
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
+- `e2e-verify.ts` — 端到端验证 AI 分析全链路（单张照片）
+- `repair-heic.ts` — 修复已有 HEIC 照片的缩略图（thumbnailPath IS NULL 且扩展名为 heic/heif）
+- `repair-thumbnails.ts` — 通用缩略图重建工具（尺寸升级后使用），支持 `--limit N` 分批处理
 
 ### 前端架构 (apps/web)
 
