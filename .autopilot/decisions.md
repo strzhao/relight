@@ -1,5 +1,16 @@
 # 架构决策日志
 
+### [2026-05-03] 缩略图缓存策略：短 TTL + ETag
+<!-- tags: thumbnail, cache, etag, performance -->
+
+**Background**: 缩略图 API 原来 `max-age=86400`（24h），forceRegenerate 重新生成缩略图后浏览器仍使用旧缓存，用户看不到更新。
+
+**Choice**: `max-age` 从 86400 降到 3600（1h），新增基于文件 mtime 的 ETag 头支持条件请求（304 Not Modified）。
+
+**Alternatives rejected**: 
+- URL 版本号（`?v=timestamp`）：需要修改所有调用方，侵入性强
+- `no-cache`：每个请求都回源，浪费带宽
+
 ### [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例
 <!-- tags: tech-stack, backend, orm, conventions, design -->
 

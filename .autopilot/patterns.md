@@ -1,5 +1,25 @@
 # 模式与教训
 
+### [2026-05-03] EXIF Orientation 需同时在缩略图生成和元数据提取中处理
+<!-- tags: exif, sharp, thumbnail, metadata, orientation -->
+
+**Scenario**: 竖屏照片（EXIF orientation=6）生成的缩略图仍为横屏（400x300），因为 sharp 未经 `.rotate()` 处理，且 DB 中 width/height 未按方向交换。
+
+**Lesson**: 两处必须同时修复：
+1. `sharp().rotate()` 放在 `.resize()` 之前，自动读取 EXIF 并旋转像素数据
+2. `getMetadata()` 对 orientation 5-8（90°/270° 旋转）交换返回的 width/height
+
+**Evidence**: IMG_1365 (orientation=6, raw 3264x2448) 修复前缩略图为 400x300 横屏，修复后为 300x400 竖屏。
+
+### [2026-05-03] 网络挂载存储源 forceRegenerate 应跳过文件哈希
+<!-- tags: smb, network-storage, scan, force-regenerate, optimization -->
+
+**Scenario**: 存储源为 SMB 网络挂载（`/Volumes/...`），forceRegenerate 时对未变更文件仍需 `fs.readFile()` 计算 SHA256，500MB 视频文件导致 Worker 卡死 5+ 分钟无进度。
+
+**Lesson**: forceRegenerate 模式对 mtime+size 未变更的文件应跳过哈希，直接进入缩略图重建阶段。新增 `regenerateOnlyFiles` 数组专门处理此路径。
+
+**Evidence**: 修复前 job 31 卡在 hashing 阶段 5 分钟 processed=0；修复后 job 32 的 hashing 瞬间完成，6180 个文件直接进入 processing。
+
 ### [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies
 <!-- tags: pnpm, native-modules, build -->
 

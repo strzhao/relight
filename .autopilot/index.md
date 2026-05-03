@@ -5,8 +5,11 @@
 - [2026-05-02] AI 分析质量验收采用纯规则自动化评分，非 AI 评估 AI | tags: ai, evaluation, testing, design | → decisions.md
 - [2026-05-03] 队列监控实时推送选用 SSE 而非 WebSocket/轮询 | tags: sse, websocket, monitoring, realtime, design | → decisions.md
 - [2026-05-03] AI 分析不再由扫描自动触发，改为外部显式控制 | tags: ai, analysis, scan, trigger, design | → decisions.md
+- [2026-05-03] 缩略图缓存策略：短 TTL + ETag | tags: thumbnail, cache, etag, performance | → decisions.md
 
 ## Patterns
+- [2026-05-03] EXIF Orientation 需同时在缩略图生成和元数据提取中处理 | tags: exif, sharp, thumbnail, metadata, orientation | → patterns.md
+- [2026-05-03] 网络挂载存储源 forceRegenerate 应跳过文件哈希 | tags: smb, network-storage, scan, force-regenerate, optimization | → patterns.md
 - [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies | tags: pnpm, native-modules, build | → patterns.md
 - [2026-05-01] Vitest workspace 模式需在根级别安装 vitest | tags: vitest, monorepo, testing | → patterns.md
 - [2026-05-01] Biome 1.9.4 使用 organizeImports 顶层键，非 assist | tags: biome, linting, config | → patterns.md
