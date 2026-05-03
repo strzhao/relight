@@ -3,8 +3,8 @@ import path from "node:path";
 import sharp from "sharp";
 import { heicFileToJpeg } from "./heic";
 
-const THUMBNAIL_WIDTH = 400;
-const THUMBNAIL_HEIGHT = 400;
+const THUMBNAIL_WIDTH = 800;
+const THUMBNAIL_HEIGHT = 800;
 
 export async function generateThumbnail(
   sourcePath: string,
@@ -21,7 +21,7 @@ export async function generateThumbnail(
     const jpegBuffer = await heicFileToJpeg(sourcePath, {
       maxWidth: THUMBNAIL_WIDTH,
       maxHeight: THUMBNAIL_HEIGHT,
-      quality: 80,
+      quality: 85,
     });
     await fs.writeFile(outputPath, jpegBuffer);
   } else {
@@ -30,7 +30,7 @@ export async function generateThumbnail(
         fit: "inside",
         withoutEnlargement: true,
       })
-      .jpeg({ quality: 80 })
+      .jpeg({ quality: 85 })
       .toFile(outputPath);
   }
 
