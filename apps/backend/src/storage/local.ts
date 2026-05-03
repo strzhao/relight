@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import sharp from "sharp";
+import { createHeicDecoder } from "../lib/heic-decoder";
 import type { FileInfo, IStorageAdapter } from "./interface";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -13,6 +16,12 @@ const IMAGE_EXTENSIONS = new Set([
   ".bmp",
   ".tiff",
 ]);
+
+const HEIC_EXTENSIONS = new Set([".heic", ".heif"]);
+
+function isHeic(filePath: string): boolean {
+  return HEIC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
 
 export class LocalFilesystemAdapter implements IStorageAdapter {
   async listFiles(rootPath: string): Promise<FileInfo[]> {
@@ -63,8 +72,55 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
   }
 
   async getMetadata(
-    _filePath: string,
+    filePath: string,
   ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
-    return {};
+    try {
+      // For HEIC, convert to temporary JPEG first, then extract metadata via sharp
+      if (isHeic(filePath)) {
+        return this.getHeicMetadata(filePath);
+      }
+
+      const meta = await sharp(filePath).metadata();
+      return {
+        width: meta.width,
+        height: meta.height,
+      };
+    } catch {
+      // Sharp may fail on unsupported formats — return empty metadata gracefully
+      return {};
+    }
+  }
+
+  private async getHeicMetadata(
+    filePath: string,
+  ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
+    const decoder = createHeicDecoder();
+
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const tempDir = path.join(os.tmpdir(), `relight-meta-${ts}-${rand}`);
+    await fs.mkdir(tempDir, { recursive: true });
+    const intermediateJpeg = path.join(tempDir, `meta-intermediate-${ts}.jpg`);
+
+    try {
+      // Step 1: HEIC → temporary JPEG via heif-convert
+      await decoder.convertToJpeg(filePath, intermediateJpeg);
+
+      // Step 2: sharp metadata on intermediate JPEG
+      const meta = await sharp(intermediateJpeg).metadata();
+      return {
+        width: meta.width,
+        height: meta.height,
+      };
+    } catch {
+      return {};
+    } finally {
+      // Clean up temp directory
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
   }
 }

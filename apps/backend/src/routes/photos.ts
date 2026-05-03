@@ -134,7 +134,7 @@ export const photosRouter = new Hono()
     const photo = photos[0];
 
     if (!photo?.thumbnailPath) {
-      return c.text("No thumbnail available", 404);
+      return c.json({ success: false, error: "No thumbnail available" }, 404);
     }
 
     try {
@@ -144,6 +144,6 @@ export const photosRouter = new Hono()
         "Cache-Control": "public, max-age=86400",
       });
     } catch {
-      return c.text("Thumbnail file not found", 404);
+      return c.json({ success: false, error: "Thumbnail file not found" }, 404);
     }
   });
