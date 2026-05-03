@@ -35,4 +35,11 @@ export const API_ROUTES = {
     events: (name: string) => `/api/queues/${name}/events`,
     job: (name: string, jobId: string) => `/api/queues/${name}/jobs/${jobId}`,
   },
+  storage: {
+    list: "/api/storage",
+    files: (id: string) => `/api/storage/${id}/files`,
+  },
+  analyze: {
+    trigger: "/api/analyze",
+  },
 } as const;

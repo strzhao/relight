@@ -1,7 +1,9 @@
 import type {
   AdminStats,
+  AnalyzeTriggerResponse,
   ApiResponse,
   DailyPick,
+  FileTreeResponse,
   HealthDetails,
   PaginatedResponse,
   Photo,
@@ -53,11 +55,14 @@ export const api = {
   },
 
   scan: {
-    trigger: (storageSourceId?: string) =>
-      fetchApi<ApiResponse<{ message: string }>>(API_ROUTES.scan.trigger, {
-        method: "POST",
-        body: JSON.stringify({ storageSourceId }),
-      }),
+    trigger: (storageSourceId?: string, skipAnalysis?: boolean) =>
+      fetchApi<ApiResponse<{ jobId: string | undefined; storageSourceId: string }>>(
+        API_ROUTES.scan.trigger,
+        {
+          method: "POST",
+          body: JSON.stringify({ storageSourceId, skipAnalysis }),
+        },
+      ),
   },
 
   settings: {
@@ -81,5 +86,18 @@ export const api = {
     list: () => fetchApi<ApiResponse<QueueInfo[]>>(API_ROUTES.queues.list),
     job: (name: string, jobId: string) =>
       fetchApi<ApiResponse<QueueJobDetail>>(API_ROUTES.queues.job(name, jobId)),
+  },
+
+  storage: {
+    list: () => fetchApi<ApiResponse<StorageSource[]>>(API_ROUTES.storage.list),
+    files: (id: string) => fetchApi<ApiResponse<FileTreeResponse>>(API_ROUTES.storage.files(id)),
+  },
+
+  analyze: {
+    trigger: (photoIds: string[], force?: boolean) =>
+      fetchApi<ApiResponse<AnalyzeTriggerResponse>>(API_ROUTES.analyze.trigger, {
+        method: "POST",
+        body: JSON.stringify({ photoIds, force }),
+      }),
   },
 };

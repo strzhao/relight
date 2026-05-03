@@ -2,12 +2,14 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   adminRouter,
+  analyzeRouter,
   dailyRouter,
   healthRouter,
   photosRouter,
   queuesRouter,
   scanRouter,
   settingsRouter,
+  storageRouter,
   tagsRouter,
 } from "./routes";
 
@@ -24,6 +26,8 @@ export function createApp(): Hono {
   app.route("/api/scan", scanRouter);
   app.route("/api/settings", settingsRouter);
   app.route("/api/queues", queuesRouter);
+  app.route("/api/storage", storageRouter);
+  app.route("/api/analyze", analyzeRouter);
 
   return app;
 }

@@ -10,6 +10,7 @@ import { analyzeQueue } from "./queues";
 
 interface ScanJobData {
   storageSourceId: string;
+  skipAnalysis?: boolean;
 }
 
 interface ExistingPhotoCache {
@@ -29,7 +30,7 @@ interface ExistingPhotoCache {
  * 3. 遍历目录，mtime+size 命中则跳过 SHA256（增量优化）
  * 4. 仅对新文件/修改文件执行 SHA256 + 缩略图生成
  * 5. INSERT 新记录 + UPDATE 变更记录
- * 6. 入队 analyze-photo 任务
+ * 6. 入队 analyze-photo 任务（skipAnalysis 时跳过）
  */
 export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
   const { storageSourceId } = job.data;
@@ -95,11 +96,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
 
       // 快速路径：同一文件路径 + mtime + size 匹配 → 跳过 SHA256
-      if (
-        existing &&
-        existing.fileMtime === fileMtime &&
-        existing.fileSize === file.size
-      ) {
+      if (existing && existing.fileMtime === fileMtime && existing.fileSize === file.size) {
         skippedCount++;
         continue;
       }
@@ -116,9 +113,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
         }
       } catch (err) {
         errorCount++;
-        job.log(
-          `读取文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
-        );
+        job.log(`读取文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -159,7 +154,11 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           createdAt: now,
         });
 
-        await analyzeQueue.add(`analyze:${photoId}`, { photoId });
+        // 入队 analyze-photo 任务（skipAnalysis 时跳过）
+        if (!job.data.skipAnalysis) {
+          await analyzeQueue.add(`analyze:${photoId}`, { photoId });
+        }
+
         newCount++;
       } catch (err) {
         errorCount++;
@@ -186,9 +185,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
         updatedCount++;
       } catch (err) {
         errorCount++;
-        job.log(
-          `更新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
-        );
+        job.log(`更新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 

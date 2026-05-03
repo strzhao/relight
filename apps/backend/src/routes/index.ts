@@ -6,3 +6,5 @@ export { scanRouter } from "./scan";
 export { settingsRouter } from "./settings";
 export { adminRouter } from "./admin";
 export { queuesRouter } from "./queues";
+export { storageRouter } from "./storage";
+export { analyzeRouter } from "./analyze";
