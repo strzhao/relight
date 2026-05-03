@@ -21,3 +21,4 @@
 - [2026-05-03] 异步任务并发守护模式：SQLite 事务 + stale 阈值 | tags: concurrency, sqlite, bullmq, transaction, async-job | → patterns.md
 - [2026-05-03] EventSource 自定义 SSE 事件与原生事件命名冲突需分离处理 | tags: sse, eventsource, frontend, error-handling, hooks | → patterns.md
 - [2026-05-03] CLI 委托安全四要素：execFile 数组 + realpath 校验 + tmpdir 隔离 + 超时 | tags: security, child_process, execFile, cli, backend, heic | → patterns.md
+- [2026-05-04] macOS sharp 不包含 HEIC 解码支持，使用 heic-decode (WASM) 替代 | tags: heic, sharp, image-processing, thumbnail, macos | → patterns.md

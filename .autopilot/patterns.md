@@ -211,6 +211,31 @@ eventSource.addEventListener("snapshot", (e) => {
 
 **Evidence**: `apps/web/hooks/use-queue-sse.ts:55-73` — 修改前 `addEventListener("error")` 只检查 `EventSource.CLOSED`，后端自定义 `event: "error"` 的 `event.data` 被忽略，导致 snapshot 永久为 null（加载骨架屏）。修改后自定义事件解析 `data.error` 并展示给用户，原生错误用 `onerror` 独立处理。
 
+### [2026-05-04] macOS sharp 不包含 HEIC 解码支持，使用 heic-decode (WASM) 替代
+
+<!-- tags: heic, sharp, image-processing, thumbnail, macos -->
+
+**Scenario**: macOS 上 sharp 预编译的 libvips 二进制不包含 HEIC 解码支持（需要 libheif），`sharp(sourcePath)` 直接对 HEIC 文件抛出异常。即使 `IMAGE_EXTENSIONS` 包含 `.heic`/`.heif`，缩略图生成仍会失败。
+
+**Lesson**: 使用 `heic-decode` (WASM, 纯 JS, 无原生依赖) 解码 HEIC → RGBA 像素数据，再传入 sharp 做 resize + JPEG 编码：
+
+```typescript
+// heic-decode → RGBA → sharp → JPEG pipeline
+import decode from "heic-decode";
+const { width, height, data } = await decode({ buffer });
+const jpeg = await sharp(Buffer.from(data), {
+  raw: { width, height, channels: 4 },
+}).resize(maxW, maxH, { fit: "inside", withoutEnlargement: true })
+  .jpeg({ quality: 80 }).toBuffer();
+```
+
+三个关键修复点：
+1. `thumbnail.ts`: HEIC → heic-decode → sharp → `.jpg`（统一输出扩展名）
+2. `analyze-photo.ts`: HEIC → JPEG buffer 后再 base64 送 AI（`image/heic` MIME 多数视觉模型不支持）
+3. `repair-heic.ts`: 修复已有 HEIC 照片的 thumbnail_path（WHERE thumbnail_path IS NULL AND file_path LIKE '%.heic'）
+
+**Evidence**: IMG_1804.HEIC (1.1MB) 修复前 `sharp(sourcePath)` 抛出异常 → thumbnailPath=null → 前端显示占位符。修复后 `heic-decode` 成功解码 → 生成 36KB 合法 JPEG 缩略图 (magic bytes: FF D8 FF)。
+
 ### [2026-05-03] CLI 委托安全四要素：execFile 数组 + realpath 校验 + tmpdir 隔离 + AbortController 超时
 <!-- tags: security, child_process, execFile, cli, backend, heic -->
 
