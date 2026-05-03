@@ -7,7 +7,6 @@ import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { generateThumbnail } from "../lib/thumbnail";
 import { createStorageAdapter } from "../storage";
-import { analyzeQueue } from "./queues";
 
 interface ScanJobData {
   storageSourceId: string;
@@ -36,8 +35,9 @@ const PROGRESS_BATCH_SIZE = 10;
  * 3. 遍历目录，mtime+size 命中则跳过 SHA256（增量优化）
  * 4. 仅对新文件/修改文件执行 SHA256 + 缩略图生成
  * 5. INSERT 新记录 + UPDATE 变更记录
- * 6. 入队 analyze-photo 任务（skipAnalysis 时跳过）
- * 7. UPDATE scan_log（而非 INSERT）
+ * 6. UPDATE scan_log（而非 INSERT）
+ *
+ * AI 分析由外部显式触发，不在扫描流程中自动入队。
  */
 export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
   const { storageSourceId, scanLogId } = job.data;
@@ -214,10 +214,6 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           takenAt: metadata.takenAt?.toISOString() ?? null,
           createdAt: now,
         });
-
-        if (!job.data.skipAnalysis) {
-          await analyzeQueue.add(`analyze:${photoId}`, { photoId });
-        }
 
         newCount++;
       } catch (err) {

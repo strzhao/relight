@@ -11,7 +11,7 @@ interface UseQueueSSEReturn {
   reconnect: () => void;
 }
 
-const KNOWN_QUEUES = ["scan-storage", "analyze-photo"] as const;
+const KNOWN_QUEUES = ["scan-storage", "analyze-photo", "daily-selection"] as const;
 
 export function isValidQueueName(name: string): name is (typeof KNOWN_QUEUES)[number] {
   return (KNOWN_QUEUES as readonly string[]).includes(name);
@@ -33,6 +33,10 @@ export function useQueueSSE(name: string): UseQueueSSEReturn {
     // 关闭已有连接
     eventSourceRef.current?.close();
 
+    // 重置快照状态（切换队列时清空旧数据）
+    setSnapshot(null);
+    setError(null);
+
     const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
     const url = `${baseUrl}${API_ROUTES.queues.events(name)}`;
     const es = new EventSource(url);
@@ -48,13 +52,25 @@ export function useQueueSSE(name: string): UseQueueSSEReturn {
       }
     });
 
-    es.addEventListener("error", () => {
+    // 自定义 SSE error 事件（后端业务错误，如 Redis 连接失败）
+    es.addEventListener("error", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as { error?: string };
+        if (data.error) {
+          setError(data.error);
+        }
+      } catch {
+        // 原生 EventSource 连接错误，由 onerror 处理
+      }
+    });
+
+    // 原生 EventSource 连接错误
+    es.onerror = () => {
       setConnected(false);
-      // EventSource 会自动重连，这里仅标记断开状态
       if (es.readyState === EventSource.CLOSED) {
         setError("连接已关闭");
       }
-    });
+    };
 
     es.onopen = () => {
       setConnected(true);
