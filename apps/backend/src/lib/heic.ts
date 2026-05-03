@@ -1,0 +1,51 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import decode from "heic-decode";
+import sharp from "sharp";
+
+const HEIC_EXTENSIONS = new Set([".heic", ".heif"]);
+
+export function isHeicFile(filePath: string): boolean {
+  return HEIC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+interface ConvertOptions {
+  maxWidth?: number;
+  maxHeight?: number;
+  quality?: number;
+}
+
+/**
+ * HEIC buffer → JPEG buffer
+ *
+ * 管线：heic-decode (RGBA pixels) → sharp (resize + JPEG encode)
+ */
+export async function convertHeicToJpeg(
+  buffer: Buffer,
+  options: ConvertOptions = {},
+): Promise<Buffer> {
+  const { maxWidth, maxHeight, quality = 80 } = options;
+
+  const { width, height, data } = await decode({ buffer });
+
+  let pipeline = sharp(Buffer.from(data), {
+    raw: { width, height, channels: 4 },
+  });
+
+  if (maxWidth || maxHeight) {
+    pipeline = pipeline.resize(maxWidth, maxHeight, {
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+  }
+
+  return pipeline.jpeg({ quality }).toBuffer();
+}
+
+/**
+ * HEIC 文件路径 → JPEG buffer（读取文件 + 转换）
+ */
+export async function heicFileToJpeg(filePath: string, options?: ConvertOptions): Promise<Buffer> {
+  const buffer = await readFile(filePath);
+  return convertHeicToJpeg(buffer, options);
+}

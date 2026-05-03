@@ -45,11 +45,24 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     throw new Error(`存储源不存在: ${photo.storageSourceId}`);
   }
 
-  // 2. 读取文件并 base64 编码
+  // 2. 读取文件并 base64 编码（HEIC 需先转为 JPEG）
   const adapter = createStorageAdapter(source.type);
-  const buffer = await adapter.getFileBuffer(photo.filePath);
+  let buffer = await adapter.getFileBuffer(photo.filePath);
+  let mimeType = adapter.getMimeType(photo.filePath);
+
+  const ext = photo.filePath.toLowerCase();
+  if (ext.endsWith(".heic") || ext.endsWith(".heif")) {
+    job.log("检测到 HEIC 文件，转换为 JPEG 后发送 AI 分析");
+    const { heicFileToJpeg } = await import("../lib/heic");
+    buffer = await heicFileToJpeg(photo.filePath, {
+      maxWidth: 2048,
+      maxHeight: 2048,
+      quality: 85,
+    });
+    mimeType = "image/jpeg";
+  }
+
   const base64 = buffer.toString("base64");
-  const mimeType = adapter.getMimeType(photo.filePath);
 
   job.log(`文件大小: ${buffer.length} bytes, MIME: ${mimeType}`);
 
