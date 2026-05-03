@@ -6,6 +6,8 @@ import type {
   PaginatedResponse,
   Photo,
   PhotoAnalysisItem,
+  QueueInfo,
+  QueueJobDetail,
   QueuesStatus,
   ScanLog,
   StorageSource,
@@ -73,5 +75,11 @@ export const api = {
     health: () => fetchApi<ApiResponse<HealthDetails>>(API_ROUTES.admin.health),
     photos: (params?: URLSearchParams) =>
       fetchApi<PaginatedResponse<PhotoAnalysisItem>>(`${API_ROUTES.admin.photos}?${params ?? ""}`),
+  },
+
+  queues: {
+    list: () => fetchApi<ApiResponse<QueueInfo[]>>(API_ROUTES.queues.list),
+    job: (name: string, jobId: string) =>
+      fetchApi<ApiResponse<QueueJobDetail>>(API_ROUTES.queues.job(name, jobId)),
   },
 };
