@@ -16,6 +16,13 @@ export const updateSettingsSchema = z.object({
 /** 触发扫描 */
 export const scanNowSchema = z.object({
   storageSourceId: z.string().uuid().optional(),
+  skipAnalysis: z.boolean().optional().default(false),
+});
+
+/** 触发批量分析 */
+export const analyzeFilesSchema = z.object({
+  photoIds: z.array(z.string().uuid()).min(1).max(100),
+  force: z.boolean().optional(),
 });
 
 /** 每日精选查询 */
@@ -38,5 +45,6 @@ export const photoQuerySchema = z.object({
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;
 export type UpdateSettings = z.infer<typeof updateSettingsSchema>;
 export type ScanNow = z.infer<typeof scanNowSchema>;
+export type AnalyzeFiles = z.infer<typeof analyzeFilesSchema>;
 export type DailyPickQuery = z.infer<typeof dailyPickQuerySchema>;
 export type PhotoQuery = z.infer<typeof photoQuerySchema>;

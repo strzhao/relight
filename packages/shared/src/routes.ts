@@ -21,4 +21,11 @@ export const API_ROUTES = {
     list: "/api/settings",
     update: "/api/settings",
   },
+  storage: {
+    list: "/api/storage",
+    files: (id: string) => `/api/storage/${id}/files`,
+  },
+  analyze: {
+    trigger: "/api/analyze",
+  },
 } as const;

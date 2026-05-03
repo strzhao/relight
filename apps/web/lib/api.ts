@@ -1,9 +1,10 @@
 import type {
+  AnalyzeTriggerResponse,
   ApiResponse,
   DailyPick,
+  FileTreeResponse,
   PaginatedResponse,
   Photo,
-  ScanLog,
   StorageSource,
   Tag,
 } from "@relight/shared";
@@ -42,11 +43,14 @@ export const api = {
   },
 
   scan: {
-    trigger: (storageSourceId?: string) =>
-      fetchApi<ApiResponse<{ message: string }>>(API_ROUTES.scan.trigger, {
-        method: "POST",
-        body: JSON.stringify({ storageSourceId }),
-      }),
+    trigger: (storageSourceId?: string, skipAnalysis?: boolean) =>
+      fetchApi<ApiResponse<{ jobId: string | undefined; storageSourceId: string }>>(
+        API_ROUTES.scan.trigger,
+        {
+          method: "POST",
+          body: JSON.stringify({ storageSourceId, skipAnalysis }),
+        },
+      ),
   },
 
   settings: {
@@ -55,6 +59,19 @@ export const api = {
       fetchApi<ApiResponse<Record<string, string>>>(API_ROUTES.settings.update, {
         method: "PUT",
         body: JSON.stringify({ key, value }),
+      }),
+  },
+
+  storage: {
+    list: () => fetchApi<ApiResponse<StorageSource[]>>(API_ROUTES.storage.list),
+    files: (id: string) => fetchApi<ApiResponse<FileTreeResponse>>(API_ROUTES.storage.files(id)),
+  },
+
+  analyze: {
+    trigger: (photoIds: string[], force?: boolean) =>
+      fetchApi<ApiResponse<AnalyzeTriggerResponse>>(API_ROUTES.analyze.trigger, {
+        method: "POST",
+        body: JSON.stringify({ photoIds, force }),
       }),
   },
 };

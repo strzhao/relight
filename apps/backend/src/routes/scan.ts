@@ -35,9 +35,11 @@ export const scanRouter = new Hono()
       storageSourceId = sources[0].id;
     }
 
-    // 入队扫描任务
+    // 入队扫描任务（传递 skipAnalysis）
+    const skipAnalysis = parsed.data.skipAnalysis ?? false;
     const job = await scanQueue.add(`scan:${storageSourceId}`, {
       storageSourceId,
+      skipAnalysis,
     });
 
     return c.json({
@@ -60,11 +62,21 @@ export const scanRouter = new Hono()
     if (!latestLog) {
       return c.json({
         success: true,
-        data: { id, status: "pending", message: "暂无扫描记录" },
+        data: { id, status: "pending", message: "暂无扫描记录" as const },
       });
     }
 
-    const status = latestLog.finishedAt ? "completed" : "running";
+    let status: "running" | "completed" | "failed";
+    let errorMessage: string | undefined;
+
+    if (!latestLog.finishedAt) {
+      status = "running";
+    } else if (latestLog.newCount === 0 && latestLog.errorCount > 0) {
+      status = "failed";
+      errorMessage = `扫描失败：${latestLog.errorCount} 个错误`;
+    } else {
+      status = "completed";
+    }
 
     return c.json({
       success: true,
@@ -72,6 +84,7 @@ export const scanRouter = new Hono()
         id: latestLog.id,
         storageSourceId: latestLog.storageSourceId,
         status,
+        errorMessage,
         scannedCount: latestLog.scannedCount,
         newCount: latestLog.newCount,
         errorCount: latestLog.errorCount,

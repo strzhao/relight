@@ -132,3 +132,33 @@ export interface PaginatedResponse<T> {
 export interface TagWithCount extends Tag {
   photoCount: number;
 }
+
+/** 分析状态枚举 */
+export type AnalysisStatus = "pending" | "analyzed" | "failed";
+
+/** 文件树节点 */
+export interface FileTreeNode {
+  type: "folder" | "file";
+  name: string;
+  path: string;
+  children?: FileTreeNode[];
+  photoId?: string;
+  fileSize?: number;
+  analysisStatus?: AnalysisStatus;
+}
+
+/** 文件树响应 */
+export interface FileTreeResponse {
+  tree: FileTreeNode[];
+  totalFiles: number;
+  analyzedCount: number;
+  pendingCount: number;
+  failedCount: number;
+}
+
+/** 分析触发响应 */
+export interface AnalyzeTriggerResponse {
+  queuedCount: number;
+  skippedCount: number;
+  jobIds: string[];
+}

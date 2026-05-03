@@ -7,15 +7,15 @@ import { config } from "../lib/config";
 const connection = { url: config.redisUrl };
 
 // 创建三个 Worker 实例
-const scanWorker = new Worker("scan:storage", scanStorageWorker, {
+const scanWorker = new Worker("scan-storage", scanStorageWorker, {
   connection,
 });
 
-const analyzeWorker = new Worker("analyze:photo", analyzePhotoWorker, {
+const analyzeWorker = new Worker("analyze-photo", analyzePhotoWorker, {
   connection,
 });
 
-const dailyWorker = new Worker("daily:selection", dailySelectionWorker, {
+const dailyWorker = new Worker("daily-selection", dailySelectionWorker, {
   connection,
 });
 
@@ -41,24 +41,24 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 // Worker 事件日志
 scanWorker.on("completed", (job) => {
-  console.log(`[scan:storage] 任务完成: ${job.id}`);
+  console.log(`[scan-storage] 任务完成: ${job.id}`);
 });
 scanWorker.on("failed", (job, err) => {
-  console.error(`[scan:storage] 任务失败: ${job?.id}`, err.message);
+  console.error(`[scan-storage] 任务失败: ${job?.id}`, err.message);
 });
 
 analyzeWorker.on("completed", (job) => {
-  console.log(`[analyze:photo] 任务完成: ${job.id}`);
+  console.log(`[analyze-photo] 任务完成: ${job.id}`);
 });
 analyzeWorker.on("failed", (job, err) => {
-  console.error(`[analyze:photo] 任务失败: ${job?.id}`, err.message);
+  console.error(`[analyze-photo] 任务失败: ${job?.id}`, err.message);
 });
 
 dailyWorker.on("completed", (job) => {
-  console.log(`[daily:selection] 任务完成: ${job.id}`);
+  console.log(`[daily-selection] 任务完成: ${job.id}`);
 });
 dailyWorker.on("failed", (job, err) => {
-  console.error(`[daily:selection] 任务失败: ${job?.id}`, err.message);
+  console.error(`[daily-selection] 任务失败: ${job?.id}`, err.message);
 });
 
 console.log("[workers] BullMQ Worker 进程已启动");

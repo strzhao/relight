@@ -10,6 +10,7 @@ import { analyzeQueue } from "./queues";
 
 interface ScanJobData {
   storageSourceId: string;
+  skipAnalysis?: boolean;
 }
 
 /**
@@ -21,7 +22,7 @@ interface ScanJobData {
  * 3. SHA256 去重
  * 4. INSERT 新照片记录
  * 5. 生成缩略图
- * 6. 入队 analyze-photo 任务
+ * 6. 入队 analyze-photo 任务（skipAnalysis 时跳过）
  */
 export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
   const { storageSourceId } = job.data;
@@ -110,8 +111,10 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           createdAt: now,
         });
 
-        // 入队 analyze-photo 任务
-        await analyzeQueue.add(`analyze:${photoId}`, { photoId });
+        // 入队 analyze-photo 任务（skipAnalysis 时跳过）
+        if (!job.data.skipAnalysis) {
+          await analyzeQueue.add(`analyze:${photoId}`, { photoId });
+        }
 
         newCount++;
       } catch (err) {
