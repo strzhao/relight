@@ -58,6 +58,67 @@ try {
 } catch { /* DB 文件缺失，disk 为 null */ }
 ```
 
+### [2026-05-03] 扫描进度 SSE 双数据源模式：DB scan_log + BullMQ job.progress
+
+<!-- tags: sse, scan, bullmq, progress, sqlite, hono -->
+
+**Scenario**: 存储源扫描是异步长时间任务，需要 SSE 实时推送进度。纯 BullMQ job.progress 在 worker 崩溃后丢失进度数据，纯 DB scan_log 在扫描初期只有空值。
+
+**Lesson**: 使用双数据源合并策略——DB scan_log 作为权威状态源（持久化，崩溃可恢复），BullMQ job.progress 作为增量进度源（实时 phase/totalFiles/processed/counts）。SSE 端点合并时以 job.progress 优先，fallback 到 scan_log：
+
+```typescript
+// SSE 端点：合并双数据源
+const [log] = await db.select().from(schema.scanLogs).where(eq(...));
+const job = await scanQueue.getJob(log.jobId);
+const progress = await job?.progress;  // BullMQ 增量数据
+const event = {
+  phase: progress?.phase ?? null,           // BullMQ 优先
+  totalFiles: progress?.totalFiles ?? log.scannedCount,  // DB fallback
+  status: log.finishedAt ? "completed" : "running",
+};
+```
+
+**Key details**:
+- worker 通过 `PROGRESS_BATCH_SIZE=10` 批量调用 `job.updateProgress()`，避免每文件一次 Redis 写入
+- worker 完成/失败后 **UPDATE** scan_log（非 INSERT），携带最终计数
+- SSE 端点 1s 间隔轮询双数据源（比队列监控的 3s 更频繁）
+- stale 检测：`startedAt > 30 分钟前` 且 `finishedAt=null` → 标记为 stale，返回 error 事件
+- 409 并发守护使用同款 stale 阈值，排除死扫描对并发判断的干扰
+
+**Evidence**: 扫描 6152 文件耗时 29 秒，SSE 每秒推送 `event: progress`，阶段从 listing → hashing → processing → completed 逐级推进。
+
+### [2026-05-03] 异步任务并发守护模式：SQLite 事务 + stale 阈值
+
+<!-- tags: concurrency, sqlite, bullmq, transaction, async-job -->
+
+**Scenario**: 存储源扫描是耗时操作，用户可能误触多次触发。需要防止同一存储源被重复扫描。
+
+**Lesson**: 在 POST 端点入队前使用 SQLite 事务包裹 SELECT + INSERT，检查当前是否有 active scan（finishedAt IS NULL 且 startedAt 在 30 分钟内）：
+
+```typescript
+// 检查 active scan（排除 stale 记录）
+const [active] = await db
+  .select({ id: scanLogs.id })
+  .from(scanLogs)
+  .where(
+    and(
+      eq(scanLogs.storageSourceId, body.storageSourceId),
+      sql`finished_at IS NULL`,
+      sql`started_at > datetime('now', '-30 minutes')`,
+    ),
+  )
+  .limit(1);
+if (active) return c.json({ success: false, error: "该存储源已有正在进行的扫描任务" }, 409);
+// ... 入队 + INSERT scan_log ...
+```
+
+**Key details**:
+- 409 响应附带 `activeScanLogId`，前端可从中恢复 SSE 连接（而非仅显示错误）
+- stale 阈值（30 分钟）同时用于 SSE 端点和并发守护，保持一致
+- 降级：BullMQ 不可用时，active 检查仍能工作（纯 SQLite 不依赖 Redis）
+
+**Evidence**: POST /api/scan 快速连续两次调用，第二次返回 409 + `{"activeScanLogId":"dac77ffc-..."}`。
+
 ### [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数
 <!-- tags: bullmq, queue, worker, retry -->
 

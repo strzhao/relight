@@ -12,3 +12,5 @@
 - [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数 | tags: bullmq, queue, worker, retry | → patterns.md
 - [2026-05-03] Hono streamSSE() 实现 BullMQ 队列实时监控推送 | tags: hono, sse, bullmq, monitoring, streaming | → patterns.md
 - [2026-05-03] 健康端点系统指标采集采用嵌套 try-catch 降级 | tags: health, api, error-handling, nodejs, filesystem | → patterns.md
+- [2026-05-03] 扫描进度 SSE 双数据源模式：DB scan_log + BullMQ job.progress | tags: sse, scan, bullmq, progress, sqlite, hono | → patterns.md
+- [2026-05-03] 异步任务并发守护模式：SQLite 事务 + stale 阈值 | tags: concurrency, sqlite, bullmq, transaction, async-job | → patterns.md
