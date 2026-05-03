@@ -48,3 +48,33 @@ const scanQueue = new Queue("scan:storage", {
 // Worker 侧不需要重试参数
 new Worker("scan:storage", scanStorageWorker, { connection, concurrency: 1 });
 ```
+
+### [2026-05-03] CLI 委托安全四要素：execFile 数组 + realpath 校验 + tmpdir 隔离 + AbortController 超时
+<!-- tags: security, child_process, execFile, cli, backend, heic -->
+
+**Scenario**: 需要从 Node.js 调用外部 CLI 工具（`heif-convert`）处理用户上传文件，需防范命令注入、路径遍历、资源泄漏、临时文件残留等风险。
+
+**Lesson**: 四个安全要素缺一不可：
+1. **execFile 数组参数**（非 exec/spawn shell 字符串）— 每个 argv 元素独立传递，shell 元字符不会被解释
+2. **fs.realpath 输入校验** — 确认输入文件存在且为普通文件（拒绝符号链接目录、设备文件等）
+3. **os.tmpdir() 隔离目录 + finally 清理 + process.exit 兜底** — 临时文件写入 `os.tmpdir()/prefix-{ts}-{rand}/`，finally 块清理正常路径，`process.on('exit', cleanup)` + `fs.rmSync`（同步版本）兜底异常退出
+4. **AbortController 30s 超时** — 防止子进程僵尸，单文件转换硬限制
+
+**Evidence**: 
+```typescript
+// 1. execFile 数组参数
+execFile("heif-convert", ["-q", "85", resolvedPath, output], { timeout: 30000 });
+
+// 2. realpath 校验
+const resolvedPath = await realpath(input);
+const stat = await fs.promises.stat(resolvedPath);
+if (!stat.isFile()) throw new Error(`路径不是普通文件: ${input}`);
+
+// 3. tmpdir 隔离 + finally
+const tempDir = path.join(os.tmpdir(), `relight-heic-${ts}-${rand}`);
+try { await decoder.convertToJpeg(input, output); }
+finally { fs.rmSync(tempDir, { recursive: true, force: true }); }
+
+// 4. exit 兜底 (必须用 fs.rmSync 同步版本)
+process.on("exit", () => { fs.rmSync(tempDir, { recursive: true, force: true }); });
+```
