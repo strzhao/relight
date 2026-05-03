@@ -81,7 +81,6 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     }
 
     job.log(`存储源: ${source.name} (${source.rootPath})`);
-    await pushProgress("listing");
 
     // 2. 查询已有照片，构建 filePath → ExistingPhoto 缓存
     const existingPhotos = await db
@@ -103,6 +102,12 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     job.log(`已缓存 ${existingMap.size} 条已有记录`);
 
     // 3. 遍历目录获取媒体文件
+    // 先用已有照片数作为 totalFiles 下界估计，避免 listing 阶段显示 0/0
+    await pushProgress("listing", {
+      totalFiles: Math.max(existingMap.size, 1),
+      processed: 0,
+    });
+
     const adapter = createStorageAdapter(source.type);
     const files = await adapter.listFiles(source.rootPath);
     scannedCount = files.length;
