@@ -265,3 +265,77 @@ finally { fs.rmSync(tempDir, { recursive: true, force: true }); }
 // 4. exit 兜底 (必须用 fs.rmSync 同步版本)
 process.on("exit", () => { fs.rmSync(tempDir, { recursive: true, force: true }); });
 ```
+
+### [2026-05-04] BullMQ QueueEvents 事件驱动 SSE 推送（单 Job 追踪）
+
+<!-- tags: sse, bullmq, queue-events, event-driven, hono -->
+
+**Scenario**: 照片详情面板点击「分析」按钮后，需要等待单个分析 Job 完成并自动刷新。已有 SSE 模式（队列监控、扫描进度）使用 setInterval 轮询数据源，但单 Job 追踪场景更适合事件驱动——Job 可能数秒完成也可能数分钟，轮询间隔难以兼顾延迟和资源。
+
+**Lesson**: 使用 BullMQ `QueueEvents` 监听 `completed`/`failed` 事件，结合 Hono `streamSSE()` 实现事件驱动推送（而非轮询）：
+
+```typescript
+// 模块级单例 QueueEvents，避免每个 SSE 连接创建新 Redis 连接
+const analyzeQueueEvents = new QueueEvents("analyze-photo", {
+  connection: { url: config.redisUrl },
+});
+
+// SSE 端点：事件驱动，仅在 Job 完成/失败时推送
+.get("/jobs/:jobId/events", async (c) => {
+  const jobId = c.req.param("jobId");
+  return streamSSE(c, async (stream) => {
+    const signal = c.req.raw.signal;
+    let cleaned = false;
+
+    const onCompleted = async (args: { jobId: string }) => {
+      if (args.jobId !== jobId) return;
+      await stream.writeSSE({ data: JSON.stringify({ jobId, status: "completed" }), event: "completed" });
+      stream.close().catch(() => {});
+    };
+
+    const onFailed = async (args: { jobId: string; failedReason: string }) => {
+      if (args.jobId !== jobId) return;
+      await stream.writeSSE({ data: JSON.stringify({ jobId, status: "failed", error: args.failedReason }), event: "failed" });
+      stream.close().catch(() => {});
+    };
+
+    analyzeQueueEvents.on("completed", onCompleted);
+    analyzeQueueEvents.on("failed", onFailed);
+
+    const cleanup = async () => {
+      if (cleaned) return;
+      cleaned = true;
+      analyzeQueueEvents.off("completed", onCompleted);
+      analyzeQueueEvents.off("failed", onFailed);
+    };
+
+    signal.addEventListener("abort", () => { cleanup(); }, { once: true });
+
+    while (!signal.aborted) await stream.sleep(1000);
+    await cleanup();
+  });
+});
+```
+
+**Key details**:
+- `QueueEvents` 监听全局队列事件，需按 `jobId` 过滤（`if (args.jobId !== jobId) return`）
+- `cleaned` 守卫避免 abort 回调和 while 循环退出双重调用 `cleanup()`
+- 写 SSE 和 close 包裹 try-catch，客户端已断开时忽略写入错误
+- 前端 `EventSource` 监听命名事件 `completed`/`failed`，与原生 `onerror` 分离
+- 与轮询式 SSE 的本质区别：推送时机由事件触发而非定时器，零延迟、零空转
+
+**Evidence**: curl 验证 — POST /api/analyze 提交 Job → GET /api/analyze/jobs/1/events 在 Job 完成后收到 `event: completed`，延迟 <1s。
+
+### [2026-05-04] SSE 连接资源管理：QueueEvents 单例 + 幂等清理 + try-catch 包裹
+
+<!-- tags: sse, resource-management, redis, cleanup, bullmq, hono -->
+
+**Scenario**: 每 SSE 连接创建新 `QueueEvents` 实例会导致 Redis 连接泄漏（N 个客户端 = N 条 Redis 连接）。同时 SSE 端点存在双重清理竞态：`signal.addEventListener("abort")` 回调和 `while` 循环退出后的 `await cleanup()` 可能并发。
+
+**Lesson**: 三个关键防护模式：
+
+1. **QueueEvents 提升为模块级单例** — `const analyzeQueueEvents = new QueueEvents(...)` 放在模块顶层（非路由 handler 内），所有 SSE 连接共享同一 Redis 连接
+2. **幂等清理守卫** — `let cleaned = false` + `if (cleaned) return` 确保 `cleanup()` 最多执行一次
+3. **try-catch 包裹 SSE 写操作** — `stream.writeSSE()` 和 `stream.close()` 在客户端断开时可能抛异常，必须 try-catch 吞掉
+
+**Evidence**: 代码审查发现 C1（Redis 连接泄漏）、C2（双重清理竞态）、C4（缺少 try-catch），修复后所有 SSE 连接共享 1 个 Redis 连接，abort 和 while 退出不再竞态。

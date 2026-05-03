@@ -22,3 +22,5 @@
 - [2026-05-03] EventSource 自定义 SSE 事件与原生事件命名冲突需分离处理 | tags: sse, eventsource, frontend, error-handling, hooks | → patterns.md
 - [2026-05-03] CLI 委托安全四要素：execFile 数组 + realpath 校验 + tmpdir 隔离 + 超时 | tags: security, child_process, execFile, cli, backend, heic | → patterns.md
 - [2026-05-04] macOS sharp 不包含 HEIC 解码支持，使用 heic-decode (WASM) 替代 | tags: heic, sharp, image-processing, thumbnail, macos | → patterns.md
+- [2026-05-04] BullMQ QueueEvents 事件驱动 SSE 推送（单 Job 追踪）| tags: sse, bullmq, queue-events, event-driven, hono | → patterns.md
+- [2026-05-04] SSE 连接资源管理：QueueEvents 单例 + 幂等清理 + try-catch 包裹 | tags: sse, resource-management, redis, cleanup, bullmq, hono | → patterns.md
