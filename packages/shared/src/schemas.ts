@@ -17,6 +17,7 @@ export const updateSettingsSchema = z.object({
 export const scanNowSchema = z.object({
   storageSourceId: z.string().uuid().optional(),
   skipAnalysis: z.boolean().optional().default(false),
+  forceRegenerate: z.boolean().optional().default(false),
 });
 
 /** 触发批量分析 */

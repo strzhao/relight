@@ -246,8 +246,18 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
     try {
       const metadata = await sharp(filePath).metadata();
       const result: { width?: number; height?: number; takenAt?: Date } = {};
-      if (metadata.width) result.width = metadata.width;
-      if (metadata.height) result.height = metadata.height;
+
+      // EXIF orientations 5-8 involve 90°/270° rotation → swap width/height
+      const orientation = metadata.orientation;
+      const swapDimensions = orientation != null && orientation >= 5 && orientation <= 8;
+
+      if (metadata.width && metadata.height) {
+        result.width = swapDimensions ? metadata.height : metadata.width;
+        result.height = swapDimensions ? metadata.width : metadata.height;
+      } else {
+        if (metadata.width) result.width = metadata.width;
+        if (metadata.height) result.height = metadata.height;
+      }
       if (metadata.exif) {
         try {
           const dateTimeOriginal = extractExifDate(metadata.exif);

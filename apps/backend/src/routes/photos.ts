@@ -139,10 +139,13 @@ export const photosRouter = new Hono()
     }
 
     try {
+      const stat = await fs.stat(photo.thumbnailPath);
       const buffer = await fs.readFile(photo.thumbnailPath);
+      const etag = `"${stat.mtimeMs.toFixed(0)}"`;
       return c.body(buffer, 200, {
         "Content-Type": "image/jpeg",
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=3600",
+        ETag: etag,
       });
     } catch {
       return c.text("Thumbnail file not found", 404);

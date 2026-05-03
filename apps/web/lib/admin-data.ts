@@ -1,4 +1,10 @@
-import type { AdminStats, HealthDetails, PhotoAnalysisItem, QueuesStatus } from "@relight/shared";
+import type {
+  AdminStats,
+  HealthDetails,
+  PhotoAnalysisItem,
+  QueuesStatus,
+  UnifiedPhotosResponse,
+} from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -40,7 +46,7 @@ export function getHealthDetails(): Promise<HealthDetails> {
   return serverFetch<HealthDetails>(API_ROUTES.admin.health);
 }
 
-/** 获取分页照片分析列表 */
+/** 获取分页照片分析列表（旧版，保留兼容性） */
 export function getPhotoAnalyses(
   page = 1,
   pageSize = 20,
@@ -52,4 +58,27 @@ export function getPhotoAnalyses(
     sortBy,
   });
   return serverFetch(`${API_ROUTES.admin.photos}?${params}`);
+}
+
+/** 统一照片列表查询参数 */
+export interface UnifiedPhotosParams {
+  page?: number;
+  pageSize?: number;
+  sortBy?: "createdAt" | "takenAt" | "fileSize" | "aestheticScore" | "processedAt";
+  storageSourceId?: string;
+  analysisStatus?: "all" | "analyzed" | "unanalyzed";
+  minScore?: number;
+}
+
+/** 获取统一照片列表 */
+export function getUnifiedPhotos(params: UnifiedPhotosParams): Promise<UnifiedPhotosResponse> {
+  const sp = new URLSearchParams();
+  if (params.page != null) sp.set("page", String(params.page));
+  if (params.pageSize != null) sp.set("pageSize", String(params.pageSize));
+  if (params.sortBy) sp.set("sortBy", params.sortBy);
+  if (params.storageSourceId) sp.set("storageSourceId", params.storageSourceId);
+  if (params.analysisStatus && params.analysisStatus !== "all")
+    sp.set("analysisStatus", params.analysisStatus);
+  if (params.minScore != null) sp.set("minScore", String(params.minScore));
+  return serverFetch<UnifiedPhotosResponse>(`${API_ROUTES.admin.photos}?${sp.toString()}`);
 }

@@ -314,6 +314,7 @@ export interface ScanProgress {
   updatedCount: number;
   skippedCount: number;
   errorCount: number;
+  regeneratedCount: number;
   currentFile?: string;
 }
 
@@ -328,6 +329,7 @@ export interface ScanProgressEvent {
   updatedCount: number;
   skippedCount: number;
   errorCount: number;
+  regeneratedCount: number;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -337,4 +339,44 @@ export interface ScanTriggerResponse {
   jobId: string | undefined;
   scanLogId: string;
   storageSourceId: string;
+}
+
+/** 统一照片列表项 */
+export interface UnifiedPhotoItem {
+  id: string;
+  storageSourceId: string;
+  filePath: string;
+  width: number;
+  height: number;
+  fileSize: number;
+  thumbnailPath: string | null;
+  takenAt: string | null;
+  createdAt: string;
+  latestAnalysis: {
+    id: string;
+    aiModel: string;
+    aestheticScore: number | null;
+    narrative: string | null;
+    processedAt: string;
+  } | null;
+  analysesCount: number;
+}
+
+/** 统一照片列表响应 */
+export interface UnifiedPhotosResponse {
+  data: UnifiedPhotoItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  storageSources: { id: string; name: string }[];
+  storageSource?: {
+    id: string;
+    name: string;
+    type: "local" | "smb" | "webdav";
+    rootPath: string;
+    enabled: boolean;
+    lastScanAt: string | null;
+    photoCount: number;
+    analyzedCount: number;
+  };
 }

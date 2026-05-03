@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
-import { count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 import { analyzeQueue, dailyQueue, scanQueue } from "../jobs/queues";
@@ -309,48 +309,212 @@ export const adminRouter = new Hono()
   })
   /**
    * GET /api/admin/photos
-   * 分页照片分析列表，支持 sortBy "aestheticScore" | "processedAt"
+   * 统一照片列表（以 photos 为基表，LEFT JOIN 最新分析记录）
+   * 支持参数:
+   *   - page, pageSize: 分页
+   *   - sortBy: createdAt | takenAt | fileSize | aestheticScore | processedAt
+   *   - storageSourceId: 按存储源过滤
+   *   - analysisStatus: all | analyzed | unanalyzed
+   *   - minScore: 最低美学评分
    */
   .get("/photos", async (c) => {
     try {
       const page = Number(c.req.query("page")) || 1;
       const pageSize = Math.min(Number(c.req.query("pageSize")) || 20, 100);
-      const sortBy = c.req.query("sortBy") === "aestheticScore" ? "aestheticScore" : "processedAt";
+      const storageSourceId = c.req.query("storageSourceId") || undefined;
+      const analysisStatus = c.req.query("analysisStatus") || "all";
+      const minScore = c.req.query("minScore") ? Number(c.req.query("minScore")) : undefined;
+      const sortByParam = c.req.query("sortBy") || "createdAt";
+
+      const validSortBy = [
+        "createdAt",
+        "takenAt",
+        "fileSize",
+        "aestheticScore",
+        "processedAt",
+      ] as const;
+      const sortBy = validSortBy.includes(sortByParam as (typeof validSortBy)[number])
+        ? (sortByParam as (typeof validSortBy)[number])
+        : "createdAt";
 
       const offset = (page - 1) * pageSize;
 
+      // 构建 WHERE 条件
+      const conditions: ReturnType<typeof sql>[] = [];
+
+      if (storageSourceId) {
+        conditions.push(eq(schema.photos.storageSourceId, storageSourceId));
+      }
+
+      if (analysisStatus === "analyzed") {
+        conditions.push(
+          sql`EXISTS (
+            SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id}
+          )`,
+        );
+      } else if (analysisStatus === "unanalyzed") {
+        conditions.push(
+          sql`NOT EXISTS (
+            SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id}
+          )`,
+        );
+      }
+
+      if (minScore != null && !Number.isNaN(minScore)) {
+        conditions.push(
+          sql`EXISTS (
+            SELECT 1 FROM photo_analyses
+            WHERE photo_analyses.photo_id = ${schema.photos.id}
+            AND photo_analyses.aesthetic_score >= ${minScore}
+          )`,
+        );
+      }
+
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
       // 总数
-      const [countResult] = await db.select({ total: count() }).from(schema.photoAnalyses);
+      const [countResult] = await db.select({ total: count() }).from(schema.photos).where(where);
 
       const total = countResult?.total ?? 0;
 
-      // 分页数据
+      // 排序映射
+      let orderBySql: ReturnType<typeof desc>;
+      switch (sortBy) {
+        case "aestheticScore":
+          // NULL 值排最后：DESC 用 -1，ASC 用 999
+          orderBySql = desc(sql`COALESCE(${schema.photoAnalyses.aestheticScore}, -1)`);
+          break;
+        case "processedAt":
+          orderBySql = desc(schema.photoAnalyses.processedAt);
+          break;
+        case "takenAt":
+          orderBySql = desc(schema.photos.takenAt);
+          break;
+        case "fileSize":
+          orderBySql = desc(schema.photos.fileSize);
+          break;
+        default:
+          orderBySql = desc(schema.photos.createdAt);
+          break;
+      }
+
+      // 分页数据：以 photos 为基表，LEFT JOIN 最新分析
       const rows = await db
         .select({
-          id: schema.photoAnalyses.id,
+          id: schema.photos.id,
+          storageSourceId: schema.photos.storageSourceId,
           filePath: schema.photos.filePath,
+          width: schema.photos.width,
+          height: schema.photos.height,
+          fileSize: schema.photos.fileSize,
+          thumbnailPath: schema.photos.thumbnailPath,
+          takenAt: schema.photos.takenAt,
+          createdAt: schema.photos.createdAt,
+          analysisId: schema.photoAnalyses.id,
           aiModel: schema.photoAnalyses.aiModel,
           aestheticScore: schema.photoAnalyses.aestheticScore,
           narrative: schema.photoAnalyses.narrative,
           processedAt: schema.photoAnalyses.processedAt,
+          analysesCount: sql<number>`(
+            SELECT COUNT(*) FROM photo_analyses
+            WHERE photo_analyses.photo_id = ${schema.photos.id}
+          )`,
         })
-        .from(schema.photoAnalyses)
-        .innerJoin(schema.photos, eq(schema.photoAnalyses.photoId, schema.photos.id))
-        .orderBy(
-          sortBy === "aestheticScore"
-            ? desc(schema.photoAnalyses.aestheticScore)
-            : desc(schema.photoAnalyses.processedAt),
+        .from(schema.photos)
+        .leftJoin(
+          schema.photoAnalyses,
+          sql`${schema.photoAnalyses.id} = (
+            SELECT pa.id FROM photo_analyses AS pa
+            WHERE pa.photo_id = ${schema.photos.id}
+            ORDER BY pa.processed_at DESC
+            LIMIT 1
+          )`,
         )
+        .where(where)
+        .orderBy(orderBySql)
         .limit(pageSize)
         .offset(offset);
+
+      // 所有存储源（用于筛选下拉）
+      const allSources = await db
+        .select({
+          id: schema.storageSources.id,
+          name: schema.storageSources.name,
+        })
+        .from(schema.storageSources);
+
+      // 单个存储源详情（仅当 storageSourceId 指定时）
+      let storageSourceDetail: {
+        id: string;
+        name: string;
+        type: string;
+        rootPath: string;
+        enabled: boolean;
+        lastScanAt: string | null;
+        photoCount: number;
+        analyzedCount: number;
+      } | null = null;
+
+      if (storageSourceId) {
+        const [source] = await db
+          .select()
+          .from(schema.storageSources)
+          .where(eq(schema.storageSources.id, storageSourceId));
+
+        if (source) {
+          const [photoCountResult] = await db
+            .select({ total: count() })
+            .from(schema.photos)
+            .where(eq(schema.photos.storageSourceId, storageSourceId));
+
+          const [analyzedCountResult] = await db
+            .select({ total: count() })
+            .from(schema.photoAnalyses)
+            .innerJoin(schema.photos, eq(schema.photoAnalyses.photoId, schema.photos.id))
+            .where(eq(schema.photos.storageSourceId, storageSourceId));
+
+          storageSourceDetail = {
+            id: source.id,
+            name: source.name,
+            type: source.type,
+            rootPath: source.rootPath,
+            enabled: source.enabled,
+            lastScanAt: source.lastScanAt,
+            photoCount: photoCountResult?.total ?? 0,
+            analyzedCount: analyzedCountResult?.total ?? 0,
+          };
+        }
+      }
 
       return c.json({
         success: true,
         data: {
-          data: rows,
+          data: rows.map((row) => ({
+            id: row.id,
+            storageSourceId: row.storageSourceId,
+            filePath: row.filePath,
+            width: row.width,
+            height: row.height,
+            fileSize: row.fileSize,
+            thumbnailPath: row.thumbnailPath,
+            takenAt: row.takenAt,
+            createdAt: row.createdAt,
+            latestAnalysis: row.analysisId
+              ? {
+                  id: row.analysisId,
+                  aiModel: row.aiModel,
+                  aestheticScore: row.aestheticScore,
+                  narrative: row.narrative,
+                  processedAt: row.processedAt,
+                }
+              : null,
+            analysesCount: row.analysesCount,
+          })),
           total,
           page,
           pageSize,
+          storageSources: allSources,
+          ...(storageSourceDetail ? { storageSource: storageSourceDetail } : {}),
         },
       });
     } catch (error) {

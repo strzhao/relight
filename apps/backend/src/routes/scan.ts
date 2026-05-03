@@ -67,11 +67,13 @@ export const scanRouter = new Hono()
     const scanLogId = crypto.randomUUID();
     const now = new Date().toISOString();
     const skipAnalysis = parsed.data.skipAnalysis ?? false;
+    const forceRegenerate = parsed.data.forceRegenerate ?? false;
 
     const job = await scanQueue.add(`scan:${storageSourceId}`, {
       storageSourceId,
       scanLogId,
       skipAnalysis,
+      forceRegenerate,
     });
 
     // 入队成功后写入 scan_log
@@ -180,6 +182,7 @@ export const scanRouter = new Hono()
               updatedCount: 0,
               skippedCount: 0,
               errorCount: log.errorCount,
+              regeneratedCount: 0,
               startedAt: log.startedAt,
               finishedAt: null,
             };
@@ -224,6 +227,7 @@ export const scanRouter = new Hono()
             updatedCount: (progress?.updatedCount as number) ?? 0,
             skippedCount: (progress?.skippedCount as number) ?? 0,
             errorCount: (progress?.errorCount as number) ?? log.errorCount,
+            regeneratedCount: (progress?.regeneratedCount as number) ?? 0,
             startedAt: log.startedAt,
             finishedAt: log.finishedAt,
           };

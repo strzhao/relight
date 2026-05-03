@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 
 const navItems = [
   { href: "/admin", label: "仪表盘", icon: LayoutDashboard },
-  { href: "/admin/photos", label: "照片分析", icon: Image },
+  { href: "/admin/photos", label: "照片管理", icon: Image },
   { href: "/admin/queues", label: "队列监控", icon: Activity },
   { href: "/admin/health", label: "系统健康", icon: Heart },
 ];

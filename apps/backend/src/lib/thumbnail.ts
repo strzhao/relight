@@ -56,6 +56,7 @@ export async function generateVideoThumbnail(
   }
 
   await sharp(frameBuffer)
+    .rotate()
     .resize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, {
       fit: "inside",
       withoutEnlargement: true,
@@ -83,6 +84,7 @@ export async function generateThumbnail(
 
   await fs.mkdir(outputDir, { recursive: true });
   await sharp(sourcePath)
+    .rotate()
     .resize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, {
       fit: "inside",
       withoutEnlargement: true,

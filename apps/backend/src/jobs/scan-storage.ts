@@ -13,6 +13,7 @@ interface ScanJobData {
   storageSourceId: string;
   scanLogId?: string;
   skipAnalysis?: boolean;
+  forceRegenerate?: boolean;
 }
 
 interface ExistingPhotoCache {
@@ -47,6 +48,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
   let newCount = 0;
   let skippedCount = 0;
   let updatedCount = 0;
+  let regeneratedCount = 0;
   let errorCount = 0;
 
   // 辅助函数：推送进度到 BullMQ + 更新 scan_log
@@ -54,11 +56,12 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     const progress: ScanProgress = {
       phase,
       totalFiles: scannedCount,
-      processed: skippedCount + newCount + updatedCount + errorCount,
+      processed: skippedCount + newCount + updatedCount + regeneratedCount + errorCount,
       newCount,
       updatedCount,
       skippedCount,
       errorCount,
+      regeneratedCount,
       ...extra,
     };
     try {
@@ -126,14 +129,24 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       hash: string;
       file: (typeof files)[number];
     }> = [];
+    // forceRegenerate 时，未变更的文件跳过哈希直接重新生成缩略图
+    const regenerateOnlyFiles: Array<{ id: string; file: (typeof files)[number] }> = [];
 
     let hashingProcessed = 0;
     for (const file of files) {
       const existing = existingMap.get(file.path);
       const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
 
-      if (existing && existing.fileMtime === fileMtime && existing.fileSize === file.size) {
-        skippedCount++;
+      if (
+        existing &&
+        existing.fileMtime === fileMtime &&
+        existing.fileSize === file.size
+      ) {
+        if (job.data.forceRegenerate) {
+          regenerateOnlyFiles.push({ id: existing.id, file });
+        } else {
+          skippedCount++;
+        }
         hashingProcessed++;
         continue;
       }
@@ -161,7 +174,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     }
 
     job.log(
-      `跳过 ${skippedCount} (未变更), 新增 ${newFiles.length}, 更新 ${updatedFiles.length}, 错误 ${errorCount}`,
+      `跳过 ${skippedCount} (未变更), 新增 ${newFiles.length}, 更新 ${updatedFiles.length}, 重建缩略图 ${regenerateOnlyFiles.length}, 错误 ${errorCount}`,
     );
 
     const thumbnailDir = path.join(config.storageRoot, "thumbnails");
@@ -171,7 +184,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
 
     // 5a. 处理新文件
     let processingCount = 0;
-    const totalProcessing = newFiles.length + updatedFiles.length;
+    const totalProcessing = newFiles.length + updatedFiles.length + regenerateOnlyFiles.length;
 
     for (const { hash, file } of newFiles) {
       try {
@@ -225,19 +238,63 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       try {
         const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
 
-        await db
-          .update(schema.photos)
-          .set({
-            fileHash: hash,
-            fileSize: file.size,
-            fileMtime,
-          })
-          .where(eq(schema.photos.id, id));
+        let thumbnailPath: string | null | undefined;
+        if (job.data.forceRegenerate) {
+          try {
+            thumbnailPath = await generateThumbnail(file.path, thumbnailDir, id);
+          } catch (thumbErr) {
+            job.log(
+              `缩略图重新生成失败 (${file.name}): ${thumbErr instanceof Error ? thumbErr.message : String(thumbErr)}`,
+            );
+          }
+        }
+
+        const updateValues: Record<string, unknown> = {
+          fileHash: hash,
+          fileSize: file.size,
+          fileMtime,
+        };
+        if (thumbnailPath != null) {
+          updateValues.thumbnailPath = thumbnailPath;
+        }
+
+        await db.update(schema.photos).set(updateValues).where(eq(schema.photos.id, id));
 
         updatedCount++;
       } catch (err) {
         errorCount++;
         job.log(`更新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      processingCount++;
+      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
+        await pushProgress("processing");
+      }
+    }
+
+    // 5c. 强制重建缩略图（未变更文件跳过哈希）
+    for (const { id, file } of regenerateOnlyFiles) {
+      try {
+        const thumbnailPath = await generateThumbnail(file.path, thumbnailDir, id);
+        const metadata = await adapter.getMetadata(file.path);
+        const updateValues: Record<string, unknown> = {};
+        if (thumbnailPath) updateValues.thumbnailPath = thumbnailPath;
+        if (metadata.width != null && metadata.height != null) {
+          updateValues.width = metadata.width;
+          updateValues.height = metadata.height;
+        }
+        if (Object.keys(updateValues).length > 0) {
+          await db
+            .update(schema.photos)
+            .set(updateValues)
+            .where(eq(schema.photos.id, id));
+        }
+        regeneratedCount++;
+      } catch (err) {
+        errorCount++;
+        job.log(
+          `缩略图重建失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
 
       processingCount++;
@@ -272,7 +329,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       .where(eq(schema.storageSources.id, storageSourceId));
 
     job.log(
-      `扫描完成: 扫描 ${scannedCount}, 跳过 ${skippedCount}, 新增 ${newCount}, 更新 ${updatedCount}, 错误 ${errorCount}`,
+      `扫描完成: 扫描 ${scannedCount}, 跳过 ${skippedCount}, 新增 ${newCount}, 更新 ${updatedCount}, 重建缩略图 ${regeneratedCount}, 错误 ${errorCount}`,
     );
   } catch (err) {
     // 失败时也更新 scan_log

@@ -99,7 +99,7 @@ export default async function AdminDashboardPage() {
                     </p>
                     <div className="pt-2">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/admin/storage-sources/${source.id}`}>查看详情</Link>
+                        <Link href={`/admin/photos?storageSourceId=${source.id}`}>查看详情</Link>
                       </Button>
                     </div>
                   </CardContent>
