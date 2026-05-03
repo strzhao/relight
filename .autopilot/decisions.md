@@ -45,3 +45,16 @@
 - 混合方案（侧边栏轮询 + SSE 详情面板）：最终选择此方案——侧边栏轻量轮询减少连接数，详情面板 SSE 推送保证实时性。断开时 EventSource 自动重连，无需额外恢复逻辑。
 
 **Trade-offs**: SSE 在多个浏览器 tab 打开时会创建多条连接，当前无连接数限制。后续可添加 `maxConnections` 限制或切换为单条 broadcast SSE 通道。Hono `streamSSE()` 是 HTTP 长连接，某些反向代理可能需要配置禁用缓冲。
+
+### [2026-05-03] AI 分析不再由扫描自动触发，改为外部显式控制
+<!-- tags: ai, analysis, scan, trigger, design -->
+
+**Background**: 当前 AI 视觉模型（qwen3.6-35b）分析效果尚不理想，自动触发会产生大量低质量结果并浪费推理资源。用户需要先优化提示词和模型参数，再批量重跑分析。
+
+**Choice**: 移除 scan-storage worker 中的 `analyzeQueue.add()` 调用，AI 分析改由外部显式触发（后续单独设计触发入口）。`ScanJobData.skipAnalysis` 字段保留但不再生效。
+
+**Alternatives rejected**:
+- 保留 `skipAnalysis` 标志控制：默认跳过分析需要每次扫描都传参，且 API 设计上"扫描"与"分析"耦合不清晰
+- 环境变量开关：只能在部署级别控制，粒度太粗
+
+**Trade-offs**: 完全移除自动触发意味着每次新增照片后需手动触发分析。在分析质量稳定之前这是合理的，但后续需要配套设计批量触发/定时触发机制。

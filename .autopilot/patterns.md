@@ -181,3 +181,12 @@ eventSource.addEventListener("snapshot", (e) => {
   setConnected(true);
 });
 ```
+
+### [2026-05-03] EventSource 自定义 SSE 事件与原生事件命名冲突需分离处理
+<!-- tags: sse, eventsource, frontend, error-handling, hooks -->
+
+**Scenario**: 后端通过 SSE `event: "error"` 推送业务错误（如 Redis 连接失败），前端 `addEventListener("error", handler)` 同时捕获自定义 SSE 事件和原生 EventSource 连接错误，导致业务错误被吞没或连接状态误判。
+
+**Lesson**: 在 `addEventListener("error", handler)` 中通过 `try { JSON.parse(event.data) }` 判断是否为业务自定义事件——解析成功则为业务错误，解析失败则为原生连接错误。原生连接错误改用 `es.onerror` 处理（仅含 readyState，无 data 字段），两者物理分离避免歧义。
+
+**Evidence**: `apps/web/hooks/use-queue-sse.ts:55-73` — 修改前 `addEventListener("error")` 只检查 `EventSource.CLOSED`，后端自定义 `event: "error"` 的 `event.data` 被忽略，导致 snapshot 永久为 null（加载骨架屏）。修改后自定义事件解析 `data.error` 并展示给用户，原生错误用 `onerror` 独立处理。
