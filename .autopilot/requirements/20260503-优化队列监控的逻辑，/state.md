@@ -1,8 +1,8 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
-iteration: 1
+iteration: 2
 max_iterations: 30
 max_retries: 3
 retry_count: 0
@@ -11,7 +11,7 @@ plan_mode: "deep"
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/monitor/.autopilot/requirements/20260503-优化队列监控的逻辑，"
 session_id: 5ad9c1f7-7890-4f86-9fff-fd47e568f85c
 started_at: "2026-05-02T17:43:40Z"
@@ -238,3 +238,6 @@ QueuesLayout (layout.tsx) — "use client"
 - [2026-05-02T18:35:00Z] 红队验收测试完成：4 个测试文件、41 个测试用例全部通过
 - [2026-05-02T18:40:00Z] 合流完成：修复 mock getState + vitest alias + 异步渲染 + total count 测试，全部 159 测试通过
 - [2026-05-02T19:00:00Z] QA 完成 — Wave 1 全部 ✅/⚠️，Wave 1.5 8/8 场景通过，Wave 2a 8/8 设计符合，Wave 2b 5 非阻断问题 → gate: review-accept
+- [2026-05-03T02:36:00Z] 合并提交 d8db98a feat(monitor): 新增 /admin/queues 队列监控页面，支持 SSE 实时推送与作业详情查看（23 文件，+2026/-17 行）
+- [2026-05-03T02:38:00Z] 知识提取完成 — patterns: Hono SSE + BullMQ 模式，decisions: SSE vs WebSocket 技术选型
+- [2026-05-03T02:38:00Z] phase → done，需求关闭

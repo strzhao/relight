@@ -11,3 +11,4 @@
 - [2026-05-01] Biome 1.9.4 使用 organizeImports 顶层键，非 assist | tags: biome, linting, config | → patterns.md
 - [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数 | tags: bullmq, queue, worker, retry | → patterns.md
 - [2026-05-03] Hono streamSSE() 实现 BullMQ 队列实时监控推送 | tags: hono, sse, bullmq, monitoring, streaming | → patterns.md
+- [2026-05-03] 健康端点系统指标采集采用嵌套 try-catch 降级 | tags: health, api, error-handling, nodejs, filesystem | → patterns.md

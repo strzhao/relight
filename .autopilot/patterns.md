@@ -27,6 +27,37 @@
 
 **Evidence**: `biome check .` → `Found an unknown key assist. Known keys: $schema, extends, vcs, files, formatter, organizeImports, linter...`；修改后 lint 通过。
 
+### [2026-05-03] 健康端点系统指标采集采用嵌套 try-catch 降级
+<!-- tags: health, api, error-handling, nodejs, filesystem -->
+
+**Scenario**: 扩展 `/api/admin/health` 端点增加系统资源（CPU/内存/进程）和磁盘信息时，需要保证系统指标采集失败不影响现有组件健康检查。
+
+**Lesson**: 系统指标采集使用嵌套 try-catch 隔离：外层捕获 DB 文件不存在（`disk: null`），内层捕获 `fs.statfsSync` 不可用（`freeSpaceBytes: null`）。系统采集代码放在组件检查逻辑**之后**，确保即使系统采集全部失败，组件状态仍正常返回。
+
+**Key details**:
+- `fs.statfsSync` 使用 `bavail`（非特权用户可用块数）而非 `bfree`（总空闲块数），因为 `bavail` 排除了保留块，更准确反映用户实际可用空间
+- 挂载点参数用 `path.resolve(path.dirname(config.databasePath))` 解析相对路径
+- `cpus()` 返回空数组时用 `?.model ?? "unknown"` 降级
+- `loadavg()` 在 Windows 返回 `[0,0,0]`，前端用 `(value ?? 0).toFixed(1)` 安全处理
+
+**Evidence**:
+```typescript
+// 后端：嵌套 try-catch 降级
+let disk = null;
+try {
+  const dbPath = path.resolve(config.databasePath);
+  const dbStats = fs.statSync(dbPath);
+  const dbFile = { path: dbPath, sizeBytes: dbStats.size };
+  let freeSpaceBytes = null, totalSpaceBytes = null;
+  try {
+    const statfs = fs.statfsSync(path.resolve(path.dirname(config.databasePath)));
+    totalSpaceBytes = statfs.blocks * statfs.bsize;
+    freeSpaceBytes = statfs.bavail * statfs.bsize;
+  } catch { /* statfs 不可用，保持 null */ }
+  disk = { dbFile, freeSpaceBytes, totalSpaceBytes };
+} catch { /* DB 文件缺失，disk 为 null */ }
+```
+
 ### [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数
 <!-- tags: bullmq, queue, worker, retry -->
 
