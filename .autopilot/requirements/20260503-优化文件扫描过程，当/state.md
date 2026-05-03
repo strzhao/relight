@@ -1,7 +1,8 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
+knowledge_extracted: "true"
 iteration: 2
 max_iterations: 30
 max_retries: 3
@@ -11,7 +12,6 @@ plan_mode: "deep"
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260503-优化文件扫描过程，当"
 session_id: 04f63380-ddd4-4f7d-8ef0-9b0d3a2d31f2
 started_at: "2026-05-03T01:41:41Z"
@@ -53,6 +53,9 @@ SSE 实时推送扫描进度 + 客户端 3s 轮询更新照片列表。
 - [x] 验证: typecheck（无新错误）+ lint（无新错误）+ SSE 端点可用
 
 ## 变更日志
+- [2026-05-03T02:43:00Z] autopilot 完成
+- [2026-05-03T02:42:00Z] 知识提取完成：扫描进度 SSE 双数据源模式 + 409 并发守护模式
+- [2026-05-03T02:40:00Z] 代码提交: bc4dd7b feat(scan): SSE 实时进度 + Dashboard 优化
 - [2026-05-03T02:37:36Z] 用户批准验收，进入合并阶段
 - [2026-05-03T01:41:41Z] autopilot 初始化
 - [2026-05-03T01:55:00Z] Deep Design Q&A 完成，方案 A 选定
