@@ -92,7 +92,6 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
 - `e2e-verify.ts` — 端到端验证 AI 分析全链路（单张照片）
 - `repair-heic.ts` — 修复已有 HEIC 照片的缩略图（thumbnailPath IS NULL 且扩展名为 heic/heif）
-- `repair-thumbnails.ts` — 通用缩略图重建工具（尺寸升级后使用），支持 `--limit N` 分批处理
 
 ### 前端架构 (apps/web)
 
