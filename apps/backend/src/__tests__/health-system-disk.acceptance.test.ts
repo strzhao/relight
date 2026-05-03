@@ -434,9 +434,7 @@ describe("健康检查扩展 — 系统资源与磁盘（设计文档验收）",
     it("当 disk 非 null 时，freeSpaceBytes 应为 number 或 null", () => {
       const { disk } = body.data;
       if (disk !== null) {
-        expect(
-          disk.freeSpaceBytes === null || typeof disk.freeSpaceBytes === "number",
-        ).toBe(true);
+        expect(disk.freeSpaceBytes === null || typeof disk.freeSpaceBytes === "number").toBe(true);
       }
     });
 
@@ -450,19 +448,15 @@ describe("健康检查扩展 — 系统资源与磁盘（设计文档验收）",
     it("当 disk 非 null 时，totalSpaceBytes 应为 number 或 null", () => {
       const { disk } = body.data;
       if (disk !== null) {
-        expect(
-          disk.totalSpaceBytes === null || typeof disk.totalSpaceBytes === "number",
-        ).toBe(true);
+        expect(disk.totalSpaceBytes === null || typeof disk.totalSpaceBytes === "number").toBe(
+          true,
+        );
       }
     });
 
     it("当 disk 非 null 且 freeSpaceBytes 和 totalSpaceBytes 都非 null 时，freeSpaceBytes ≤ totalSpaceBytes", () => {
       const { disk } = body.data;
-      if (
-        disk !== null &&
-        disk.freeSpaceBytes !== null &&
-        disk.totalSpaceBytes !== null
-      ) {
+      if (disk !== null && disk.freeSpaceBytes !== null && disk.totalSpaceBytes !== null) {
         expect(disk.freeSpaceBytes).toBeLessThanOrEqual(disk.totalSpaceBytes);
       }
     });
@@ -489,7 +483,7 @@ describe("健康检查扩展 — 系统资源与磁盘（设计文档验收）",
       const redisComponent = body.data.components.find((c) => c.component === "redis");
       expect(redisComponent).toBeDefined();
       const validStatuses: ComponentStatus[] = ["healthy", "degraded", "unhealthy"];
-      expect(validStatuses).toContain(redisComponent!.status);
+      expect(validStatuses).toContain(redisComponent?.status);
     });
 
     it("即使 ai 组件为 degraded，API 仍应返回 200", async () => {
@@ -498,7 +492,7 @@ describe("健康检查扩展 — 系统资源与磁盘（设计文档验收）",
       const aiComponent = body.data.components.find((c) => c.component === "ai");
       expect(aiComponent).toBeDefined();
       const validStatuses: ComponentStatus[] = ["healthy", "degraded", "unhealthy"];
-      expect(validStatuses).toContain(aiComponent!.status);
+      expect(validStatuses).toContain(aiComponent?.status);
     });
 
     it("连续 3 次请求均应返回 200 且结构一致（不因拒动而改变）", async () => {

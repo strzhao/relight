@@ -77,7 +77,7 @@ let app: Hono;
 let sqlite: Database.Database;
 let db: BetterSQLite3Database<typeof realSchema>;
 let storageId: string;
-let photoIds: string[] = [];
+const photoIds: string[] = [];
 const now = "2026-05-02T10:00:00.000Z";
 const oneHourAgo = "2026-05-02T09:00:00.000Z";
 const twoHoursAgo = "2026-05-02T08:00:00.000Z";
@@ -121,11 +121,36 @@ beforeAll(async () => {
     { filePath: "/nas-photos/landscape_01.jpg", fileHash: "h001", score: 9, time: now },
     { filePath: "/nas-photos/portrait_01.jpg", fileHash: "h002", score: 8, time: oneHourAgo },
     { filePath: "/nas-photos/sunset_01.jpg", fileHash: "h003", score: 7, time: twoHoursAgo },
-    { filePath: "/nas-photos/macro_01.jpg", fileHash: "h004", score: 6, time: "2026-05-02T07:00:00.000Z" },
-    { filePath: "/nas-photos/street_01.jpg", fileHash: "h005", score: 5, time: "2026-05-02T06:00:00.000Z" },
-    { filePath: "/nas-photos/night_01.jpg", fileHash: "h006", score: 8, time: "2026-05-02T05:00:00.000Z" },
-    { filePath: "/nas-photos/travel_01.jpg", fileHash: "h007", score: 9, time: "2026-05-02T04:00:00.000Z" },
-    { filePath: "/nas-photos/food_01.jpg", fileHash: "h008", score: 4, time: "2026-05-02T03:00:00.000Z" },
+    {
+      filePath: "/nas-photos/macro_01.jpg",
+      fileHash: "h004",
+      score: 6,
+      time: "2026-05-02T07:00:00.000Z",
+    },
+    {
+      filePath: "/nas-photos/street_01.jpg",
+      fileHash: "h005",
+      score: 5,
+      time: "2026-05-02T06:00:00.000Z",
+    },
+    {
+      filePath: "/nas-photos/night_01.jpg",
+      fileHash: "h006",
+      score: 8,
+      time: "2026-05-02T05:00:00.000Z",
+    },
+    {
+      filePath: "/nas-photos/travel_01.jpg",
+      fileHash: "h007",
+      score: 9,
+      time: "2026-05-02T04:00:00.000Z",
+    },
+    {
+      filePath: "/nas-photos/food_01.jpg",
+      fileHash: "h008",
+      score: 4,
+      time: "2026-05-02T03:00:00.000Z",
+    },
   ];
 
   for (const p of photosData) {
@@ -169,7 +194,7 @@ beforeAll(async () => {
     if (!p) continue;
     await db.insert(realSchema.photoAnalyses).values({
       id: analysisId,
-      photoId: photoIds[i]!,
+      photoId: photoIds[i] ?? "",
       aiModel: "qwen3.6-35b",
       rawResponse: "{}",
       narrative: `这是第 ${i + 1} 张照片的叙事描述`,
@@ -187,8 +212,7 @@ beforeAll(async () => {
   // 7. 动态导入 admin router 并创建测试 App
   const adminMod = await import("../routes/admin");
   const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter ||
-    (adminMod as Record<string, Hono>).default;
+    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
   app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -245,12 +269,12 @@ describe("Admin API 数据一致性 — 验收测试", () => {
       // 第一个存储源有 9 张照片
       const nasSource = stats.storageSources.find((s) => s.name === "NAS 照片库");
       expect(nasSource).toBeDefined();
-      expect(nasSource!.photoCount).toBe(9);
+      expect(nasSource?.photoCount).toBe(9);
 
       // 第二个存储源有 0 张照片
       const backupSource = stats.storageSources.find((s) => s.name === "备用存储");
       expect(backupSource).toBeDefined();
-      expect(backupSource!.photoCount).toBe(0);
+      expect(backupSource?.photoCount).toBe(0);
     });
 
     it("recentAnalyses 应最多返回 10 条", () => {
@@ -260,7 +284,7 @@ describe("Admin API 数据一致性 — 验收测试", () => {
     it("recentAnalyses 应按 processedAt 降序排列（最新的在前）", () => {
       const times = stats.recentAnalyses.map((a) => new Date(a.processedAt).getTime());
       for (let i = 1; i < times.length; i++) {
-        expect(times[i - 1]).toBeGreaterThanOrEqual(times[i]!);
+        expect(times[i - 1]).toBeGreaterThanOrEqual(times[i] ?? 0);
       }
     });
 
@@ -291,7 +315,7 @@ describe("Admin API 数据一致性 — 验收测试", () => {
       const parsed = body as PaginatedPhotosResponse;
       const scores = parsed.data.map((p) => p.aestheticScore);
       for (let i = 1; i < scores.length; i++) {
-        expect(scores[i - 1]).toBeGreaterThanOrEqual(scores[i]!);
+        expect(scores[i - 1]).toBeGreaterThanOrEqual(scores[i] ?? 0);
       }
     });
 
@@ -300,7 +324,7 @@ describe("Admin API 数据一致性 — 验收测试", () => {
       const parsed = body as PaginatedPhotosResponse;
       const times = parsed.data.map((p) => new Date(p.processedAt).getTime());
       for (let i = 1; i < times.length; i++) {
-        expect(times[i - 1]).toBeGreaterThanOrEqual(times[i]!);
+        expect(times[i - 1]).toBeGreaterThanOrEqual(times[i] ?? 0);
       }
     });
 
@@ -380,8 +404,8 @@ describe("Admin API 数据一致性 — 验收测试", () => {
       const stats = (body as { success: boolean; data: AdminStatsData }).data;
 
       for (const analysis of stats.recentAnalyses) {
-        const photos = await db!
-          .select({ filePath: realSchema.photos.filePath })
+        const photos = await db
+          ?.select({ filePath: realSchema.photos.filePath })
           .from(realSchema.photos)
           .where(eq(realSchema.photos.filePath, analysis.filePath))
           .limit(1);
@@ -494,6 +518,7 @@ function createTables(sqlite: Database.Database): void {
     CREATE TABLE IF NOT EXISTS scan_logs (
       id TEXT PRIMARY KEY,
       storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
+      job_id TEXT,
       scanned_count INTEGER NOT NULL DEFAULT 0,
       new_count INTEGER NOT NULL DEFAULT 0,
       error_count INTEGER NOT NULL DEFAULT 0,

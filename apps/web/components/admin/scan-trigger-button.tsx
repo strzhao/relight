@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Play } from "lucide-react";
+import { useState } from "react";
 
 interface ScanTriggerButtonProps {
   storageSourceId?: string;
@@ -33,12 +33,7 @@ export function ScanTriggerButton({ storageSourceId }: ScanTriggerButtonProps) {
   }
 
   return (
-    <Button
-      variant="default"
-      size="sm"
-      onClick={handleScan}
-      disabled={loading}
-    >
+    <Button variant="default" size="sm" onClick={handleScan} disabled={loading}>
       <Play className="size-4" />
       {loading ? "提交中..." : "触发扫描"}
     </Button>

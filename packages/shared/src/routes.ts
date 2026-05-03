@@ -17,6 +17,7 @@ export const API_ROUTES = {
   scan: {
     trigger: "/api/scan",
     status: (id: string) => `/api/scan/${id}`,
+    events: (id: string) => `/api/scan/${id}/events`,
   },
   settings: {
     list: "/api/settings",

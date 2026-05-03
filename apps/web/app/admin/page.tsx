@@ -1,7 +1,7 @@
 import { RefreshButton } from "@/components/admin/refresh-button";
-import { ScanTriggerButton } from "@/components/admin/scan-trigger-button";
 import { StatsCard } from "@/components/admin/stats-card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminStats } from "@/lib/admin-data";
@@ -97,14 +97,10 @@ export default async function AdminDashboardPage() {
                         ? new Date(source.lastScanAt).toLocaleString("zh-CN")
                         : "从未"}
                     </p>
-                    <div className="flex items-center justify-between pt-2">
-                      <ScanTriggerButton storageSourceId={source.id} />
-                      <Link
-                        href={`/admin/storage-sources/${source.id}`}
-                        className="text-sm text-primary hover:underline"
-                      >
-                        查看详情
-                      </Link>
+                    <div className="pt-2">
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/admin/storage-sources/${source.id}`}>查看详情</Link>
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -173,30 +169,36 @@ export default async function AdminDashboardPage() {
           /* 加载骨架 */
           <div className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={`skeleton-stat-${i}`}>
-                  <CardHeader className="pb-2">
-                    <Skeleton className="h-4 w-20" />
-                  </CardHeader>
-                  <CardContent>
-                    <Skeleton className="h-8 w-16" />
-                    <Skeleton className="mt-2 h-3 w-32" />
-                  </CardContent>
-                </Card>
-              ))}
+              {Array.from({ length: 4 }).map(() => {
+                const id = crypto.randomUUID();
+                return (
+                  <Card key={id}>
+                    <CardHeader className="pb-2">
+                      <Skeleton className="h-4 w-20" />
+                    </CardHeader>
+                    <CardContent>
+                      <Skeleton className="h-8 w-16" />
+                      <Skeleton className="mt-2 h-3 w-32" />
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Card key={`skeleton-source-${i}`}>
-                  <CardHeader className="pb-2">
-                    <Skeleton className="h-4 w-24" />
-                  </CardHeader>
-                  <CardContent>
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="mt-2 h-4 w-3/4" />
-                  </CardContent>
-                </Card>
-              ))}
+              {Array.from({ length: 3 }).map(() => {
+                const id = crypto.randomUUID();
+                return (
+                  <Card key={id}>
+                    <CardHeader className="pb-2">
+                      <Skeleton className="h-4 w-24" />
+                    </CardHeader>
+                    <CardContent>
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="mt-2 h-4 w-3/4" />
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
             <Skeleton className="h-48 w-full rounded-lg" />
           </div>

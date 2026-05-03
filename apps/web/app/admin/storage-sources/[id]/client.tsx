@@ -1,28 +1,19 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { AnalyzeTriggerButton } from "@/components/admin/analyze-trigger-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { AnalyzeTriggerButton } from "@/components/admin/analyze-trigger-button";
-
-interface PhotoRow {
-  id: string;
-  filePath: string;
-  width: number;
-  height: number;
-  fileSize: number;
-  createdAt: string;
-  takenAt: string | null;
-  analysesCount: number;
-}
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import type { PhotoRow } from "./types";
 
 interface Props {
   photos: PhotoRow[];
   storageSourceId: string;
   page: number;
   totalPages: number;
+  isScanning?: boolean;
 }
 
 export function StorageSourcePhotosTable({
@@ -30,6 +21,7 @@ export function StorageSourcePhotosTable({
   storageSourceId,
   page,
   totalPages,
+  isScanning,
 }: Props) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -66,8 +58,12 @@ export function StorageSourcePhotosTable({
               第 {page} 页，共 {totalPages} 页
             </span>
             {selectedIds.size > 0 && (
-              <span className="text-sm text-muted-foreground">
-                已选 {selectedIds.size} 张
+              <span className="text-sm text-muted-foreground">已选 {selectedIds.size} 张</span>
+            )}
+            {isScanning && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="size-2 rounded-full bg-green-500 animate-pulse" />
+                自动刷新中
               </span>
             )}
           </div>
@@ -90,10 +86,7 @@ export function StorageSourcePhotosTable({
 
         <div className="divide-y rounded-lg border">
           {photos.map((photo) => (
-            <div
-              key={photo.id}
-              className="flex items-center gap-4 px-4 py-3 hover:bg-muted/30"
-            >
+            <div key={photo.id} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/30">
               <input
                 type="checkbox"
                 checked={selectedIds.has(photo.id)}
@@ -107,9 +100,7 @@ export function StorageSourcePhotosTable({
                     {photo.width}x{photo.height}
                   </span>
                   <span>{(photo.fileSize / 1024 / 1024).toFixed(1)} MB</span>
-                  <span>
-                    {new Date(photo.createdAt).toLocaleDateString("zh-CN")}
-                  </span>
+                  <span>{new Date(photo.createdAt).toLocaleDateString("zh-CN")}</span>
                 </div>
               </div>
               {photo.analysesCount > 0 ? (

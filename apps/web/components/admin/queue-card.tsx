@@ -1,6 +1,6 @@
-import type { QueueStatus } from "@relight/shared";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import type { QueueStatus } from "@relight/shared";
 
 interface QueueCardProps {
   queue: QueueStatus;
@@ -22,8 +22,7 @@ export function QueueCard({ queue }: QueueCardProps) {
     (queue.counts.failed || 0) +
     (queue.counts.delayed || 0);
 
-  const progressPercent =
-    total > 0 ? Math.round(((queue.counts.completed || 0) / total) * 100) : 0;
+  const progressPercent = total > 0 ? Math.round(((queue.counts.completed || 0) / total) * 100) : 0;
 
   return (
     <Card>
@@ -50,11 +49,7 @@ export function QueueCard({ queue }: QueueCardProps) {
             if (value === 0) return null;
             const status = statusLabels[key];
             return (
-              <Badge
-                key={key}
-                variant="secondary"
-                className={status?.className}
-              >
+              <Badge key={key} variant="secondary" className={status?.className}>
                 {status?.label ?? key}: {value}
               </Badge>
             );

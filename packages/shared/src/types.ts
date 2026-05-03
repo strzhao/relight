@@ -304,3 +304,37 @@ export interface AnalyzeTriggerResponse {
   skippedCount: number;
   jobIds: string[];
 }
+
+/** 扫描进度（BullMQ job.progress 结构） */
+export interface ScanProgress {
+  phase: "listing" | "hashing" | "processing" | "completed";
+  totalFiles: number;
+  processed: number;
+  newCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  currentFile?: string;
+}
+
+/** SSE 推送的扫描进度事件 */
+export interface ScanProgressEvent {
+  scanLogId: string;
+  status: "running" | "completed" | "failed" | "stale";
+  phase: ScanProgress["phase"] | null;
+  totalFiles: number;
+  processed: number;
+  newCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** 扫描触发响应 */
+export interface ScanTriggerResponse {
+  jobId: string | undefined;
+  scanLogId: string;
+  storageSourceId: string;
+}

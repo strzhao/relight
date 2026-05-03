@@ -121,6 +121,7 @@ export const scanLogs = sqliteTable("scan_logs", {
   storageSourceId: text("storage_source_id")
     .notNull()
     .references(() => storageSources.id),
+  jobId: text("job_id"),
   scannedCount: integer("scanned_count").notNull().default(0),
   newCount: integer("new_count").notNull().default(0),
   errorCount: integer("error_count").notNull().default(0),

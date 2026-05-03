@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
+import { useState } from "react";
 
 interface AnalyzeTriggerButtonProps {
   photoIds: string[];

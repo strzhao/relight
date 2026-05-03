@@ -178,9 +178,7 @@ export const photosRouter = new Hono()
       return c.json({ success: false, error: "所有照片都不存在" }, 400);
     }
 
-    const jobs = validIds.map((photoId) =>
-      analyzeQueue.add(`analyze:${photoId}`, { photoId }),
-    );
+    const jobs = validIds.map((photoId) => analyzeQueue.add(`analyze:${photoId}`, { photoId }));
     await Promise.all(jobs);
 
     return c.json({

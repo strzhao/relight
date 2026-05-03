@@ -1,14 +1,9 @@
 "use client";
 
+import { cn } from "@/lib/utils";
+import { Activity, Heart, Image, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Activity,
-  Heart,
-  Image,
-  LayoutDashboard,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/admin", label: "仪表盘", icon: LayoutDashboard },
@@ -28,9 +23,7 @@ export function AdminSidebar() {
       <nav className="flex flex-col gap-1 px-3">
         {navItems.map((item) => {
           const isActive =
-            item.href === "/admin"
-              ? pathname === "/admin"
-              : pathname.startsWith(item.href);
+            item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
           const Icon = item.icon;
 
           return (

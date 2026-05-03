@@ -71,8 +71,7 @@ let app: Hono;
 beforeAll(async () => {
   const adminMod = await import("../routes/admin");
   const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter ||
-    (adminMod as Record<string, Hono>).default;
+    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
   app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -300,11 +299,14 @@ describe("Admin API 错误处理 — 验收测试", () => {
       "/api/admin/photos",
     ];
 
-    it.each(adminPaths)("GET %s 异常时 success 应为 false 或 true（非 undefined）", async (path) => {
-      const { body } = await get(path);
-      const parsed = body as ErrorResponse;
-      expect(typeof parsed.success).toBe("boolean");
-    });
+    it.each(adminPaths)(
+      "GET %s 异常时 success 应为 false 或 true（非 undefined）",
+      async (path) => {
+        const { body } = await get(path);
+        const parsed = body as ErrorResponse;
+        expect(typeof parsed.success).toBe("boolean");
+      },
+    );
 
     it("所有端点返回的错误响应应有统一结构", async () => {
       for (const path of adminPaths) {

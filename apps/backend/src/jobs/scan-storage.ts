@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import type { ScanProgress } from "@relight/shared";
 import type { Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
@@ -10,6 +11,7 @@ import { analyzeQueue } from "./queues";
 
 interface ScanJobData {
   storageSourceId: string;
+  scanLogId?: string;
   skipAnalysis?: boolean;
 }
 
@@ -21,6 +23,9 @@ interface ExistingPhotoCache {
   fileSize: number;
 }
 
+/** 每 N 个文件批量 updateProgress */
+const PROGRESS_BATCH_SIZE = 10;
+
 /**
  * scan-storage Worker
  *
@@ -31,9 +36,10 @@ interface ExistingPhotoCache {
  * 4. 仅对新文件/修改文件执行 SHA256 + 缩略图生成
  * 5. INSERT 新记录 + UPDATE 变更记录
  * 6. 入队 analyze-photo 任务（skipAnalysis 时跳过）
+ * 7. UPDATE scan_log（而非 INSERT）
  */
 export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
-  const { storageSourceId } = job.data;
+  const { storageSourceId, scanLogId } = job.data;
   job.log(`开始扫描存储源: ${storageSourceId}`);
 
   const scanStartedAt = new Date().toISOString();
@@ -42,6 +48,25 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
   let skippedCount = 0;
   let updatedCount = 0;
   let errorCount = 0;
+
+  // 辅助函数：推送进度到 BullMQ + 更新 scan_log
+  const pushProgress = async (phase: ScanProgress["phase"], extra?: Partial<ScanProgress>) => {
+    const progress: ScanProgress = {
+      phase,
+      totalFiles: scannedCount,
+      processed: skippedCount + newCount + updatedCount + errorCount,
+      newCount,
+      updatedCount,
+      skippedCount,
+      errorCount,
+      ...extra,
+    };
+    try {
+      await job.updateProgress(progress as unknown as number | object);
+    } catch {
+      // updateProgress 失败不影响扫描流程
+    }
+  };
 
   try {
     // 1. 查找存储源
@@ -56,6 +81,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     }
 
     job.log(`存储源: ${source.name} (${source.rootPath})`);
+    await pushProgress("listing");
 
     // 2. 查询已有照片，构建 filePath → ExistingPhoto 缓存
     const existingPhotos = await db
@@ -71,7 +97,6 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
 
     const existingMap = new Map<string, ExistingPhotoCache>();
     for (const p of existingPhotos) {
-      // 同一 filePath 可能因历史原因有多条记录，保留最新的
       existingMap.set(p.filePath, p);
     }
 
@@ -82,6 +107,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     const files = await adapter.listFiles(source.rootPath);
     scannedCount = files.length;
     job.log(`找到 ${scannedCount} 个媒体文件`);
+    await pushProgress("hashing");
 
     // 4. 处理每个文件：mtime+size 快速路径 vs 完整 hash
     const newFiles: Array<{ hash: string; file: (typeof files)[number] }> = [];
@@ -91,17 +117,17 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       file: (typeof files)[number];
     }> = [];
 
+    let hashingProcessed = 0;
     for (const file of files) {
       const existing = existingMap.get(file.path);
       const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
 
-      // 快速路径：同一文件路径 + mtime + size 匹配 → 跳过 SHA256
       if (existing && existing.fileMtime === fileMtime && existing.fileSize === file.size) {
         skippedCount++;
+        hashingProcessed++;
         continue;
       }
 
-      // 完整路径：读取文件内容，计算 SHA256
       try {
         const buffer = await adapter.getFileBuffer(file.path);
         const hash = createHash("sha256").update(buffer).digest("hex");
@@ -115,6 +141,13 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
         errorCount++;
         job.log(`读取文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
       }
+
+      hashingProcessed++;
+
+      // 每 N 个文件推送一次进度
+      if (hashingProcessed % PROGRESS_BATCH_SIZE === 0) {
+        await pushProgress("hashing");
+      }
     }
 
     job.log(
@@ -124,7 +157,12 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     const thumbnailDir = path.join(config.storageRoot, "thumbnails");
     const now = new Date().toISOString();
 
+    await pushProgress("processing");
+
     // 5a. 处理新文件
+    let processingCount = 0;
+    const totalProcessing = newFiles.length + updatedFiles.length;
+
     for (const { hash, file } of newFiles) {
       try {
         const photoId = crypto.randomUUID();
@@ -154,7 +192,6 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           createdAt: now,
         });
 
-        // 入队 analyze-photo 任务（skipAnalysis 时跳过）
         if (!job.data.skipAnalysis) {
           await analyzeQueue.add(`analyze:${photoId}`, { photoId });
         }
@@ -166,9 +203,14 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           `处理新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+
+      processingCount++;
+      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
+        await pushProgress("processing");
+      }
     }
 
-    // 5b. 处理变更文件（更新 hash + mtime + size，可选重新生成缩略图）
+    // 5b. 处理变更文件
     for (const { id, hash, file } of updatedFiles) {
       try {
         const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
@@ -187,20 +229,33 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
         errorCount++;
         job.log(`更新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
       }
+
+      processingCount++;
+      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
+        await pushProgress("processing");
+      }
     }
 
-    // 6. 写入扫描日志
-    await db.insert(schema.scanLogs).values({
-      id: crypto.randomUUID(),
-      storageSourceId,
-      scannedCount,
-      newCount,
-      errorCount,
-      startedAt: scanStartedAt,
-      finishedAt: new Date().toISOString(),
+    // 6. 最终进度推送
+    await pushProgress("completed", {
+      totalFiles: scannedCount,
+      processed: skippedCount + newCount + updatedCount + errorCount,
     });
 
-    // 7. 更新存储源最后扫描时间
+    // 7. UPDATE scan_log（向后兼容：仅当 scanLogId 存在时更新）
+    if (scanLogId) {
+      await db
+        .update(schema.scanLogs)
+        .set({
+          scannedCount,
+          newCount,
+          errorCount,
+          finishedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.scanLogs.id, scanLogId));
+    }
+
+    // 8. 更新存储源最后扫描时间
     await db
       .update(schema.storageSources)
       .set({ lastScanAt: new Date().toISOString() })
@@ -210,19 +265,21 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       `扫描完成: 扫描 ${scannedCount}, 跳过 ${skippedCount}, 新增 ${newCount}, 更新 ${updatedCount}, 错误 ${errorCount}`,
     );
   } catch (err) {
-    // 即使失败也写入日志
-    try {
-      await db.insert(schema.scanLogs).values({
-        id: crypto.randomUUID(),
-        storageSourceId,
-        scannedCount,
-        newCount,
-        errorCount: errorCount + 1,
-        startedAt: scanStartedAt,
-        finishedAt: new Date().toISOString(),
-      });
-    } catch {
-      // 日志写入失败，忽略
+    // 失败时也更新 scan_log
+    if (scanLogId) {
+      try {
+        await db
+          .update(schema.scanLogs)
+          .set({
+            scannedCount,
+            newCount,
+            errorCount: errorCount + 1,
+            finishedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.scanLogs.id, scanLogId));
+      } catch {
+        // 日志更新失败，忽略
+      }
     }
 
     throw err;

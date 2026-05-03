@@ -1,9 +1,4 @@
-import type {
-  AdminStats,
-  HealthDetails,
-  PhotoAnalysisItem,
-  QueuesStatus,
-} from "@relight/shared";
+import type { AdminStats, HealthDetails, PhotoAnalysisItem, QueuesStatus } from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";

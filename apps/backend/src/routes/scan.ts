@@ -1,13 +1,16 @@
 import { scanNowSchema } from "@relight/shared";
-import { eq } from "drizzle-orm";
+import type { ScanProgressEvent } from "@relight/shared";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { db, schema } from "../db";
 import { scanQueue } from "../jobs/queues";
+
+const STALE_THRESHOLD_MINUTES = 30;
 
 export const scanRouter = new Hono()
   .get("/", (c) => c.json({ success: true, data: [], total: 0 }))
   .post("/", async (c) => {
-    // 获取请求体（接收前端传来的 storageSourceId）
     let body: Record<string, unknown> = {};
     try {
       body = await c.req.json();
@@ -20,7 +23,6 @@ export const scanRouter = new Hono()
       return c.json({ success: false, error: parsed.error.message }, 400);
     }
 
-    // 如果没有指定 storageSourceId，取第一个启用的存储源
     let storageSourceId = parsed.data.storageSourceId;
     if (!storageSourceId) {
       const sources = await db
@@ -35,22 +37,63 @@ export const scanRouter = new Hono()
       storageSourceId = sources[0].id;
     }
 
-    // 入队扫描任务（传递 skipAnalysis）
+    // 并发守护：检查是否有 active scan（排除 stale 超过阈值日寸）
+    const staleCutoff = new Date(Date.now() - STALE_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+
+    const [activeScan] = await db
+      .select({ id: schema.scanLogs.id })
+      .from(schema.scanLogs)
+      .where(
+        and(
+          eq(schema.scanLogs.storageSourceId, storageSourceId),
+          isNull(schema.scanLogs.finishedAt),
+          gt(schema.scanLogs.startedAt, staleCutoff),
+        ),
+      )
+      .limit(1);
+
+    if (activeScan) {
+      return c.json(
+        {
+          success: false,
+          error: "该存储源已有正在进行的扫描任务",
+          data: { activeScanLogId: activeScan.id },
+        },
+        409,
+      );
+    }
+
+    // 创建 scan_log（事务）
+    const scanLogId = crypto.randomUUID();
+    const now = new Date().toISOString();
     const skipAnalysis = parsed.data.skipAnalysis ?? false;
+
     const job = await scanQueue.add(`scan:${storageSourceId}`, {
       storageSourceId,
+      scanLogId,
       skipAnalysis,
+    });
+
+    // 入队成功后写入 scan_log
+    await db.insert(schema.scanLogs).values({
+      id: scanLogId,
+      storageSourceId,
+      jobId: job.id ?? null,
+      scannedCount: 0,
+      newCount: 0,
+      errorCount: 0,
+      startedAt: now,
+      finishedAt: null,
     });
 
     return c.json({
       success: true,
-      data: { jobId: job.id, storageSourceId },
+      data: { jobId: job.id, scanLogId, storageSourceId },
     });
   })
   .get("/:id", async (c) => {
     const id = c.req.param("id");
 
-    // 查找扫描日志
     const logs = await db
       .select()
       .from(schema.scanLogs)
@@ -91,5 +134,142 @@ export const scanRouter = new Hono()
         startedAt: latestLog.startedAt,
         finishedAt: latestLog.finishedAt,
       },
+    });
+  })
+  /** GET /api/scan/:id/events — SSE 推送扫描进度 */
+  .get("/:id/events", async (c) => {
+    const scanLogId = c.req.param("id");
+
+    return streamSSE(c, async (stream) => {
+      const signal = c.req.raw.signal;
+      let completed = false;
+
+      const push = async () => {
+        if (completed) return;
+
+        try {
+          // 读取 scan_log
+          const [log] = await db
+            .select()
+            .from(schema.scanLogs)
+            .where(eq(schema.scanLogs.id, scanLogId))
+            .limit(1);
+
+          if (!log) {
+            await stream.writeSSE({
+              data: JSON.stringify({ error: "扫描记录不存在" }),
+              event: "error",
+            });
+            completed = true;
+            return;
+          }
+
+          // 检测 stale（超过阈值且未完成）
+          const staleCutoff = new Date(
+            Date.now() - STALE_THRESHOLD_MINUTES * 60 * 1000,
+          ).toISOString();
+
+          if (!log.finishedAt && log.startedAt < staleCutoff) {
+            const event: ScanProgressEvent = {
+              scanLogId,
+              status: "stale",
+              phase: null,
+              totalFiles: log.scannedCount,
+              processed: log.scannedCount,
+              newCount: log.newCount,
+              updatedCount: 0,
+              skippedCount: 0,
+              errorCount: log.errorCount,
+              startedAt: log.startedAt,
+              finishedAt: null,
+            };
+            await stream.writeSSE({
+              data: JSON.stringify(event),
+              event: "error",
+            });
+            completed = true;
+            return;
+          }
+
+          // 读取 BullMQ job progress（如果有 jobId）
+          let progress: Record<string, unknown> | null = null;
+          if (log.jobId) {
+            try {
+              const job = await scanQueue.getJob(log.jobId);
+              if (job) {
+                const rawProgress = await job.progress;
+                if (rawProgress && typeof rawProgress === "object") {
+                  progress = rawProgress as Record<string, unknown>;
+                }
+              }
+            } catch {
+              // BullMQ 不可用，降级使用 scan_log 数据
+            }
+          }
+
+          const isFinished = log.finishedAt != null;
+          const status: ScanProgressEvent["status"] = isFinished
+            ? log.newCount === 0 && log.errorCount > 0
+              ? "failed"
+              : "completed"
+            : "running";
+
+          const event: ScanProgressEvent = {
+            scanLogId,
+            status,
+            phase: (progress?.phase as ScanProgressEvent["phase"]) ?? null,
+            totalFiles: (progress?.totalFiles as number) ?? log.scannedCount,
+            processed: (progress?.processed as number) ?? log.scannedCount,
+            newCount: (progress?.newCount as number) ?? log.newCount,
+            updatedCount: (progress?.updatedCount as number) ?? 0,
+            skippedCount: (progress?.skippedCount as number) ?? 0,
+            errorCount: (progress?.errorCount as number) ?? log.errorCount,
+            startedAt: log.startedAt,
+            finishedAt: log.finishedAt,
+          };
+
+          await stream.writeSSE({
+            data: JSON.stringify(event),
+            event: "progress",
+          });
+
+          if (isFinished) {
+            completed = true;
+          }
+        } catch (err) {
+          await stream.writeSSE({
+            data: JSON.stringify({
+              error: err instanceof Error ? err.message : "推送进度失败",
+            }),
+            event: "error",
+          });
+        }
+      };
+
+      // 立即推送第一帧
+      await push();
+
+      // 每 1 秒推送（比队列 SSE 的 3s 更频繁）
+      const interval = setInterval(() => {
+        if (signal.aborted || completed) {
+          clearInterval(interval);
+          return;
+        }
+        push().catch(() => {
+          clearInterval(interval);
+        });
+      }, 1000);
+
+      const onAbort = () => {
+        clearInterval(interval);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+
+      // 保持连接活跃
+      while (!signal.aborted && !completed) {
+        await stream.sleep(1000);
+      }
+
+      clearInterval(interval);
     });
   });
