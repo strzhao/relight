@@ -25,3 +25,5 @@
 - [2026-05-04] BullMQ QueueEvents 事件驱动 SSE 推送（单 Job 追踪）| tags: sse, bullmq, queue-events, event-driven, hono | → patterns.md
 - [2026-05-04] SSE 连接资源管理：QueueEvents 单例 + 幂等清理 + try-catch 包裹 | tags: sse, resource-management, redis, cleanup, bullmq, hono | → patterns.md
 - [2026-05-03] @tanstack/react-virtual sentinel 必须放在虚拟容器内部而非作为虚拟项 | tags: react, virtual-scroll, tanstack-virtual, frontend | → patterns.md
+- [2026-05-04] BullMQ job.progress + Hono streamSSE 实现实时扫描进度推送 | tags: bullmq, sse, hono, realtime, monitoring | → patterns.md
+- [2026-05-04] BullMQ 5.76.4 队列名不允许包含冒号 `:` | tags: bullmq, queue, naming, migration | → patterns.md

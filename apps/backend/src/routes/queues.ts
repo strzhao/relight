@@ -3,6 +3,7 @@ import type {
   QueueJobDetail,
   QueueJobSummary,
   QueueSnapshot,
+  ScanProgress,
 } from "@relight/shared";
 import type { Queue } from "bullmq";
 import { Hono } from "hono";
@@ -49,7 +50,7 @@ function getConfig(name: string): QueueConfig | undefined {
   return queueConfigs[name];
 }
 
-/** 从 BullMQ getJobCounts 原始返回值提取类型化计数 */
+/** 从 BullMQ getJobCounts 返回值提取类型化计数 */
 async function getTypedCounts(queue: Queue): Promise<QueueJobCounts> {
   const raw = await queue.getJobCounts(
     "waiting",
@@ -79,7 +80,10 @@ function inferState(job: Record<string, unknown>): QueueJobSummary["state"] {
 }
 
 /** 将 BullMQ Job 转为 QueueJobSummary */
-function toJobSummary(job: Record<string, unknown>): QueueJobSummary {
+function toJobSummary(
+  job: Record<string, unknown>,
+  progress?: ScanProgress | number | null,
+): QueueJobSummary {
   return {
     id: String(job.id ?? ""),
     name: String(job.name ?? ""),
@@ -89,10 +93,11 @@ function toJobSummary(job: Record<string, unknown>): QueueJobSummary {
     finishedOn: job.finishedOn ? Number(job.finishedOn) : null,
     attemptsMade: Number(job.attemptsMade ?? 0),
     failedReason: job.failedReason ? String(job.failedReason) : null,
+    progress: progress && typeof progress === "object" ? (progress as ScanProgress) : null,
   };
 }
 
-/** 获取队列的快照（counts + recentJobs） */
+/** 获取队列快照（counts + recentJobs + aggregateProgress） */
 async function getQueueSnapshot(queue: Queue): Promise<QueueSnapshot> {
   const counts = await getTypedCounts(queue);
   const [waiting, active, completed, failed, delayed] = await Promise.all([
@@ -104,14 +109,49 @@ async function getQueueSnapshot(queue: Queue): Promise<QueueSnapshot> {
   ]);
 
   const allJobs = [...waiting, ...active, ...completed, ...failed, ...delayed]
-    .map((j) => toJobSummary(j as unknown as Record<string, unknown>))
+    .map((j) =>
+      toJobSummary(
+        j as unknown as Record<string, unknown>,
+        j.progress as ScanProgress | number | null,
+      ),
+    )
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 20);
+
+  // 计算 aggregateProgress：汇总所有 active 作业的 progress
+  let aggregateProgress: QueueSnapshot["aggregateProgress"] = null;
+  const activeWithProgress = active
+    .map((j) => j.progress as ScanProgress | number | string | undefined | null)
+    .filter((p): p is ScanProgress => typeof p === "object" && p !== null && "phase" in p);
+
+  if (activeWithProgress.length > 0) {
+    aggregateProgress = activeWithProgress.reduce(
+      (acc, p) => ({
+        totalFiles: acc.totalFiles + (p.totalFiles || 0),
+        processed: acc.processed + (p.processed || 0),
+        newCount: acc.newCount + (p.newCount || 0),
+        skippedCount: acc.skippedCount + (p.skippedCount || 0),
+        errorCount: acc.errorCount + (p.errorCount || 0),
+        updatedCount: acc.updatedCount + (p.updatedCount || 0),
+        regeneratedCount: acc.regeneratedCount + (p.regeneratedCount || 0),
+      }),
+      {
+        totalFiles: 0,
+        processed: 0,
+        newCount: 0,
+        skippedCount: 0,
+        errorCount: 0,
+        updatedCount: 0,
+        regeneratedCount: 0,
+      },
+    );
+  }
 
   return {
     timestamp: new Date().toISOString(),
     counts,
     recentJobs: allJobs,
+    aggregateProgress,
   };
 }
 
@@ -120,21 +160,21 @@ export const queuesRouter = new Hono()
   .get("/", async (c) => {
     const results = await Promise.all(
       KNOWN_QUEUES.map(async (name) => {
-        const config = getConfig(name);
-        if (!config) return null;
-        let counts: QueueJobCounts | null = null;
+        const cfg = getConfig(name);
+        if (!cfg) return null;
+        let qCounts: QueueJobCounts | null = null;
         try {
-          counts = await getTypedCounts(config.queue);
+          qCounts = await getTypedCounts(cfg.queue);
         } catch {
           // Redis 不可用时返回 null
         }
         return {
           name,
-          label: config.label,
-          description: config.description,
-          isActive: config.isActive,
-          badge: config.badge,
-          counts,
+          label: cfg.label,
+          description: cfg.description,
+          isActive: cfg.isActive,
+          badge: cfg.badge,
+          counts: qCounts,
         };
       }),
     );
@@ -145,13 +185,13 @@ export const queuesRouter = new Hono()
   /** GET /api/queues/:name/events — SSE 推送队列快照（3s 间隔） */
   .get("/:name/events", async (c) => {
     const name = c.req.param("name");
-    const config = getConfig(name);
+    const cfg = getConfig(name);
 
-    if (!config) {
+    if (!cfg) {
       return c.json({ success: false, error: `未知队列: ${name}` }, 404);
     }
 
-    if (!config.isActive) {
+    if (!cfg.isActive) {
       return c.json({ success: false, error: "该队列暂未开放" }, 403);
     }
 
@@ -160,7 +200,7 @@ export const queuesRouter = new Hono()
 
       const push = async () => {
         try {
-          const snapshot = await getQueueSnapshot(config.queue);
+          const snapshot = await getQueueSnapshot(cfg.queue);
           await stream.writeSSE({
             data: JSON.stringify(snapshot),
             event: "snapshot",
@@ -201,14 +241,14 @@ export const queuesRouter = new Hono()
   .get("/:name/jobs/:jobId", async (c) => {
     const name = c.req.param("name");
     const jobId = c.req.param("jobId");
-    const config = getConfig(name);
+    const cfg = getConfig(name);
 
-    if (!config) {
+    if (!cfg) {
       return c.json({ success: false, error: `未知队列: ${name}` }, 404);
     }
 
     try {
-      const job = await config.queue.getJob(jobId);
+      const job = await cfg.queue.getJob(jobId);
       if (!job) {
         return c.json({ success: false, error: "作业不存在" }, 404);
       }
@@ -225,7 +265,7 @@ export const queuesRouter = new Hono()
         attemptsMade: job.attemptsMade,
         failedReason: job.failedReason ?? null,
         data: job.data,
-        progress: job.progress as number | object,
+        progress: job.progress as ScanProgress | null,
         returnvalue: job.returnvalue,
         opts: job.opts as Record<string, unknown>,
         stacktrace: job.stacktrace ?? [],

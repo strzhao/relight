@@ -245,6 +245,7 @@ export interface QueueJobSummary {
   finishedOn: number | null;
   attemptsMade: number;
   failedReason: string | null;
+  progress?: ScanProgress | null;
 }
 
 /** 队列作业详情（含 data 和 stacktrace） */
@@ -261,6 +262,15 @@ export interface QueueSnapshot {
   timestamp: string;
   counts: QueueJobCounts;
   recentJobs: QueueJobSummary[];
+  aggregateProgress?: {
+    totalFiles: number;
+    processed: number;
+    newCount: number;
+    skippedCount: number;
+    errorCount: number;
+    updatedCount: number;
+    regeneratedCount: number;
+  } | null;
 }
 
 /** 队列信息（侧边栏） */

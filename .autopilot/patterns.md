@@ -348,3 +348,40 @@ const analyzeQueueEvents = new QueueEvents("analyze-photo", {
 **Lesson**: sentinel 不能作为 useVirtualizer 的虚拟项渲染——因为当它不在可视范围内时虚拟滚动不会渲染它（永远不可见=永远不触发回调）。正确做法是 sentinel 放在虚拟容器内部、所有虚拟行之后，通过绝对定位（transform: translateY(totalSize)）固定在列表末尾。另一方案是为 sentinel 额外增加一个计数槽位（count + 1），用虚拟化渲染它。
 
 **Evidence**: 初次实现时 sentinel 始终不可见、无限加载不触发。修改后 sentinelRef 附加到 index >= flatItems.length 的 slot（count + 1），IntersectionObserver 正常回调。参见 `use-virtual-grid.ts` 第 116 行 `count: flatItems.length + (hasMore ? 1 : 0)` 和第 143-163 行 sentinel 渲染逻辑。
+
+### [2026-05-04] BullMQ job.progress + Hono streamSSE 实现实时扫描进度推送
+<!-- tags: bullmq, sse, hono, realtime, monitoring -->
+
+**Scenario**: 需要在 admin 队列监控页实时展示扫描作业的详细进度（当前处理到哪个图片、已处理/总数、各类计数），而不仅仅是队列级别的作业状态。
+
+**Lesson**: BullMQ `job.updateProgress(ScanProgress对象)` 将进度写入 Redis hash，`queue.getJobs()` 返回的 Job 实例的 `.progress` 属性同步读取该值（无需额外 Redis 查询）。通过 Hono `streamSSE()` 每 3s 拉取 snapshots + aggregateProgress 推送到前端，前端 `EventSource` 消费并渲染 per-job 内联进度条。
+
+**Evidence**: SSE 端点 `GET /api/queues/:name/events` 推送每 3s 一帧 QueueSnapshot，包含每个作业独立的 `progress` 字段（phase/processed/totalFiles/newCount/regeneratedCount/currentFile 等）+ 所有活跃作业的 `aggregateProgress` 汇总。curl 验证 processed 值从 5620→5630→5640 实时递增。前端 `useQueueSSE` hook 基于 EventSource 实现，支持断线自动重连。
+
+**关键实现**:
+```typescript
+// 后端：SSE 端点
+return streamSSE(c, async (stream) => {
+  const push = async () => {
+    const snapshot = await getQueueSnapshot(queue); // 含 job.progress + aggregateProgress
+    await stream.writeSSE({ data: JSON.stringify(snapshot), event: "snapshot" });
+  };
+  await push(); // 立即推送第一帧
+  const interval = setInterval(push, 3000);
+  while (!signal.aborted) await stream.sleep(1000); // 心跳
+  signal.addEventListener("abort", () => clearInterval(interval));
+});
+
+// 前端：EventSource hook
+const es = new EventSource(`/api/queues/${queueName}/events`);
+es.addEventListener("snapshot", (e) => setSnapshot(JSON.parse(e.data)));
+```
+
+### [2026-05-04] BullMQ 5.76.4 队列名不允许包含冒号 `:`
+<!-- tags: bullmq, queue, naming, migration -->
+
+**Scenario**: 创建 BullMQ Queue 时使用 `"scan:storage"`、`"analyze:photo"` 等带冒号的名称，Worker 启动时报错 `":" is not allowed in queue names`。
+
+**Lesson**: BullMQ 5.76.4 的队列名仅允许字母、数字、连字符和下划线。冒号 `:` 在旧版本（3.x）中常用于命名空间分隔，但在 5.x 中被移除。迁移时需将 `:` 替换为 `-` 或 `_`。
+
+**Evidence**: `new Queue("scan:storage", ...)` → `Error: ":" is not allowed in queue names`；改为 `"scan-storage"` 后正常运行。
