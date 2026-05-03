@@ -2,9 +2,11 @@ import type { TagCategory } from "@relight/shared";
 import type { Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { aiClient } from "../ai/client";
+import { evaluateResponse } from "../ai/evaluation/evaluator";
 import { loadPrompts } from "../ai/prompts";
 import { parseAnalysisResponse } from "../ai/response-parser";
 import { db, schema } from "../db";
+import { config } from "../lib/config";
 import { createStorageAdapter } from "../storage";
 
 interface AnalyzeJobData {
@@ -53,14 +55,13 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
 
   job.log(`文件大小: ${buffer.length} bytes, MIME: ${mimeType}`);
 
-  // 3. 加载 AI Prompt
-  const prompts = await loadPrompts();
-  const fullPrompt = `${prompts.system}\n\n---\n\n${prompts.user}`;
+  // 3. 加载 AI Prompt（使用配置的版本）
+  const prompts = await loadPrompts(config.ai.promptVersion);
 
   job.log("调用 AI 视觉模型分析...");
 
-  // 4. 调用 AI
-  const rawResponse = await aiClient.analyzePhoto(base64, mimeType, fullPrompt);
+  // 4. 调用 AI（分离 system/user 提示词传递）
+  const rawResponse = await aiClient.analyzePhoto(base64, mimeType, prompts.system, prompts.user);
 
   job.log(`AI 响应长度: ${rawResponse.length} chars`);
 
@@ -72,6 +73,17 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
   }
 
   const result = parsed ?? fallback;
+
+  // 5a. 评估分析质量
+  const evalResult = evaluateResponse(result, rawResponse, error);
+  console.log(
+    "[analyze-photo] 评估:",
+    JSON.stringify({
+      photoId,
+      totalScore: evalResult.totalScore,
+      dimensions: evalResult.dimensions.map((d) => ({ name: d.name, score: d.score })),
+    }),
+  );
 
   // 6. 写入数据库：tags + photoTags + photoAnalyses
   const now = new Date().toISOString();
@@ -132,6 +144,7 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     await db
       .update(schema.photoAnalyses)
       .set({
+        aiModel: config.ai.visionModel,
         narrative: result.narrative,
         aestheticScore: result.aestheticScore,
         tags: result.tags,
@@ -139,7 +152,7 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
         colorAnalysis: result.colorAnalysis,
         emotionalAnalysis: result.emotionalAnalysis,
         usageSuggestions: result.usageSuggestions,
-        promptVersion: "v1",
+        promptVersion: config.ai.promptVersion,
         rawResponse,
         processedAt: now,
       })
@@ -149,7 +162,7 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     await db.insert(schema.photoAnalyses).values({
       id: crypto.randomUUID(),
       photoId,
-      aiModel: process.env.AI_VISION_MODEL ?? "qwen3.6-35b",
+      aiModel: config.ai.visionModel,
       narrative: result.narrative,
       aestheticScore: result.aestheticScore,
       tags: result.tags,
@@ -157,7 +170,7 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
       colorAnalysis: result.colorAnalysis,
       emotionalAnalysis: result.emotionalAnalysis,
       usageSuggestions: result.usageSuggestions,
-      promptVersion: "v1",
+      promptVersion: config.ai.promptVersion,
       rawResponse,
       processedAt: now,
     });

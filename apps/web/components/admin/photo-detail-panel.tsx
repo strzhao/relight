@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
 import type {
   AnalysisTag,
@@ -15,8 +16,8 @@ import type {
   StorageSource,
 } from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
-import { ChevronDown, ChevronUp, ImageOff, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, ChevronUp, ImageOff, Loader2, Sparkles, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface PhotoFullDetail extends Photo {
   tags: (PhotoTag & { tagName?: string; tagCategory?: string })[];
@@ -38,6 +39,12 @@ export function PhotoDetailPanel({ photoId, open, onClose }: PhotoDetailPanelPro
   const [error, setError] = useState<string | null>(null);
   const [showRawResponse, setShowRawResponse] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  const [analyzeFeedback, setAnalyzeFeedback] = useState<{
+    type: "info" | "error";
+    message: string;
+  } | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -55,12 +62,83 @@ export function PhotoDetailPanel({ photoId, open, onClose }: PhotoDetailPanelPro
     }
   }, [photoId]);
 
+  const handleAnalyze = useCallback(async () => {
+    // 关闭上一次的 EventSource
+    eventSourceRef.current?.close();
+
+    setAnalyzeLoading(true);
+    setAnalyzeFeedback(null);
+
+    try {
+      const result = await api.analyze.trigger([photoId], true);
+      if (!result.success) {
+        throw new Error(result.error ?? "提交失败");
+      }
+
+      const jobId = result.data.jobIds[0];
+      if (!jobId) throw new Error("未获取到任务 ID");
+
+      setAnalyzeFeedback({
+        type: "info",
+        message: "分析任务已提交，等待 AI 处理...",
+      });
+
+      // 建立 SSE 连接等待分析完成
+      const es = new EventSource(`${BASE_URL}${API_ROUTES.analyze.jobEvents(jobId)}`);
+      eventSourceRef.current = es;
+
+      es.addEventListener("completed", () => {
+        es.close();
+        eventSourceRef.current = null;
+        setAnalyzeLoading(false);
+        setAnalyzeFeedback(null);
+        fetchDetail();
+      });
+
+      es.addEventListener("failed", (event) => {
+        es.close();
+        eventSourceRef.current = null;
+        let errorMsg = "未知错误";
+        try {
+          const data = JSON.parse(event.data) as { error?: string };
+          errorMsg = data.error ?? errorMsg;
+        } catch {
+          // JSON 解析失败时使用默认错误消息
+        }
+        setAnalyzeLoading(false);
+        setAnalyzeFeedback({
+          type: "error",
+          message: `分析失败: ${errorMsg}`,
+        });
+      });
+
+      es.onerror = () => {
+        es.close();
+        eventSourceRef.current = null;
+        setAnalyzeLoading(false);
+        setAnalyzeFeedback({
+          type: "error",
+          message: "SSE 连接中断，分析可能仍在进行中",
+        });
+      };
+    } catch (err) {
+      setAnalyzeLoading(false);
+      setAnalyzeFeedback({
+        type: "error",
+        message: err instanceof Error ? err.message : "提交分析失败",
+      });
+    }
+  }, [photoId, fetchDetail]);
+
   useEffect(() => {
     if (open && photoId) {
       fetchDetail();
     } else {
       setPhoto(null);
       setError(null);
+      setAnalyzeFeedback(null);
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
     }
   }, [open, photoId, fetchDetail]);
 
@@ -89,14 +167,42 @@ export function PhotoDetailPanel({ photoId, open, onClose }: PhotoDetailPanelPro
       />
       {/* Slide-out panel */}
       <div className="fixed right-0 top-0 z-50 h-full max-w-xl w-full bg-background border-l shadow-2xl overflow-y-auto">
-        {/* Close button */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-4 top-4 z-10 rounded-sm p-1 opacity-70 hover:opacity-100 hover:bg-accent"
-        >
-          <X className="size-5" />
-        </button>
+        {/* Actions + Close button */}
+        <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleAnalyze}
+            disabled={analyzeLoading || loading}
+            className="rounded-sm p-1 opacity-70 hover:opacity-100 hover:bg-accent disabled:opacity-30"
+            title="分析此照片"
+          >
+            {analyzeLoading ? (
+              <Loader2 className="size-5 animate-spin" />
+            ) : (
+              <Sparkles className="size-5" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-sm p-1 opacity-70 hover:opacity-100 hover:bg-accent"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        {/* Analyze feedback */}
+        {analyzeFeedback && (
+          <div
+            className={`mx-6 mt-6 rounded-lg border px-4 py-3 text-sm ${
+              analyzeFeedback.type === "info"
+                ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                : "border-destructive/50 bg-destructive/5 text-destructive"
+            }`}
+          >
+            {analyzeFeedback.message}
+          </div>
+        )}
 
         {/* Loading */}
         {loading && (

@@ -9,23 +9,34 @@ export interface PromptSet {
   user: string;
 }
 
+/** 内存缓存（Promise 级别），避免并发请求时重复读取磁盘 */
+const cache = new Map<string, Promise<PromptSet>>();
+
 /**
  * 加载指定版本的 Prompt 文件
- * @param version Prompt 版本号，默认 "v1"
+ * @param version Prompt 版本号，默认 "v1"（调用方应通过 config.ai.promptVersion 显式传入）
  */
 export async function loadPrompts(version = "v1"): Promise<PromptSet> {
+  const cached = cache.get(version);
+  if (cached) return cached;
+
   const dir = path.join(__dirname, version);
 
-  const [system, user] = await Promise.all([
-    fs.readFile(path.join(dir, "system.txt"), "utf-8"),
-    fs.readFile(path.join(dir, "user.txt"), "utf-8"),
-  ]);
+  const promise = (async (): Promise<PromptSet> => {
+    const [system, user] = await Promise.all([
+      fs.readFile(path.join(dir, "system.txt"), "utf-8"),
+      fs.readFile(path.join(dir, "user.txt"), "utf-8"),
+    ]);
+    return { system, user };
+  })();
 
-  return { system, user };
+  cache.set(version, promise);
+  return promise;
 }
 
 /**
- * 合并 System + User Prompt，返回适合 AI client 使用的完整 prompt
+ * 合并 System + User Prompt，返回适合旧版 AI client 使用的完整 prompt
+ * @deprecated 新代码应使用 loadPrompts() 获取分离的 system/user，通过 analyzePhoto 的独立参数传递
  */
 export async function buildPrompt(version?: string): Promise<string> {
   const prompts = await loadPrompts(version);

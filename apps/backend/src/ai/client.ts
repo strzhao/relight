@@ -11,37 +11,63 @@ export class RelightAIClient {
    * 分析照片（视觉模型）
    * @param imageBase64 base64 编码的图片
    * @param mimeType 图片 MIME 类型
-   * @param prompt 分析提示词
+   * @param systemPrompt 系统提示词
+   * @param userPrompt 用户提示词
    */
-  async analyzePhoto(imageBase64: string, mimeType: string, prompt: string): Promise<string> {
-    const response = await client.chat.completions.create({
-      model: config.ai.visionModel,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${imageBase64}`,
-              },
+  async analyzePhoto(
+    imageBase64: string,
+    mimeType: string,
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<string> {
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${mimeType};base64,${imageBase64}`,
             },
-            {
-              type: "text",
-              text: prompt,
-            },
-          ],
-        },
-      ],
-      max_tokens: 4096,
-      // qwen3.6 是推理模型，默认输出到 reasoning_content 而非 content
-      // 禁用思考模式以确保 JSON 输出在 content 字段
-      // @ts-expect-error thinking 尚未进入 OpenAI 官方类型定义
-      thinking: { type: "disabled" },
-    });
+          },
+          {
+            type: "text",
+            text: userPrompt,
+          },
+        ],
+      },
+    ];
 
-    const msg = response.choices[0]?.message;
-    return msg?.content || (msg as Record<string, string>).reasoning_content || "";
+    // qwen3.6 是推理模型，默认输出到 reasoning_content 而非 content
+    // 禁用思考模式以确保 JSON 输出在 content 字段
+    const baseParams = {
+      model: config.ai.visionModel,
+      messages,
+      max_tokens: 4096,
+      temperature: 0.3,
+      top_p: 0.9,
+      thinking: { type: "disabled" } as const,
+    };
+
+    // 首次尝试带 response_format 和 seed
+    try {
+      const response = await client.chat.completions.create({
+        ...baseParams,
+        response_format: { type: "json_object" },
+        seed: 42,
+      });
+      const msg = response.choices[0]?.message;
+      return msg?.content || (msg as unknown as Record<string, string>).reasoning_content || "";
+    } catch {
+      // 降级：去掉 response_format 和 seed 重试
+      const response = await client.chat.completions.create(baseParams);
+      const msg = response.choices[0]?.message;
+      return msg?.content || (msg as unknown as Record<string, string>).reasoning_content || "";
+    }
   }
 
   /**
@@ -59,12 +85,12 @@ export class RelightAIClient {
       model: config.ai.model,
       messages,
       max_tokens: 4096,
-      // @ts-expect-error thinking 尚未进入 OpenAI 官方类型定义
+      // @ts-expect-error thinking is a qwen-specific extension
       thinking: { type: "disabled" },
     });
 
     const msg = response.choices[0]?.message;
-    return msg?.content || (msg as Record<string, string>).reasoning_content || "";
+    return msg?.content || (msg as unknown as Record<string, string>).reasoning_content || "";
   }
 }
 

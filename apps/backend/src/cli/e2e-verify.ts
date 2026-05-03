@@ -46,11 +46,15 @@ async function main(): Promise<void> {
   console.log(`Base64 长度: ${(base64.length / 1024).toFixed(0)} KB`);
 
   // Step 3: 调用 AI 视觉模型
-  const fullPrompt = `${prompts.system}\n\n${prompts.user}`;
   console.log("\n--- 正在调用 AI 模型 (qwen3.6-35b) ---");
   const startTime = Date.now();
 
-  const rawResponse = await aiClient.analyzePhoto(base64, "image/jpeg", fullPrompt);
+  const rawResponse = await aiClient.analyzePhoto(
+    base64,
+    "image/jpeg",
+    prompts.system,
+    prompts.user,
+  );
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`AI 响应耗时: ${elapsed}s`);

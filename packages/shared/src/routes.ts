@@ -42,5 +42,6 @@ export const API_ROUTES = {
   },
   analyze: {
     trigger: "/api/analyze",
+    jobEvents: (jobId: string) => `/api/analyze/jobs/${jobId}/events`,
   },
 } as const;

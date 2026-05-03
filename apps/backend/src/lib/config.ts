@@ -10,5 +10,6 @@ export const config = {
     apiKey: process.env.AI_API_KEY ?? "qwen-local-key",
     model: process.env.AI_MODEL ?? "qwen3.6-35b",
     visionModel: process.env.AI_VISION_MODEL ?? "qwen3.6-35b",
+    promptVersion: process.env.AI_PROMPT_VERSION || "v2",
   },
 } as const;
