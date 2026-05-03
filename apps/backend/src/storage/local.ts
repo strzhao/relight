@@ -173,18 +173,23 @@ export async function getVideoMetadata(
 }
 
 export class LocalFilesystemAdapter implements IStorageAdapter {
-  async listFiles(rootPath: string): Promise<FileInfo[]> {
+  async listFiles(rootPath: string, onProgress?: (count: number) => void): Promise<FileInfo[]> {
     const files: FileInfo[] = [];
-    await this.walk(rootPath, rootPath, files);
+    await this.walk(rootPath, rootPath, files, onProgress);
     return files;
   }
 
-  private async walk(rootPath: string, currentPath: string, files: FileInfo[]): Promise<void> {
+  private async walk(
+    rootPath: string,
+    currentPath: string,
+    files: FileInfo[],
+    onProgress?: (count: number) => void,
+  ): Promise<void> {
     const entries = await fs.readdir(currentPath, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
-        await this.walk(rootPath, fullPath, files);
+        await this.walk(rootPath, fullPath, files, onProgress);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
         if (SUPPORTED_EXTENSIONS.has(ext)) {
@@ -195,6 +200,10 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
             size: stat.size,
             modifiedAt: stat.mtime,
           });
+          // 每 100 个文件回调一次进度
+          if (onProgress && files.length % 100 === 0) {
+            onProgress(files.length);
+          }
         }
       }
     }

@@ -109,7 +109,12 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     });
 
     const adapter = createStorageAdapter(source.type);
-    const files = await adapter.listFiles(source.rootPath);
+    const files = await adapter.listFiles(source.rootPath, (foundCount) => {
+      void pushProgress("listing", {
+        totalFiles: Math.max(foundCount, existingMap.size),
+        processed: foundCount,
+      });
+    });
     scannedCount = files.length;
     job.log(`找到 ${scannedCount} 个媒体文件`);
     await pushProgress("hashing");
