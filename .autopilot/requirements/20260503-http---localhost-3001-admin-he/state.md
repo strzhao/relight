@@ -1,7 +1,8 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
+knowledge_extracted: "true"
 iteration: 5
 max_iterations: 30
 max_retries: 3
