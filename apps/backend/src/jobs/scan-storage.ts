@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import type { ScanProgress } from "@relight/shared";
 import type { Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
@@ -11,6 +12,9 @@ import { analyzeQueue } from "./queues";
 interface ScanJobData {
   storageSourceId: string;
 }
+
+/** 每 N 个文件批量 updateProgress */
+const PROGRESS_BATCH_SIZE = 10;
 
 /**
  * scan-storage Worker
@@ -30,7 +34,27 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
   const scanStartedAt = new Date().toISOString();
   let scannedCount = 0;
   let newCount = 0;
+  let skippedCount = 0;
   let errorCount = 0;
+
+  const pushProgress = async (phase: ScanProgress["phase"], extra?: Partial<ScanProgress>) => {
+    const progress: ScanProgress = {
+      phase,
+      totalFiles: scannedCount,
+      processed: skippedCount + newCount + errorCount,
+      newCount,
+      updatedCount: 0,
+      skippedCount,
+      errorCount,
+      regeneratedCount: 0,
+      ...extra,
+    };
+    try {
+      await job.updateProgress(progress as unknown as number | object);
+    } catch {
+      // updateProgress 失败不影响扫描流程
+    }
+  };
 
   try {
     // 1. 查找存储源
@@ -47,6 +71,8 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     job.log(`存储源: ${source.name} (${source.rootPath})`);
 
     // 2. 遍历目录获取图片文件
+    await pushProgress("listing", { totalFiles: 1, processed: 0 });
+
     const adapter = createStorageAdapter(source.type);
     const files = await adapter.listFiles(source.rootPath);
     scannedCount = files.length;
@@ -55,10 +81,18 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     // 收集所有 hash，批量查询已存在的
     const fileHashMap = new Map<string, (typeof files)[number]>();
 
+    await pushProgress("hashing");
+
+    let hashingProcessed = 0;
     for (const file of files) {
       const buffer = await adapter.getFileBuffer(file.path);
       const hash = createHash("sha256").update(buffer).digest("hex");
       fileHashMap.set(hash, file);
+
+      hashingProcessed++;
+      if (hashingProcessed % PROGRESS_BATCH_SIZE === 0) {
+        await pushProgress("hashing");
+      }
     }
 
     // 查询已有照片的 hash
@@ -71,12 +105,16 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
 
     // 3. 去重：过滤新文件
     const newFileEntries = [...fileHashMap.entries()].filter(([hash]) => !existingHashes.has(hash));
+    skippedCount = scannedCount - newFileEntries.length;
 
-    job.log(`新文件: ${newFileEntries.length}, 已存在: ${scannedCount - newFileEntries.length}`);
+    job.log(`新文件: ${newFileEntries.length}, 已存在: ${skippedCount}`);
 
     // 4. 处理每个新文件
     const thumbnailDir = path.join(config.storageRoot, "thumbnails");
 
+    await pushProgress("processing");
+
+    let processingCount = 0;
     for (const [hash, file] of newFileEntries) {
       try {
         const photoId = crypto.randomUUID();
@@ -118,9 +156,20 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
         errorCount++;
         job.log(`处理文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
       }
+
+      processingCount++;
+      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
+        await pushProgress("processing", { currentFile: file.name });
+      }
     }
 
-    // 5. 写入扫描日志
+    // 5. 最终进度推送
+    await pushProgress("completed", {
+      totalFiles: scannedCount,
+      processed: skippedCount + newCount + errorCount,
+    });
+
+    // 6. 写入扫描日志
     await db.insert(schema.scanLogs).values({
       id: crypto.randomUUID(),
       storageSourceId,
@@ -131,13 +180,15 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       finishedAt: new Date().toISOString(),
     });
 
-    // 6. 更新存储源最后扫描时间
+    // 7. 更新存储源最后扫描时间
     await db
       .update(schema.storageSources)
       .set({ lastScanAt: new Date().toISOString() })
       .where(eq(schema.storageSources.id, storageSourceId));
 
-    job.log(`扫描完成: 扫描 ${scannedCount}, 新增 ${newCount}, 错误 ${errorCount}`);
+    job.log(
+      `扫描完成: 扫描 ${scannedCount}, 新增 ${newCount}, 跳过 ${skippedCount}, 错误 ${errorCount}`,
+    );
   } catch (err) {
     // 即使失败也写入日志
     try {

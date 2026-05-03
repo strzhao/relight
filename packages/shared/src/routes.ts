@@ -21,4 +21,9 @@ export const API_ROUTES = {
     list: "/api/settings",
     update: "/api/settings",
   },
+  queues: {
+    list: "/api/queues",
+    events: (name: string) => `/api/queues/${name}/events`,
+    job: (name: string, jobId: string) => `/api/queues/${name}/jobs/${jobId}`,
+  },
 } as const;

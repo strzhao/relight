@@ -132,3 +132,91 @@ export interface PaginatedResponse<T> {
 export interface TagWithCount extends Tag {
   photoCount: number;
 }
+
+// ────────────────────────── 队列监控相关类型 ──────────────────────────
+
+/** 扫描进度（BullMQ job.progress 存储格式） */
+export interface ScanProgress {
+  phase: "listing" | "hashing" | "processing" | "completed";
+  totalFiles: number;
+  processed: number;
+  newCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  regeneratedCount: number;
+  currentFile?: string;
+}
+
+/** 队列作业计数 */
+export interface QueueJobCounts {
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  delayed: number;
+  paused: number;
+}
+
+/** 作业摘要 */
+export interface QueueJobSummary {
+  id: string;
+  name: string;
+  state: "waiting" | "active" | "completed" | "failed" | "delayed";
+  timestamp: number;
+  processedOn: number | null;
+  finishedOn: number | null;
+  attemptsMade: number;
+  failedReason: string | null;
+  progress?: ScanProgress | null;
+}
+
+/** 队列快照 */
+export interface QueueSnapshot {
+  timestamp: string;
+  counts: QueueJobCounts;
+  recentJobs: QueueJobSummary[];
+  aggregateProgress?: {
+    totalFiles: number;
+    processed: number;
+    newCount: number;
+    skippedCount: number;
+    errorCount: number;
+    updatedCount: number;
+    regeneratedCount: number;
+  } | null;
+}
+
+/** 作业详情 */
+export interface QueueJobDetail {
+  id: string;
+  name: string;
+  state: "waiting" | "active" | "completed" | "failed" | "delayed";
+  timestamp: number;
+  processedOn: number | null;
+  finishedOn: number | null;
+  attemptsMade: number;
+  failedReason: string | null;
+  data: unknown;
+  progress?: ScanProgress | null;
+  returnvalue?: unknown;
+  opts?: Record<string, unknown>;
+  stacktrace: string[];
+}
+
+/** SSE 推送的扫描进度事件 */
+export interface ScanProgressEvent {
+  scanLogId: string;
+  status: "running" | "completed" | "failed" | "stale";
+  phase: ScanProgress["phase"];
+  totalFiles: number;
+  processed: number;
+  newCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  regeneratedCount: number;
+  currentFile?: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
