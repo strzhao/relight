@@ -41,6 +41,14 @@ export const photoQuerySchema = z.object({
   storageSourceId: z.string().uuid().optional(),
   sortBy: z.enum(["createdAt", "takenAt", "fileSize"]).default("createdAt"),
   order: z.enum(["asc", "desc"]).default("desc"),
+  dateFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  dateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 /** 批量触发分析 */

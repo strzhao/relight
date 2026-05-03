@@ -339,3 +339,12 @@ const analyzeQueueEvents = new QueueEvents("analyze-photo", {
 3. **try-catch 包裹 SSE 写操作** — `stream.writeSSE()` 和 `stream.close()` 在客户端断开时可能抛异常，必须 try-catch 吞掉
 
 **Evidence**: 代码审查发现 C1（Redis 连接泄漏）、C2（双重清理竞态）、C4（缺少 try-catch），修复后所有 SSE 连接共享 1 个 Redis 连接，abort 和 while 退出不再竞态。
+
+### [2026-05-03] @tanstack/react-virtual sentinel 必须放在虚拟容器内部而非作为虚拟项
+<!-- tags: react, virtual-scroll, tanstack-virtual, IntersectionObserver, frontend -->
+
+**Scenario**: 实现照片管理页面的无限滚动时，需要在虚拟列表底部放置 sentinel 元素，用 IntersectionObserver 监听触发加载更多。
+
+**Lesson**: sentinel 不能作为 useVirtualizer 的虚拟项渲染——因为当它不在可视范围内时虚拟滚动不会渲染它（永远不可见=永远不触发回调）。正确做法是 sentinel 放在虚拟容器内部、所有虚拟行之后，通过绝对定位（transform: translateY(totalSize)）固定在列表末尾。另一方案是为 sentinel 额外增加一个计数槽位（count + 1），用虚拟化渲染它。
+
+**Evidence**: 初次实现时 sentinel 始终不可见、无限加载不触发。修改后 sentinelRef 附加到 index >= flatItems.length 的 slot（count + 1），IntersectionObserver 正常回调。参见 `use-virtual-grid.ts` 第 116 行 `count: flatItems.length + (hasMore ? 1 : 0)` 和第 143-163 行 sentinel 渲染逻辑。

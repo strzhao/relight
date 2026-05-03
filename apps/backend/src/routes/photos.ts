@@ -15,7 +15,7 @@ export const photosRouter = new Hono()
       return c.json({ success: false, error: parsed.error.message }, 400);
     }
 
-    const { page, pageSize, tagId, storageSourceId, sortBy, order } = parsed.data;
+    const { page, pageSize, tagId, storageSourceId, sortBy, order, dateFrom, dateTo } = parsed.data;
 
     // 构建 WHERE 条件
     const conditions = [];
@@ -35,12 +35,23 @@ export const photosRouter = new Hono()
       );
     }
 
+    // 使用 COALESCE(takenAt, createdAt) 作为有效日期列
+    const effectiveDate = sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`;
+
+    if (dateFrom) {
+      conditions.push(sql`date(${effectiveDate}) >= ${dateFrom}`);
+    }
+
+    if (dateTo) {
+      conditions.push(sql`date(${effectiveDate}) <= ${dateTo}`);
+    }
+
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
     // 排序
     const sortColumn =
       sortBy === "takenAt"
-        ? schema.photos.takenAt
+        ? effectiveDate
         : sortBy === "fileSize"
           ? schema.photos.fileSize
           : schema.photos.createdAt;
