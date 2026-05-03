@@ -26,8 +26,28 @@ export const api = {
   health: () => fetchApi<{ status: string }>(API_ROUTES.health),
 
   photos: {
-    list: (params?: URLSearchParams) =>
-      fetchApi<PaginatedResponse<Photo>>(`${API_ROUTES.photos.list}?${params ?? ""}`),
+    list: (params?: {
+      page?: number;
+      pageSize?: number;
+      sortBy?: string;
+      order?: string;
+      tagId?: string;
+      storageSourceId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    }) => {
+      const searchParams = new URLSearchParams();
+      if (params) {
+        for (const [key, value] of Object.entries(params)) {
+          if (value !== undefined && value !== null) {
+            searchParams.set(key, String(value));
+          }
+        }
+      }
+      return fetchApi<PaginatedResponse<Photo>>(
+        `${API_ROUTES.photos.list}?${searchParams.toString()}`,
+      );
+    },
     detail: (id: string) => fetchApi<ApiResponse<Photo>>(API_ROUTES.photos.detail(id)),
   },
 

@@ -1,31 +1,64 @@
-import { Card } from "@/components/ui/card";
+"use client";
+
+import { cn } from "@/lib/utils";
+import type { Photo } from "@relight/shared";
+import { ImageOff } from "lucide-react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
 interface PhotoCardProps {
-  title?: string;
-  date?: string;
-  tags?: string[];
+  photo: Photo;
+  priority?: boolean;
 }
 
-export function PhotoCard({ title = "照片", date, tags = [] }: PhotoCardProps) {
+export const PhotoCard = memo(function PhotoCard({ photo, priority = false }: PhotoCardProps) {
+  const [shouldLoad, setShouldLoad] = useState(priority);
+  const [hasError, setHasError] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (priority) {
+      setShouldLoad(true);
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [priority]);
+
+  const handleError = useCallback(() => {
+    setHasError(true);
+  }, []);
+
   return (
-    <Card className="overflow-hidden">
-      <div className="aspect-square bg-muted" />
-      <div className="p-4">
-        <h3 className="text-sm font-medium">{title}</h3>
-        {date && <p className="mt-1 text-xs text-muted-foreground">{date}</p>}
-        {tags.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </Card>
+    <div ref={containerRef} className="aspect-square relative overflow-hidden rounded-md bg-muted">
+      {shouldLoad && !hasError ? (
+        <img
+          src={`${API_BASE}/api/photos/${photo.id}/thumbnail`}
+          alt=""
+          loading={priority ? "eager" : "lazy"}
+          className={cn("size-full object-cover")}
+          onError={handleError}
+        />
+      ) : hasError ? (
+        <div className="flex size-full items-center justify-center text-muted-foreground">
+          <ImageOff className="size-8" />
+        </div>
+      ) : null}
+    </div>
   );
-}
+});
