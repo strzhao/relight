@@ -44,6 +44,9 @@ export const api = {
       }),
   },
 
+  /** Build the full thumbnail URL for a photo */
+  thumbnailUrl: (id: string) => `${BASE_URL}${API_ROUTES.photos.thumbnail(id)}`,
+
   daily: {
     today: () => fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.today),
     list: (params?: URLSearchParams) =>

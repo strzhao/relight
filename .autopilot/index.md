@@ -6,6 +6,7 @@
 - [2026-05-03] 队列监控实时推送选用 SSE 而非 WebSocket/轮询 | tags: sse, websocket, monitoring, realtime, design | → decisions.md
 - [2026-05-03] AI 分析不再由扫描自动触发，改为外部显式控制 | tags: ai, analysis, scan, trigger, design | → decisions.md
 - [2026-05-03] 缩略图缓存策略：短 TTL + ETag | tags: thumbnail, cache, etag, performance | → decisions.md
+- [2026-05-03] 系统 CLI 委托 + sharp 两步转换处理不支持图像格式 | tags: heic, sharp, heif-convert, image-processing, backend, design, thumbnail | → decisions.md
 
 ## Patterns
 - [2026-05-03] EXIF Orientation 需同时在缩略图生成和元数据提取中处理 | tags: exif, sharp, thumbnail, metadata, orientation | → patterns.md
@@ -19,3 +20,4 @@
 - [2026-05-03] 扫描进度 SSE 双数据源模式：DB scan_log + BullMQ job.progress | tags: sse, scan, bullmq, progress, sqlite, hono | → patterns.md
 - [2026-05-03] 异步任务并发守护模式：SQLite 事务 + stale 阈值 | tags: concurrency, sqlite, bullmq, transaction, async-job | → patterns.md
 - [2026-05-03] EventSource 自定义 SSE 事件与原生事件命名冲突需分离处理 | tags: sse, eventsource, frontend, error-handling, hooks | → patterns.md
+- [2026-05-03] CLI 委托安全四要素：execFile 数组 + realpath 校验 + tmpdir 隔离 + 超时 | tags: security, child_process, execFile, cli, backend, heic | → patterns.md

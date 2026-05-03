@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
+import { createHeicDecoder } from "../lib/heic-decoder";
 import type { FileInfo, IStorageAdapter } from "./interface";
 
 /**
@@ -97,6 +99,12 @@ const SUPPORTED_EXTENSIONS = new Set([
 ]);
 
 export const VIDEO_EXTENSIONS = new Set([".mov", ".mp4", ".avi", ".mkv"]);
+
+const HEIC_EXTENSIONS = new Set([".heic", ".heif"]);
+
+function isHeic(filePath: string): boolean {
+  return HEIC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
 
 export async function getVideoMetadata(
   filePath: string,
@@ -243,6 +251,11 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
       return getVideoMetadata(filePath);
     }
 
+    // HEIC 先转临时 JPEG 再提取元数据
+    if (isHeic(filePath)) {
+      return this.getHeicMetadata(filePath);
+    }
+
     try {
       const metadata = await sharp(filePath).metadata();
       const result: { width?: number; height?: number; takenAt?: Date } = {};
@@ -271,6 +284,54 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
       return result;
     } catch {
       return {};
+    }
+  }
+
+  private async getHeicMetadata(
+    filePath: string,
+  ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
+    const decoder = createHeicDecoder();
+
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const tempDir = path.join(os.tmpdir(), `relight-meta-${ts}-${rand}`);
+    await fs.mkdir(tempDir, { recursive: true });
+    const intermediateJpeg = path.join(tempDir, `meta-intermediate-${ts}.jpg`);
+
+    try {
+      await decoder.convertToJpeg(filePath, intermediateJpeg);
+      const meta = await sharp(intermediateJpeg).metadata();
+      const result: { width?: number; height?: number; takenAt?: Date } = {};
+
+      const orientation = meta.orientation;
+      const swapDimensions = orientation != null && orientation >= 5 && orientation <= 8;
+
+      if (meta.width && meta.height) {
+        result.width = swapDimensions ? meta.height : meta.width;
+        result.height = swapDimensions ? meta.width : meta.height;
+      } else {
+        if (meta.width) result.width = meta.width;
+        if (meta.height) result.height = meta.height;
+      }
+      if (meta.exif) {
+        try {
+          const dateTimeOriginal = extractExifDate(meta.exif);
+          if (dateTimeOriginal) {
+            result.takenAt = dateTimeOriginal;
+          }
+        } catch {
+          // EXIF 解析失败，忽略
+        }
+      }
+      return result;
+    } catch {
+      return {};
+    } finally {
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
     }
   }
 }

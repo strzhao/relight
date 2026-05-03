@@ -137,11 +137,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       const existing = existingMap.get(file.path);
       const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
 
-      if (
-        existing &&
-        existing.fileMtime === fileMtime &&
-        existing.fileSize === file.size
-      ) {
+      if (existing && existing.fileMtime === fileMtime && existing.fileSize === file.size) {
         if (job.data.forceRegenerate) {
           regenerateOnlyFiles.push({ id: existing.id, file });
         } else {
@@ -196,9 +192,19 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
         try {
           thumbnailPath = await generateThumbnail(file.path, thumbnailDir, photoId);
         } catch (thumbErr) {
-          job.log(
-            `缩略图生成失败 (${file.name}): ${thumbErr instanceof Error ? thumbErr.message : String(thumbErr)}`,
-          );
+          const errMsg = thumbErr instanceof Error ? thumbErr.message : String(thumbErr);
+          const filePath = file.path;
+          if (errMsg.includes("heif-convert CLI is not available")) {
+            job.log(
+              `[解码器缺失] 缩略图生成失败 (${file.name}, path: ${filePath}): heif-convert 未安装，跳过 HEIC 缩略图`,
+            );
+          } else if (errMsg.includes("heif-convert timed out")) {
+            job.log(
+              `[超时] 缩略图生成失败 (${file.name}, path: ${filePath}): heif-convert 超时 (30s)`,
+            );
+          } else {
+            job.log(`缩略图生成失败 (${file.name}, path: ${filePath}): ${errMsg}`);
+          }
         }
 
         await db.insert(schema.photos).values({
@@ -280,10 +286,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           updateValues.height = metadata.height;
         }
         if (Object.keys(updateValues).length > 0) {
-          await db
-            .update(schema.photos)
-            .set(updateValues)
-            .where(eq(schema.photos.id, id));
+          await db.update(schema.photos).set(updateValues).where(eq(schema.photos.id, id));
         }
         regeneratedCount++;
       } catch (err) {

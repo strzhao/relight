@@ -84,6 +84,8 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **配置** (`src/lib/config.ts`): 所有环境变量集中管理，带默认值。AI 服务默认 `http://127.0.0.1:8001/v1`（本地部署的 qwen 兼容服务）。
 
+**HEIC 解码器** (`src/lib/heic-decoder.ts`): 通过系统 `heif-convert` CLI 将 HEIC/HEIF 文件转换为 JPEG。`createHeicDecoder()` 返回 `HeicDecoder` 对象，`available` 属性（memoized）检测 CLI 是否安装，`convertToJpeg(input, output)` 执行带 30s 超时的两步转换（HEIC → 临时 JPEG → 目标路径）。
+
 **CLI 工具** (`src/cli/`):
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
 

@@ -69,3 +69,17 @@
 - 环境变量开关：只能在部署级别控制，粒度太粗
 
 **Trade-offs**: 完全移除自动触发意味着每次新增照片后需手动触发分析。在分析质量稳定之前这是合理的，但后续需要配套设计批量触发/定时触发机制。
+
+### [2026-05-03] 系统 CLI 委托 + sharp 两步转换处理不支持图像格式
+<!-- tags: heic, sharp, heif-convert, image-processing, backend, design, thumbnail -->
+
+**Background**: sharp 预编译二进制不含 HEIC/HEIF 解码器，用户上传的 iPhone 照片（.heic）无法生成缩略图，导致照片管理页面展示失败。
+
+**Choice**: 不在 sharp 层解决 HEIC 解码，采用系统 CLI `heif-convert`（libheif）做预处理 → 输出临时 JPEG → sharp 做缩放/编码。运行时检测 CLI 可用性，结果缓存。
+
+**Alternatives rejected**:
+- sharp 源码构建 + heif：破坏 pnpm 预编译缓存，CI 环境复杂
+- WASM npm 包（heic-convert/heic-decode）：~2MB 包体，大文件性能差，维护不确定
+- sharp 直接解码：作为首选路径保留，HEIC 仅在不支持时走两步转换
+
+**Trade-offs**: 依赖系统预装 libheif（macOS `brew install libheif`），生产环境需在 Dockerfile 中添加 `RUN apt-get install -y libheif`。零新 npm 依赖，快速 C 实现，<30s 超时控制。
