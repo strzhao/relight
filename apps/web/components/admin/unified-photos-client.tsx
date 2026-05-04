@@ -1,5 +1,6 @@
 "use client";
 
+import { AnalyzeTriggerButton } from "@/components/admin/analyze-trigger-button";
 import { PhotoDetailPanel } from "@/components/admin/photo-detail-panel";
 import { PhotoFilterBar } from "@/components/admin/photo-filter-bar";
 import { PhotoGrid } from "@/components/admin/photo-grid";
@@ -29,6 +30,7 @@ export function UnifiedPhotosClient({ initialData, initialError }: UnifiedPhotos
   const [error, setError] = useState<string | null>(initialError);
   const [loading, setLoading] = useState(false);
   const [detailPhotoId, setDetailPhotoId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -104,7 +106,29 @@ export function UnifiedPhotosClient({ initialData, initialError }: UnifiedPhotos
     fetchPhotos();
   }, [fetchPhotos]);
 
+  const handleSelectionChange = useCallback((photoId: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) {
+        next.add(photoId);
+      } else {
+        next.delete(photoId);
+      }
+      return next;
+    });
+  }, []);
+
   const storageSource = data?.storageSource ?? null;
+
+  // 翻页/筛选变化时清除选中
+  const prevSearchParamsRef = useRef(searchParams.toString());
+  useEffect(() => {
+    const current = searchParams.toString();
+    if (current !== prevSearchParamsRef.current) {
+      prevSearchParamsRef.current = current;
+      setSelectedIds(new Set());
+    }
+  }, [searchParams]);
 
   // 转换为 PhotoGrid 需要的数据格式
   const gridItems = (data?.data ?? []).map((photo) => ({
@@ -128,6 +152,9 @@ export function UnifiedPhotosClient({ initialData, initialError }: UnifiedPhotos
           <p className="text-sm text-muted-foreground">共 {data?.total ?? 0} 张照片</p>
         </div>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <AnalyzeTriggerButton photoIds={[...selectedIds]} onSuccess={handleRefresh} />
+          )}
           <ProgressPanel
             mode="analyze"
             filterParams={{
@@ -166,7 +193,12 @@ export function UnifiedPhotosClient({ initialData, initialError }: UnifiedPhotos
         <Skeleton className="h-64 w-full rounded-lg" />
       ) : data ? (
         <>
-          <PhotoGrid photos={gridItems} onPhotoClick={handlePhotoClick} />
+          <PhotoGrid
+            photos={gridItems}
+            onPhotoClick={handlePhotoClick}
+            selectedIds={selectedIds}
+            onSelectionChange={handleSelectionChange}
+          />
 
           {/* 分页 */}
           {totalPages > 1 && (

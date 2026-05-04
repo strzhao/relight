@@ -253,7 +253,7 @@ export const photosRouter = new Hono()
       return c.json({ success: false, error: parsed.error.message }, 400);
     }
 
-    const { photoIds } = parsed.data;
+    const { photoIds, force } = parsed.data;
 
     // 验证照片存在
     const existingPhotos = await db
@@ -268,11 +268,26 @@ export const photosRouter = new Hono()
       return c.json({ success: false, error: "所有照片都不存在" }, 400);
     }
 
-    const jobs = validIds.map((photoId) => analyzeQueue.add(`analyze:${photoId}`, { photoId }));
+    // 过滤已分析的照片（force=true 时跳过过滤）
+    let toAnalyze = validIds;
+
+    if (!force) {
+      const analyzed = await db
+        .select({ photoId: schema.photoAnalyses.photoId })
+        .from(schema.photoAnalyses)
+        .where(inArray(schema.photoAnalyses.photoId, validIds));
+
+      const analyzedIds = new Set(analyzed.map((a) => a.photoId));
+      toAnalyze = validIds.filter((id) => !analyzedIds.has(id));
+    }
+
+    const skippedCount = validIds.length - toAnalyze.length;
+
+    const jobs = toAnalyze.map((photoId) => analyzeQueue.add(`analyze:${photoId}`, { photoId }));
     await Promise.all(jobs);
 
     return c.json({
       success: true,
-      data: { enqueued: validIds.length },
+      data: { enqueued: toAnalyze.length, skippedCount },
     });
   });

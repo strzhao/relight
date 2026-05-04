@@ -1,5 +1,6 @@
 "use client";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ImageOff } from "lucide-react";
 import { useState } from "react";
@@ -19,6 +20,10 @@ export interface PhotoGridItem {
 interface PhotoGridProps {
   photos: PhotoGridItem[];
   onPhotoClick: (photoId: string) => void;
+  /** 多选：当前选中的照片 ID 集合 */
+  selectedIds?: Set<string>;
+  /** 多选：勾选变化回调 */
+  onSelectionChange?: (photoId: string, selected: boolean) => void;
 }
 
 function ThumbnailImg({
@@ -49,7 +54,14 @@ function ThumbnailImg({
   );
 }
 
-export function PhotoGrid({ photos, onPhotoClick }: PhotoGridProps) {
+export function PhotoGrid({
+  photos,
+  onPhotoClick,
+  selectedIds,
+  onSelectionChange,
+}: PhotoGridProps) {
+  const hasSelection = selectedIds !== undefined && onSelectionChange !== undefined;
+
   if (photos.length === 0) {
     return (
       <div className="rounded-lg border py-12 text-center text-sm text-muted-foreground">
@@ -63,6 +75,7 @@ export function PhotoGrid({ photos, onPhotoClick }: PhotoGridProps) {
       {photos.map((photo) => {
         const score = photo.latestAnalysis?.aestheticScore ?? null;
         const isAnalyzed = photo.analysesCount > 0;
+        const isSelected = selectedIds?.has(photo.id) ?? false;
 
         let scoreBadgeClass = "bg-gray-100 text-gray-700";
         if (score != null) {
@@ -81,6 +94,7 @@ export function PhotoGrid({ photos, onPhotoClick }: PhotoGridProps) {
             className={cn(
               "group relative rounded-lg border bg-card overflow-hidden text-left transition-all",
               "hover:scale-[1.02] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring",
+              isSelected && "ring-2 ring-primary ring-offset-1",
             )}
           >
             {/* Thumbnail — 动态宽高比，适配横屏/竖屏/方形照片 */}
@@ -89,6 +103,16 @@ export function PhotoGrid({ photos, onPhotoClick }: PhotoGridProps) {
               style={{ aspectRatio: `${photo.width}/${photo.height}` }}
             >
               <ThumbnailImg photoId={photo.id} hasThumbnail={photo.thumbnailPath != null} />
+              {/* Multi-select checkbox overlay — top-left */}
+              {hasSelection && (
+                <Checkbox
+                  checked={isSelected}
+                  onChange={() => onSelectionChange?.(photo.id, !isSelected)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute top-2 left-2 z-10 size-4 rounded data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground border-2 border-white bg-black/20 data-[state=checked]:border-primary"
+                  aria-label={`选择照片: ${photo.filePath.split("/").pop() || photo.filePath}`}
+                />
+              )}
               {/* Score badge overlay */}
               <div className="absolute bottom-2 left-2">
                 {isAnalyzed ? (

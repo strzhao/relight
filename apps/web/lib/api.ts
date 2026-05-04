@@ -58,10 +58,10 @@ export const api = {
       );
     },
     detail: (id: string) => fetchApi<ApiResponse<Photo>>(API_ROUTES.photos.detail(id)),
-    analyze: (photoIds: string[]) =>
-      fetchApi<ApiResponse<{ enqueued: number }>>(API_ROUTES.photos.analyze, {
+    analyze: (photoIds: string[], force?: boolean) =>
+      fetchApi<ApiResponse<{ enqueued: number; skippedCount: number }>>(API_ROUTES.photos.analyze, {
         method: "POST",
-        body: JSON.stringify({ photoIds }),
+        body: JSON.stringify({ photoIds, force }),
       }),
   },
 

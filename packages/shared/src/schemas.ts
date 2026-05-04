@@ -54,6 +54,7 @@ export const photoQuerySchema = z.object({
 /** 批量触发分析 */
 export const analyzePhotosSchema = z.object({
   photoIds: z.array(z.string().uuid()).min(1).max(50),
+  force: z.boolean().optional(),
 });
 
 /** 管理后台批量分析（按筛选条件） */
