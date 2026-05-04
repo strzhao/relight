@@ -326,7 +326,7 @@ export function ScanPanel() {
                 <span>
                   共 <strong>{treeStats.totalFiles}</strong> 个文件
                 </span>
-                <span className="text-green-600">
+                <span className="text-status-completed">
                   已分析: <strong>{treeStats.analyzedCount}</strong>
                 </span>
                 <span className="text-muted-foreground">
@@ -403,7 +403,7 @@ export function ScanPanel() {
         {/* Complete */}
         {status === "complete" && analyzeProgress && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm text-green-600">
+            <div className="flex items-center gap-2 text-sm text-status-completed">
               <span>分析任务已提交</span>
             </div>
             <div className="text-sm text-muted-foreground">
@@ -415,7 +415,7 @@ export function ScanPanel() {
                 <span>
                   共 <strong>{treeStats.totalFiles}</strong> 个文件
                 </span>
-                <span className="text-green-600">
+                <span className="text-status-completed">
                   已分析: <strong>{treeStats.analyzedCount}</strong>
                 </span>
                 <span className="text-muted-foreground">

@@ -150,7 +150,7 @@ export default async function AdminDashboardPage() {
                           <span
                             className={
                               item.aestheticScore != null && item.aestheticScore >= 8
-                                ? "font-semibold text-green-600"
+                                ? "font-semibold text-score-high"
                                 : ""
                             }
                           >

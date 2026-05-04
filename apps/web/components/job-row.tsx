@@ -49,7 +49,8 @@ export function JobRow({ job, onClick }: JobRowProps) {
       onClick={onClick}
       className={cn(
         "w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg transition-colors hover:bg-accent",
-        isFailed && "bg-red-50 hover:bg-red-100 dark:bg-red-950 dark:hover:bg-red-900",
+        isFailed &&
+          "bg-destructive/10 hover:bg-destructive/20 dark:bg-destructive/15 dark:hover:bg-destructive/25",
       )}
     >
       <Badge
@@ -70,7 +71,9 @@ export function JobRow({ job, onClick }: JobRowProps) {
           <div className="text-[10px] text-muted-foreground">尝试 {job.attemptsMade} 次</div>
         )}
         {job.failedReason && (
-          <div className="text-[10px] text-red-500 truncate max-w-[120px]">{job.failedReason}</div>
+          <div className="text-[10px] text-destructive truncate max-w-[120px]">
+            {job.failedReason}
+          </div>
         )}
       </div>
     </button>

@@ -420,10 +420,10 @@ export function ProgressPanel({
                     </span>
                   )}
                   {progress.newCount > 0 && (
-                    <span className="text-green-600">新增 {progress.newCount}</span>
+                    <span className="text-status-completed">新增 {progress.newCount}</span>
                   )}
                   {progress.regeneratedCount > 0 && (
-                    <span className="text-blue-600">重建 {progress.regeneratedCount}</span>
+                    <span className="text-status-active">重建 {progress.regeneratedCount}</span>
                   )}
                   {progress.skippedCount > 0 && <span>跳过 {progress.skippedCount}</span>}
                   {progress.errorCount > 0 && (
@@ -451,7 +451,9 @@ export function ProgressPanel({
                     {analyzeProgress.totalCount}
                   </span>
                   {analyzeProgress.completedCount > 0 && (
-                    <span className="text-green-600">完成 {analyzeProgress.completedCount}</span>
+                    <span className="text-status-completed">
+                      完成 {analyzeProgress.completedCount}
+                    </span>
                   )}
                   {analyzeProgress.failedCount > 0 && (
                     <span className="text-destructive">失败 {analyzeProgress.failedCount}</span>
@@ -466,7 +468,7 @@ export function ProgressPanel({
       {/* Completed */}
       {status === "completed" && (
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-green-600">{mode === "scan" ? "扫描完成" : "分析完成"}</span>
+          <span className="text-status-completed">{mode === "scan" ? "扫描完成" : "分析完成"}</span>
           {mode === "scan" && progress && (
             <span className="text-xs text-muted-foreground">
               新增 {progress.newCount} · 跳过 {progress.skippedCount}

@@ -117,6 +117,49 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                           每日精选 → dailyPicks
 ```
 
+## 设计体系
+
+**色彩空间**: OKLCH（感知均匀）· **设计哲学**: 温润、克制、有机、清醒
+
+### 核心色板
+
+| 名称 | 用途 | CSS Token | OKLCH 值 |
+|------|------|-----------|----------|
+| Paper (纸) | 页面基底 | `--background` | `oklch(0.975 0.010 95)` |
+| Ink (墨) | 正文/标题 | `--foreground` | `oklch(0.155 0.006 95)` |
+| Mist (雾) | 卡片/分割 | `--secondary` | `oklch(0.935 0.002 95)` |
+| Smoke (烟) | 描述/辅助 | `--muted-foreground` | `oklch(0.520 0.005 95)` |
+| Sage (苔) | CTA/品牌 | `--primary` | `oklch(0.488 0.088 158)` |
+| Amber (琥) | 警告 | `--warning`, `--score-mid` | `oklch(0.660 0.165 85)` |
+| Vermillion (朱) | 错误/删除 | `--destructive` | `oklch(0.550 0.190 30)` |
+| Sky (天) | 链接/信息 | `--info`, `--status-active` | `oklch(0.575 0.130 250)` |
+
+**色相基线**: 无彩色 H=95（暖调），品牌 Sage H=158-160，Amber H=85，Vermillion H=30，Sky H=250
+
+### 语义 Token
+
+**评分** — `--score-high/bg` (苔绿)、`--score-mid/bg` (琥珀)、`--score-low/bg` (炭灰)
+**任务状态** — `--status-waiting/active/completed/failed/delayed/paused`
+**信息/警告** — `--info/fg/bg/border` (天蓝)、`--warning/fg` (琥珀)
+
+### 使用规范
+
+- 所有颜色必须通过 CSS 变量引用（`bg-primary`、`text-muted-foreground`），**禁止**硬编码 Tailwind 颜色值（`bg-green-500`、`text-blue-600` 等）
+- 状态指示使用语义 Token：`bg-status-active`、`text-status-failed` 等
+- 评分使用评分 Token：`text-score-high`、`bg-score-mid-bg` 等
+- 新增语义 Token 需同步更新 `globals.css` 的 `:root`、`.dark`、`@theme inline` 三个位置
+- 暗色模式通过 `.dark` class 触发，保持暖黑基底（H=95）+ 品牌色增亮
+
+### 动效时序
+
+| 交互 | 时长 |
+|------|------|
+| hover 反馈 | 100ms |
+| 点击反馈 | 50ms |
+| 复制确认 | 2s |
+| 入场动画 | 400ms |
+| 状态切换 | 200ms |
+
 ## 测试
 
 - 单元/集成测试: `**/__tests__/*.test.ts` (Vitest)，workspace 配置在 `vitest.workspace.ts`

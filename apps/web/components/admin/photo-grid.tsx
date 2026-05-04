@@ -64,12 +64,12 @@ export function PhotoGrid({ photos, onPhotoClick }: PhotoGridProps) {
         const score = photo.latestAnalysis?.aestheticScore ?? null;
         const isAnalyzed = photo.analysesCount > 0;
 
-        let scoreBadgeClass = "bg-gray-100 text-gray-700";
+        let scoreBadgeClass = "bg-score-low-bg text-score-low";
         if (score != null) {
           if (score >= 8) {
-            scoreBadgeClass = "bg-green-100 text-green-800";
+            scoreBadgeClass = "bg-score-high-bg text-score-high";
           } else if (score >= 6) {
-            scoreBadgeClass = "bg-yellow-100 text-yellow-800";
+            scoreBadgeClass = "bg-score-mid-bg text-score-mid";
           }
         }
 
