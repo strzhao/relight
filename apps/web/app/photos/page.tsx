@@ -5,9 +5,11 @@ import type { DateViewMode } from "@/components/date-view-control";
 import { PhotoCard } from "@/components/photo-card";
 import { PhotoSectionHeader } from "@/components/photo-section-header";
 import { Button } from "@/components/ui/button";
+import { Lightbox } from "@/components/ui/lightbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePhotosInfinite } from "@/hooks/use-photos-infinite";
 import { type GroupedPhotos, groupPhotos, useVirtualGrid } from "@/hooks/use-virtual-grid";
+import type { Photo } from "@relight/shared";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -30,6 +32,8 @@ export default function PhotosPage() {
     () => calcGridParams(getInitialContentWidth()).cols,
   );
   const [cellSize, setCellSize] = useState(() => calcGridParams(getInitialContentWidth()).cellW);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ResizeObserver: 响应式列数计算 + cellSize (150ms 防抖)
@@ -71,6 +75,18 @@ export default function PhotosPage() {
 
   const { photos, isLoading, isFetchingMore, error, hasMore, loadMore, reset } =
     usePhotosInfinite();
+
+  // Lightbox 点击处理
+  const handlePhotoClick = useCallback(
+    (photo: Photo) => {
+      const idx = photos.findIndex((p) => p.id === photo.id);
+      if (idx !== -1) {
+        setLightboxIndex(idx);
+        setLightboxOpen(true);
+      }
+    },
+    [photos],
+  );
 
   // 切换视图 → 重置滚动位置
   const handleViewModeChange = useCallback((mode: DateViewMode) => {
@@ -165,7 +181,7 @@ export default function PhotosPage() {
       </div>
 
       {/* 虚拟滚动容器 */}
-      <div ref={containerRef} className="flex-1 overflow-auto px-2">
+      <div ref={containerRef} className="flex-1 overflow-auto px-2 py-3">
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const item = flatItems[virtualItem.index];
@@ -182,7 +198,11 @@ export default function PhotosPage() {
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
                 >
-                  <PhotoSectionHeader label={item.label ?? ""} count={item.count ?? 0} />
+                  <PhotoSectionHeader
+                    label={item.label ?? ""}
+                    count={item.count ?? 0}
+                    isFirst={item.groupIndex === 0}
+                  />
                 </div>
               );
             }
@@ -205,7 +225,11 @@ export default function PhotosPage() {
               >
                 {item.photoRowPhotos?.map((photo) => (
                   <div key={photo.id} style={{ width: cellW, flexShrink: 0 }}>
-                    <PhotoCard photo={photo} priority={virtualItem.index < columnCount * 2} />
+                    <PhotoCard
+                      photo={photo}
+                      priority={virtualItem.index < columnCount * 2}
+                      onClick={handlePhotoClick}
+                    />
                   </div>
                 ))}
               </div>
@@ -238,6 +262,16 @@ export default function PhotosPage() {
           </div>
         )}
       </div>
+
+      {/* Lightbox 照片查看器 */}
+      <Lightbox
+        open={lightboxOpen}
+        photos={photos}
+        initialIndex={lightboxIndex}
+        onClose={() => setLightboxOpen(false)}
+        hasMore={hasMore}
+        onLoadMore={loadMore}
+      />
     </main>
   );
 }

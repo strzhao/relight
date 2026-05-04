@@ -4,6 +4,7 @@ export const API_ROUTES = {
     list: "/api/photos",
     detail: (id: string) => `/api/photos/${id}`,
     thumbnail: (id: string) => `/api/photos/${id}/thumbnail`,
+    original: (id: string) => `/api/photos/${id}/original`,
     analyze: "/api/photos/analyze",
   },
   daily: {
