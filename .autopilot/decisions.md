@@ -94,3 +94,15 @@
 **Trade-offs**: 自行实现增加约 300 行代码（6 个组件文件），但获得完全控制权——缩放范围 0.5x-5x 自由设定、与后端 original 端点直接集成、信息面板按需加载等。需手动处理焦点陷阱（当前已知限制）。
 
 **Evidence**: 6 个 Lightbox 组件文件（index + context + image + controls + info + keys），Biome 豁免 `useSemanticElements` 规则用于 lightbox 目录。QA 设计符合性审查 6/6 维度通过。
+
+### [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数
+
+<!-- tags: backend, bullmq, worker, concurrency, llama-cpp, performance -->
+
+**Background**: AI 图片分析速度极慢（~1/min），M4 Max 128GB 资源大部分闲置。llama-server 部署时已配置 `--parallel 2`（2 个推理槽位），但 analyze-photo Worker 使用默认 concurrency=1，一次只处理一张照片。
+
+**Choice**: Worker concurrency 设为 2，直接匹配 llama-server 推理槽位数。
+
+**Alternatives rejected**: 更高并发（4-8）被拒绝，因为 llama-server 只有 2 个 slot，更高的 Worker 并发会导致任务排队在推理服务端，不会增加吞吐量。
+
+**Trade-offs**: concurrency=2 从 1 开始保守，后续如 llama-server --parallel 调高可同步增加。

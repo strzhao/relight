@@ -1,3 +1,13 @@
+### [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload
+
+<!-- tags: ai, vision, sharp, image-resize, performance, base64 -->
+
+**Scenario**: 在 AI 视觉 API 调用前准备图片数据时，JPEG/PNG/WEBP 等非 HEIC 格式的图片直接用原始分辨率 base64 编码。
+
+**Lesson**: 高分辨率照片（6000x4000）全分辨率 base64 可达 12MB+，应统一用 sharp 缩放到 2048px（与 HEIC 处理一致）并 JPEG quality 85 编码，payload 降到 ~300KB。2048px 对美学评分、构图分析、色彩分析已足够，视觉模型内部会自行降采样，超大图片不会提升分析质量。
+
+**Evidence**: `apps/backend/src/jobs/analyze-photo.ts:63-68` — 新增 else 分支对非 HEIC 图片做 sharp resize；优化前单图 payload 7-27MB，优化后 ~300KB，处理时间从 30-60s 降到 8-15s。
+
 # 模式与教训
 
 ### [2026-05-04] macOS SMB 挂载持久化 — LaunchAgent 周期保活 + nsmb.conf 调优
