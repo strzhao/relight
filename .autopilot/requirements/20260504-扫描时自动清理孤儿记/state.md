@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 6
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/pic/.autopilot/requirements/20260504-扫描时自动清理孤儿记"
 session_id: 94ae1fbb-0c94-4d1f-8caa-39f6a45c6a56
 started_at: "2026-05-04T07:24:20Z"
@@ -178,7 +178,8 @@ DB 大小: 9.2 MB
 **最终**: ✅ 全部通过（预存错误非本次引入）
 
 ## 变更日志
-- [2026-05-04T08:06:59Z] 用户批准验收，进入合并阶段
+- [2026-05-04T08:06:59Z] 用户批准验收，进入 merge 阶段
+- [2026-05-04T08:10:00Z] merge 阶段完成：commit `d1ffe40` feat(backend): 扫描时自动清理孤儿记录 + `eb6a568` docs(knowledge): 提取知识。知识提取 2 条（patterns + decisions）
 - [2026-05-04T07:24:20Z] autopilot 初始化，目标: 扫描时自动清理孤儿记录
 - [2026-05-04T07:35:00Z] design 阶段完成：Plan 审查通过（修复 1 BLOCKER + 2 IMPORTANT），进入 implement 阶段
 - [2026-05-04T07:50:00Z] implement 阶段完成：蓝队实现 cleanupOrphans 函数（61 行）+ 红队编写 29 个验收测试全部通过 + 类型检查通过（预存错误除外），进入 qa 阶段
