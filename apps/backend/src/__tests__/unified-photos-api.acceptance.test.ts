@@ -130,8 +130,8 @@ interface UnifiedPhotosResponseBody {
 
 async function createAdminApp(): Promise<Hono> {
   const adminMod = await import("../routes/admin");
-  const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter! || (adminMod as Record<string, Hono>).default!;
+  const adminRouter: Hono = ((adminMod as Record<string, Hono>).adminRouter ||
+    (adminMod as Record<string, Hono>).default)!;
   const app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -239,6 +239,7 @@ describe("统一照片管理 API 契约 — 验收测试", () => {
   // =========================================================================
   describe("Photos 数据项字段结构", () => {
     /** 验证单个照片项的必要字段类型 */
+    // biome-ignore lint/suspicious/noExplicitAny: test utility
     function validatePhotoItem(item: any): void {
       // 基础标识字段
       expect(typeof item.id).toBe("string");
@@ -277,6 +278,7 @@ describe("统一照片管理 API 契约 — 验收测试", () => {
     }
 
     /** 验证 LatestAnalysis 对象字段 */
+    // biome-ignore lint/suspicious/noExplicitAny: test utility
     function validateLatestAnalysis(la: any): void {
       expect(typeof la.id).toBe("string");
       expect(la.id.length).toBeGreaterThan(0);

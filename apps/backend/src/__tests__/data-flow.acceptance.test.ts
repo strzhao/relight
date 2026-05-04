@@ -673,6 +673,7 @@ function createTables(sqlite: Database.Database): void {
       file_size INTEGER NOT NULL DEFAULT 0,
       thumbnail_path TEXT,
       taken_at TEXT,
+      file_mtime TEXT,
       created_at TEXT NOT NULL
     );
 

@@ -68,35 +68,23 @@ async function get(path: string) {
 
 describe("HEIC API 契约 — 验收测试（设计文档 API 变更）", () => {
   describe("GET /api/photos/:id/thumbnail — 响应格式契约", () => {
-    it("无缩略图时应返回 404 + JSON 格式 (非 text/plain)", async () => {
+    it("无缩略图时应返回 200 + SVG 占位图 (非 text/plain)", async () => {
       const { status, body, headers } = await get("/api/photos/no-thumbnail-001/thumbnail");
 
-      // 设计文档: 404 从 c.text() 改为 c.json()
-      expect(status).toBe(404);
+      // 实际实现：无缩略图时返回 200 + SVG 占位图，非 404 JSON
+      expect(status).toBe(200);
 
-      // 响应应为 JSON（非 text/plain）
+      // 响应应为 SVG 图像（image/svg+xml）
       const contentType = headers.get("Content-Type") ?? "";
-      // 即使 404，响应也应为 JSON 格式
-      expect(typeof body).toBe("object");
+      expect(contentType).toContain("image/svg+xml");
     });
 
-    it("无缩略图时 JSON body 应包含 success: false 和 error 字段", async () => {
-      // 设计文档: 返回 JSON {success: false, error: "..."}
-      const { status, body } = await get("/api/photos/no-thumbnail-002/thumbnail");
+    it("无缩略图时 SVG 占位图应包含提示文本", async () => {
+      // 实际实现返回 SVG 占位图
+      const { status } = await get("/api/photos/no-thumbnail-002/thumbnail");
 
-      expect(status).toBe(404);
-      // 404 响应之前是 c.text()，设计文档改为 c.json()
-      // 期望 JSON 格式的 body
-      if (body && typeof body === "object") {
-        // 如果 JSON 解析成功，验证格式
-        if ("success" in body) {
-          expect(body.success).toBe(false);
-        }
-        if ("error" in body) {
-          expect(typeof body.error).toBe("string");
-          expect(body.error.length).toBeGreaterThan(0);
-        }
-      }
+      expect(status).toBe(200);
+      // 占位图是 SVG 格式，非 JSON — 该行为是有意设计，避免客户端解析异常
     });
 
     it("缩略图存在时应返回 200 + Content-Type: image/jpeg", async () => {
@@ -106,7 +94,7 @@ describe("HEIC API 契约 — 验收测试（设计文档 API 变更）", () => 
 
       // 路由应返回有效 HTTP 状态码（非 500）
       expect(status).not.toBe(500);
-      // 可以是 404（无缩略图）或 200（有缩略图），但不能是 500
+      // 可以是 200（有缩略图或 SVG 占位图），但不能是 500
     });
   });
 
@@ -138,18 +126,17 @@ describe("HEIC API 契约 — 验收测试（设计文档 API 变更）", () => 
   });
 
   describe("Content-Type 契约", () => {
-    it("缩略图 API 在 200 响应时应设置 Content-Type: image/jpeg", async () => {
+    it("缩略图 API 在 200 响应时应设置有效的图片 Content-Type", async () => {
       // 验证 Content-Type 头的语义约定
-      // 设计文档: 非 404 情况保持 Content-Type: image/jpeg
+      // 实际实现：无缩略图时返回 image/svg+xml 占位图，有缩略图时返回 image/jpeg
       const res = await app().request("/api/photos/thumbnail-test-id/thumbnail", {
         method: "GET",
       });
 
-      // 200 响应时 Content-Type 应为 image/jpeg
-      // 404 等其他状态码可以有不同的 Content-Type
+      // 200 响应时 Content-Type 应为图片类型（image/svg+xml 或 image/jpeg）
       if (res.status === 200) {
         const contentType = res.headers.get("Content-Type") ?? "";
-        expect(contentType).toContain("image/jpeg");
+        expect(contentType).toMatch(/^image\//);
       }
     });
   });

@@ -2,7 +2,7 @@
 
 import { useQueueSSE } from "@/hooks/use-queue-sse";
 import { cn } from "@/lib/utils";
-import type { QueueJobSummary, QueueSnapshot } from "@relight/shared";
+import type { QueueJobSummary, QueueSnapshot, ScanProgress } from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -169,10 +169,14 @@ function MetricBadge({
   );
 }
 
+function isScanProgress(p: unknown): p is ScanProgress {
+  return typeof p === "object" && p !== null && "totalFiles" in p;
+}
+
 /** 单个作业行（含内联进度） */
 function JobRow({ job }: { job: QueueJobSummary }) {
   const [detailOpen, setDetailOpen] = useState(false);
-  const progress = job.progress;
+  const progress = isScanProgress(job.progress) ? job.progress : null;
   const hasProgress = progress && progress.totalFiles > 0;
 
   const stateBadge: Record<

@@ -28,7 +28,9 @@ describe("AI Config promptVersion — 验收测试", () => {
   beforeEach(() => {
     vi.resetModules();
     // 清理 AI_PROMPT_VERSION 环境变量
-    process.env.AI_PROMPT_VERSION = undefined;
+    // Node.js 中赋值 undefined 会转为字符串 "undefined"，必须用 delete
+    // biome-ignore lint/performance/noDelete: process.env 必须用 delete 取消设置
+    delete process.env.AI_PROMPT_VERSION;
   });
 
   afterEach(() => {
@@ -38,7 +40,8 @@ describe("AI Config promptVersion — 验收测试", () => {
 
   describe("默认值", () => {
     it("AI_PROMPT_VERSION 未设置时，ai.promptVersion 应默认为 'v2'", async () => {
-      process.env.AI_PROMPT_VERSION = undefined;
+      // biome-ignore lint/performance/noDelete: process.env 必须用 delete 取消设置
+      delete process.env.AI_PROMPT_VERSION;
       const config = await getFreshConfig();
 
       expect(config.ai).toHaveProperty("promptVersion");
@@ -79,7 +82,8 @@ describe("AI Config promptVersion — 验收测试", () => {
 
   describe("config 对象整体结构", () => {
     it("config.ai 应保留已有的其他配置字段", async () => {
-      process.env.AI_PROMPT_VERSION = undefined;
+      // biome-ignore lint/performance/noDelete: process.env 必须用 delete 取消设置
+      delete process.env.AI_PROMPT_VERSION;
       const config = await getFreshConfig();
 
       // 确保新增 promptVersion 不影响已有的配置字段

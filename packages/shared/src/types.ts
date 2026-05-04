@@ -257,7 +257,7 @@ export interface QueueJobSummary {
   finishedOn: number | null;
   attemptsMade: number;
   failedReason: string | null;
-  progress?: ScanProgress | null;
+  progress?: number | object | null;
 }
 
 /** 队列作业详情（含 data 和 stacktrace） */

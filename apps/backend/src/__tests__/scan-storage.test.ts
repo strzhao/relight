@@ -101,6 +101,7 @@ function createTestTables(sqlite: Database.Database): void {
       file_size INTEGER NOT NULL DEFAULT 0,
       thumbnail_path TEXT,
       taken_at TEXT,
+      file_mtime TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -123,6 +124,7 @@ function createTestTables(sqlite: Database.Database): void {
     CREATE TABLE IF NOT EXISTS scan_logs (
       id TEXT PRIMARY KEY,
       storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
+      job_id TEXT,
       scanned_count INTEGER NOT NULL DEFAULT 0,
       new_count INTEGER NOT NULL DEFAULT 0,
       error_count INTEGER NOT NULL DEFAULT 0,
