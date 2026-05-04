@@ -14,3 +14,4 @@
 - [2026-05-04] IntersectionObserver 在 React 中的生命周期管理——避免级联加载循环 | tags: react, intersectionobserver, infinite-scroll, ref, useeffect, cascade | → patterns.md
 - [2026-05-04] sharp 处理网络/SMB 挂载路径文件时先 readFile 读入 Buffer | tags: sharp, smb, network-path, seek-error, image-processing | → patterns.md
 - [2026-05-04] HEIC 文件可能伪装：扩展名 .heic 实际为 JPEG 内容 | tags: heic, jpeg, content-detection, format-disguise, sharp | → patterns.md
+- [2026-05-04] SSE 进度追踪使用 DB 轮询 + QueueEvents 双向更新模式 | tags: sse, bullmq, queue-events, progress, db-polling, pattern | → patterns.md

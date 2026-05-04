@@ -49,6 +49,23 @@ const scanQueue = new Queue("scan:storage", {
 new Worker("scan:storage", scanStorageWorker, { connection, concurrency: 1 });
 ```
 
+### [2026-05-04] SSE 进度追踪使用 DB 轮询 + QueueEvents 双向更新模式
+<!-- tags: sse, bullmq, queue-events, progress, db-polling, pattern -->
+
+**Scenario**: 批量异步任务（扫描/分析）需要通过 SSE 向多客户端推送实时进度。方案选择：纯 QueueEvents 流 vs DB 轮询 vs 混合。
+
+**Lesson**: 采用 DB 轮询（SSE 端点每 1s 查询数据库）+ QueueEvents 监听器（Worker 进程监听 completed/failed 事件写入 DB 计数器）的双向架构：
+1. SSE 端点从 DB 读取进度（`streamSSE` + `setInterval` 1s 轮询），支持多客户端同时连接
+2. QueueEvents 全局监听器在 Worker 进程中独立运行，通过 `analyze_batch_jobs` 映射表反向查找 batchId，原子更新计数器（`sql\`completed_count + 1\``）
+3. `finalizeBatchIfDone()` 检查 `completedCount + failedCount >= totalCount` 时设置 `finishedAt`
+4. Stale 检测：超过 30 分钟未完成的 batch 推送 `stale` 状态并关闭流
+
+**Why 纯 QueueEvents 不够**：QueueEvents 是进程本地的，SSE 客户端可能位于不同进程；QueueEvents 不持久化历史事件，断线重连后无法恢复当前进度。
+
+**Why DB 轮询优于纯内存**：Worker 重启后进度不丢失；多 SSE 客户端无需额外协调；与现有 scan SSE 模式一致。
+
+**Evidence**: `scan-progress-panel.tsx` 的扫描 SSE + `admin.ts` 的分析 SSE 均采用此模式；`workers/index.ts` 的 `analyzeEvents` QueueEvents 监听器验证了双向更新正确性；红队 60 个验收测试全部通过。
+
 ### [2026-05-04] sharp 处理网络/SMB 挂载路径文件时先 readFile 读入 Buffer
 
 <!-- tags: sharp, smb, network-path, seek-error, image-processing -->
