@@ -71,7 +71,7 @@ let app: Hono;
 beforeAll(async () => {
   const adminMod = await import("../routes/admin");
   const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
+    (adminMod as Record<string, Hono>).adminRouter! || (adminMod as Record<string, Hono>).default!;
   app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);

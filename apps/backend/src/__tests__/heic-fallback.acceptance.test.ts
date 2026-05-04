@@ -12,7 +12,7 @@
  * 此时应降级到 sharp 处理。sharp 能自动检测真实图片格式 (JPEG/PNG/WebP 等)，
  * 从而正确处理伪装文件。
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock heic-decode — 控制解码成功/失败
 const mockDecode = vi.fn();
@@ -69,6 +69,7 @@ describe("HEIC fallback — convertHeicToJpeg 验证（设计文档 §2）", () 
       resize: mockSharpResize.mockReturnThis(),
       jpeg: mockSharpJpeg.mockReturnThis(),
       toBuffer: mockSharpToBuffer,
+      toFile: mockSharpToFile,
     }));
   });
 

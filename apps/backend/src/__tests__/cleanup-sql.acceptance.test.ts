@@ -47,7 +47,7 @@ function selectBestInGroup(group: PhotoRecord[]): PhotoRecord {
     throw new Error("Empty group");
   }
   if (group.length === 1) {
-    return group[0];
+    return group[0]!;
   }
 
   // 第一优先级：有缩略图的优先
@@ -57,7 +57,7 @@ function selectBestInGroup(group: PhotoRecord[]): PhotoRecord {
   // 第二优先级：created_at 最新
   candidates.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-  return candidates[0];
+  return candidates[0]!;
 }
 
 /**
@@ -158,8 +158,8 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
         },
       ];
 
-      const key1 = groupKey(records[0]);
-      const key2 = groupKey(records[1]);
+      const key1 = groupKey(records[0]!);
+      const key2 = groupKey(records[1]!);
       expect(key1).toBe(key2);
     });
 
@@ -225,8 +225,8 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
 
       expect(keep).toHaveLength(1);
       expect(remove).toHaveLength(1);
-      expect(keep[0].id).toBe("d2"); // 有缩略图的保留
-      expect(keep[0].thumbnail_path).not.toBeNull();
+      expect(keep[0]!.id).toBe("d2"); // 有缩略图的保留
+      expect(keep[0]!.thumbnail_path).not.toBeNull();
     });
 
     it("多条有缩略图 + 多条无缩略图，应从有缩略图的候选中选取", () => {
@@ -267,9 +267,9 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
       expect(remove).toHaveLength(3);
 
       // 保留的应该有缩略图
-      expect(keep[0].thumbnail_path).not.toBeNull();
+      expect(keep[0]!.thumbnail_path).not.toBeNull();
       // 在有缩略图的两条中，应保留 created_at 最新的 (e4)
-      expect(keep[0].id).toBe("e4");
+      expect(keep[0]!.id).toBe("e4");
     });
 
     it("如果所有记录都没有缩略图，应保留 created_at 最新的", () => {
@@ -301,7 +301,7 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
 
       expect(keep).toHaveLength(1);
       expect(remove).toHaveLength(2);
-      expect(keep[0].id).toBe("f2"); // 最新的 created_at
+      expect(keep[0]!.id).toBe("f2"); // 最新的 created_at
     });
 
     it("如果所有记录都有缩略图，应保留 created_at 最新的", () => {
@@ -326,7 +326,7 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
 
       expect(keep).toHaveLength(1);
       expect(remove).toHaveLength(1);
-      expect(keep[0].id).toBe("g2"); // 最新的
+      expect(keep[0]!.id).toBe("g2"); // 最新的
     });
   });
 
@@ -431,7 +431,7 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
 
       expect(keep).toHaveLength(1);
       expect(remove).toHaveLength(0);
-      expect(keep[0].id).toBe("single-1");
+      expect(keep[0]!.id).toBe("single-1");
     });
 
     it("空前数组不应抛出错误", () => {
@@ -462,8 +462,8 @@ describe("数据清理逻辑 — 重复去重验证（设计文档 §1）", () =
 
       expect(keep).toHaveLength(1);
       // 应保留 uuid-1（有缩略图），删除 uuid-2（无缩略图即使更新）
-      expect(keep[0].id).toBe("uuid-1");
-      expect(remove[0].id).toBe("uuid-2");
+      expect(keep[0]!.id).toBe("uuid-1");
+      expect(remove[0]!.id).toBe("uuid-2");
     });
   });
 

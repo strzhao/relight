@@ -212,7 +212,7 @@ beforeAll(async () => {
   // 7. 动态导入 admin router 并创建测试 App
   const adminMod = await import("../routes/admin");
   const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
+    (adminMod as Record<string, Hono>).adminRouter! || (adminMod as Record<string, Hono>).default!;
   app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);

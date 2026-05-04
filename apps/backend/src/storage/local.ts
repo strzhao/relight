@@ -6,7 +6,9 @@ import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import type { FileInfo, IStorageAdapter } from "./interface";
 
-const IMAGE_EXTENSIONS = new Set([
+/** 扫描时收录的所有文件格式（含暂不支持 AI 分析的视频格式，入库备用） */
+const SCAN_EXTENSIONS = new Set([
+  // 图片格式
   ".jpg",
   ".jpeg",
   ".png",
@@ -16,6 +18,15 @@ const IMAGE_EXTENSIONS = new Set([
   ".heif",
   ".bmp",
   ".tiff",
+  // RAW 格式（通过 dcraw 提取预览后支持 AI 分析）
+  ".dng",
+  // 视频格式（扫描入库，暂不支持 AI 分析，后续扩展）
+  ".mp4",
+  ".mov",
+  ".avi",
+  ".mkv",
+  ".webm",
+  ".m4v",
 ]);
 
 /** EXIF DateTimeOriginal tag */
@@ -110,7 +121,7 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
         await this.walk(rootPath, fullPath, files);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        if (IMAGE_EXTENSIONS.has(ext)) {
+        if (SCAN_EXTENSIONS.has(ext)) {
           const stat = await fs.stat(fullPath);
           files.push({
             path: fullPath,
@@ -139,6 +150,7 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
       ".heif": "image/heif",
       ".bmp": "image/bmp",
       ".tiff": "image/tiff",
+      ".dng": "image/x-adobe-dng",
     };
     return mimeMap[ext] ?? "application/octet-stream";
   }

@@ -16,7 +16,7 @@
     "enabled": true
   },
   "files": {
-    "ignore": [".next", ".turbo", "dist", "node_modules", "*.db"]
+    "ignore": [".next", ".turbo", "dist", "node_modules", "*.db", ".claude"]
   },
   "overrides": [
     {
@@ -25,6 +25,9 @@
         "rules": {
           "style": {
             "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off"
           }
         }
       }

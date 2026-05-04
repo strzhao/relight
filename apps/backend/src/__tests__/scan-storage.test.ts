@@ -557,7 +557,7 @@ describe("scan-storage worker — 验收测试（设计文档修复 3+4+5）", (
       ];
 
       const adapter1 = createMockAdapter(files1);
-      await simulateScan(db, storageSourceId, adapter1, [files1[0]?.path]);
+      await simulateScan(db, storageSourceId, adapter1, [files1[0]!.path]);
 
       const files2: MockFileEntry[] = [
         {
@@ -569,7 +569,7 @@ describe("scan-storage worker — 验收测试（设计文档修复 3+4+5）", (
       ];
 
       const adapter2 = createMockAdapter(files2);
-      const result2 = await simulateScan(db, storageSourceId, adapter2, [files2[0]?.path]);
+      const result2 = await simulateScan(db, storageSourceId, adapter2, [files2[0]!.path]);
 
       expect(result2.skippedDuplicates).toBe(1);
       expect(result2.newCount).toBe(0);
@@ -963,7 +963,7 @@ describe("scan-storage worker — 验收测试（设计文档修复 3+4+5）", (
       ];
 
       const adapter = createMockAdapter(files);
-      const result = await simulateScan(db, storageSourceId, adapter, [files[0]?.path]);
+      const result = await simulateScan(db, storageSourceId, adapter, [files[0]!.path]);
 
       // 元数据失败不应导致文件被标记为错误
       expect(result.errorCount).toBe(0);

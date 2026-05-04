@@ -137,7 +137,19 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     }
 
     scannedCount = files.length;
-    job.log(`找到 ${scannedCount} 个图片文件`);
+    job.log(`找到 ${scannedCount} 个文件`);
+
+    // 输出格式分布，方便了解各格式数量
+    const formatCounts = new Map<string, number>();
+    for (const file of files) {
+      const ext = path.extname(file.name).toLowerCase() || "(无扩展名)";
+      formatCounts.set(ext, (formatCounts.get(ext) ?? 0) + 1);
+    }
+    const formatSummary = [...formatCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([ext, count]) => `${ext}: ${count}`)
+      .join(", ");
+    job.log(`格式分布: ${formatSummary}`);
 
     // ★ 孤儿记录清理（始终执行，早于提前返回）
     const cleaned = await cleanupOrphans(storageSourceId, files);

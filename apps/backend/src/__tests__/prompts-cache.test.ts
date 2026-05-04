@@ -9,7 +9,7 @@
  * - loadPrompts('v2') 返回 v2 版本 Prompt
  * - buildPrompt() 标记为 @deprecated 但仍可用
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---- Mock fs/promises ----
 
@@ -22,7 +22,7 @@ vi.mock("node:fs/promises", () => ({
 
 // ---- Import after mock ----
 
-import { loadPrompts, buildPrompt } from "../ai/prompts";
+import { buildPrompt, loadPrompts } from "../ai/prompts";
 
 // ---- 测试 ----
 
@@ -80,7 +80,7 @@ describe("Prompt Loader 内存缓存 — 验收测试", () => {
   describe("缓存行为", () => {
     it("相同版本第二次调用不应再次调用 fs.readFile（缓存命中）", async () => {
       // 使用唯一版本名以确保不在缓存中
-      const version = `v2-cache-test-1`;
+      const version = "v2-cache-test-1";
       mockReadFile
         .mockResolvedValueOnce(`system-${version}`)
         .mockResolvedValueOnce(`user-${version}`);
@@ -97,9 +97,7 @@ describe("Prompt Loader 内存缓存 — 验收测试", () => {
 
     it("缓存应返回同一对象引用（严格相等）", async () => {
       const version = "v2-cache-test-2";
-      mockReadFile
-        .mockResolvedValueOnce(`sys-${version}`)
-        .mockResolvedValueOnce(`usr-${version}`);
+      mockReadFile.mockResolvedValueOnce(`sys-${version}`).mockResolvedValueOnce(`usr-${version}`);
 
       const r1 = await loadPrompts(version);
       const r2 = await loadPrompts(version);
@@ -157,8 +155,7 @@ describe("Prompt Loader 内存缓存 — 验收测试", () => {
 
       // 模拟 readFile 有延迟
       mockReadFile.mockImplementation(
-        () =>
-          new Promise<string>((resolve) => setTimeout(() => resolve("content"), 50)),
+        () => new Promise<string>((resolve) => setTimeout(() => resolve("content"), 50)),
       );
 
       // 同时发起 3 个并发请求

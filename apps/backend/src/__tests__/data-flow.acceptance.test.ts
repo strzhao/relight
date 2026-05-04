@@ -394,7 +394,7 @@ describe("数据流完整性 — 验收测试（设计文档 §4）", () => {
       const photos = await db.select().from(schema.photos);
       expect(photos).toHaveLength(1);
       expect(photos[0]?.filePath).toBe("/tmp/test-photos/sunset01.jpg");
-      expect(photos[0]?.fileHash).toBe(computeSHA256(files[0]?.buffer));
+      expect(photos[0]?.fileHash).toBe(computeSHA256(files[0]!.buffer));
       expect(photos[0]?.fileSize).toBe(files[0]?.buffer.length);
       expect(photos[0]?.storageSourceId).toBe(storageSourceId);
 

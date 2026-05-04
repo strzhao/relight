@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import path from "node:path";
 import type { TagCategory } from "@relight/shared";
 import type { Job } from "bullmq";
 import { eq } from "drizzle-orm";
@@ -8,6 +10,25 @@ import { parseAnalysisResponse } from "../ai/response-parser";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { createStorageAdapter } from "../storage";
+
+/** AI 视觉模型支持的格式（含需转换后支持的格式） */
+const AI_SUPPORTED_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".heic",
+  ".heif",
+  ".bmp",
+  ".tiff",
+  ".dng",
+]);
+
+/** 需要 dcraw 提取 JPEG 预览的 RAW 格式 */
+const RAW_EXTENSIONS = new Set([".dng"]);
+
+const DCRAW_PATH = "/opt/homebrew/bin/dcraw";
 
 interface AnalyzeJobData {
   photoId: string;
@@ -47,13 +68,50 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     throw new Error(`存储源不存在: ${photo.storageSourceId}`);
   }
 
-  // 2. 读取文件并 base64 编码（HEIC 需先转为 JPEG）
-  const adapter = createStorageAdapter(source.type);
-  let buffer = await adapter.getFileBuffer(photo.filePath);
-  let mimeType = adapter.getMimeType(photo.filePath);
+  // === 格式门：跳过不支持的格式，写入占位记录避免重复入队 ===
+  const ext = path.extname(photo.filePath).toLowerCase();
 
-  const ext = photo.filePath.toLowerCase();
-  if (ext.endsWith(".heic") || ext.endsWith(".heif")) {
+  if (!AI_SUPPORTED_EXTENSIONS.has(ext)) {
+    job.log(`跳过不支持的格式: ${ext}，写入占位记录避免重复入队`);
+
+    const existingAnalysis = await db
+      .select({ id: schema.photoAnalyses.id })
+      .from(schema.photoAnalyses)
+      .where(eq(schema.photoAnalyses.photoId, photoId));
+
+    if (existingAnalysis.length === 0) {
+      await db.insert(schema.photoAnalyses).values({
+        id: crypto.randomUUID(),
+        photoId,
+        aiModel: "skipped",
+        narrative: `不支持的格式 (${ext})：当前 AI 视觉模型仅支持图片格式。该文件已入库，等待后续视频格式支持。`,
+        rawResponse: JSON.stringify({ skipped: true, reason: "unsupported_format", ext }),
+        processedAt: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // 2. 读取文件并准备发送 AI
+  // DNG/RAW: dcraw 提取 JPEG 预览 → resize → base64
+  // HEIC: heic-decode 转 JPEG → base64
+  // 其他: 直接读取 → base64
+  const adapter = createStorageAdapter(source.type);
+  let buffer: Buffer;
+  let mimeType: string;
+
+  if (RAW_EXTENSIONS.has(ext)) {
+    job.log("DNG/RAW 文件，使用 dcraw 提取 JPEG 预览");
+    buffer = await extractRawPreview(photo.filePath);
+    // resize 与 HEIC 一致的尺寸上限
+    const sharp = await import("sharp");
+    buffer = await sharp
+      .default(buffer)
+      .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    mimeType = "image/jpeg";
+  } else if (ext.endsWith(".heic") || ext.endsWith(".heif")) {
     job.log("检测到 HEIC 文件，转换为 JPEG 后发送 AI 分析");
     const { heicFileToJpeg } = await import("../lib/heic");
     buffer = await heicFileToJpeg(photo.filePath, {
@@ -62,6 +120,9 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
       quality: 85,
     });
     mimeType = "image/jpeg";
+  } else {
+    buffer = await adapter.getFileBuffer(photo.filePath);
+    mimeType = adapter.getMimeType(photo.filePath);
   }
 
   const base64 = buffer.toString("base64");
@@ -215,5 +276,38 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     skippedCount: 0,
     errorCount: 0,
     regeneratedCount: 0,
+  });
+}
+
+/**
+ * 使用 dcraw -e -c 提取 RAW 文件中的嵌入 JPEG 预览。
+ * dcraw -e 仅提取相机内嵌的 JPEG 预览，不进行 RAW 冲印，
+ * 速度快（< 1 秒），输出标准 JPEG 可直接用于 AI 分析。
+ */
+async function extractRawPreview(filePath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      DCRAW_PATH,
+      ["-e", "-c", filePath],
+      {
+        encoding: "buffer",
+        maxBuffer: 200 * 1024 * 1024, // 200MB 上限
+        timeout: 30_000,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const stderrMsg = stderr
+            ? Buffer.isBuffer(stderr)
+              ? stderr.toString("utf8")
+              : stderr
+            : "";
+          reject(
+            new Error(`dcraw 提取预览失败: ${error.message}${stderrMsg ? ` — ${stderrMsg}` : ""}`),
+          );
+          return;
+        }
+        resolve(stdout as Buffer);
+      },
+    );
   });
 }

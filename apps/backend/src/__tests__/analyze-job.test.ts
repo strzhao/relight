@@ -1,3 +1,4 @@
+import type { Job } from "bullmq";
 /**
  * 验收测试：Analyze Job — Prompt 版本、aiModel、评估器集成
  *
@@ -9,12 +10,13 @@
  * - 分析完成后调用评估器 evaluateResponse() 并输出日志
  * - promptVersion 写入数据库
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { Job } from "bullmq";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---- Mock drizzle-orm ----
 
-const mockEq = vi.hoisted(() => vi.fn((a: unknown, b: unknown) => ({ __op: "eq", left: a, right: b })));
+const mockEq = vi.hoisted(() =>
+  vi.fn((a: unknown, b: unknown) => ({ __op: "eq", left: a, right: b })),
+);
 
 vi.mock("drizzle-orm", () => ({
   eq: mockEq,
@@ -372,9 +374,7 @@ describe("Analyze Job — Prompt 版本、aiModel、评估器集成", () => {
       await analyzePhotoWorker(job);
 
       // 验证 captured values 中包含 aiModel
-      const photoAnalysesInsert = capturedInsertValues.find(
-        (v) => "aiModel" in v,
-      );
+      const photoAnalysesInsert = capturedInsertValues.find((v) => "aiModel" in v);
       expect(photoAnalysesInsert).toBeDefined();
       expect(photoAnalysesInsert!.aiModel).toBe("gpt-4o-vision-preview");
     });
@@ -385,16 +385,12 @@ describe("Analyze Job — Prompt 版本、aiModel、评估器集成", () => {
       setupPhotoExists();
       setupSourceExists();
       // 已有分析记录 → UPDATE 路径
-      mockDb.select.mockReturnValue(
-        chainableMock([{ id: "existing-analysis-001" }]),
-      );
+      mockDb.select.mockReturnValue(chainableMock([{ id: "existing-analysis-001" }]));
 
       const job = createMockJob();
       await analyzePhotoWorker(job);
 
-      const photoAnalysesUpdate = capturedUpdateSets.find(
-        (v) => "aiModel" in v,
-      );
+      const photoAnalysesUpdate = capturedUpdateSets.find((v) => "aiModel" in v);
       expect(photoAnalysesUpdate).toBeDefined();
       expect(photoAnalysesUpdate!.aiModel).toBe("claude-vision-3");
     });
@@ -409,14 +405,12 @@ describe("Analyze Job — Prompt 版本、aiModel、评估器集成", () => {
       const job = createMockJob();
       await analyzePhotoWorker(job);
 
-      const photoAnalysesInsert = capturedInsertValues.find(
-        (v) => "aiModel" in v,
-      );
+      const photoAnalysesInsert = capturedInsertValues.find((v) => "aiModel" in v);
       expect(photoAnalysesInsert).toBeDefined();
       expect(photoAnalysesInsert!.aiModel).toBe("config-vision-model");
       expect(photoAnalysesInsert!.aiModel).not.toBe("should-not-use-this");
 
-      delete process.env.AI_VISION_MODEL;
+      process.env.AI_VISION_MODEL = undefined;
     });
   });
 
@@ -509,9 +503,7 @@ describe("Analyze Job — Prompt 版本、aiModel、评估器集成", () => {
       const job = createMockJob();
       await analyzePhotoWorker(job);
 
-      const photoAnalysesInsert = capturedInsertValues.find(
-        (v) => "promptVersion" in v,
-      );
+      const photoAnalysesInsert = capturedInsertValues.find((v) => "promptVersion" in v);
       expect(photoAnalysesInsert).toBeDefined();
       expect(photoAnalysesInsert!.promptVersion).toBe("v2");
     });
@@ -521,16 +513,12 @@ describe("Analyze Job — Prompt 版本、aiModel、评估器集成", () => {
 
       setupPhotoExists();
       setupSourceExists();
-      mockDb.select.mockReturnValue(
-        chainableMock([{ id: "existing-analysis-001" }]),
-      );
+      mockDb.select.mockReturnValue(chainableMock([{ id: "existing-analysis-001" }]));
 
       const job = createMockJob();
       await analyzePhotoWorker(job);
 
-      const photoAnalysesUpdate = capturedUpdateSets.find(
-        (v) => "promptVersion" in v,
-      );
+      const photoAnalysesUpdate = capturedUpdateSets.find((v) => "promptVersion" in v);
       expect(photoAnalysesUpdate).toBeDefined();
       expect(photoAnalysesUpdate!.promptVersion).toBe("v1");
     });

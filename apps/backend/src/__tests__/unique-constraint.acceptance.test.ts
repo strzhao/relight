@@ -7,7 +7,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
  * - 防止同一存储源下重复插入相同路径的照片
  * - 约束定义在 Drizzle sqliteTable 的第三个参数（extras builder）中
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // ---- 辅助工具 ----
 
@@ -52,7 +52,7 @@ function hasUniqueConstraint(table: SQLiteTable, expectedColumns: string[]): boo
   const tableAny = table as unknown as Record<string, unknown>;
 
   // 方案1：检查 Symbol 配置中的 uniqueConstraints
-  const symbolConfig = tableAny[Symbol.for("drizzle:SQLiteTable")] as
+  const symbolConfig = (tableAny as any)[Symbol.for("drizzle:SQLiteTable")] as
     | Record<string, unknown>
     | undefined;
   if (symbolConfig) {
@@ -160,7 +160,7 @@ describe("photos 表复合 UNIQUE 约束 — 验收测试（设计文档 §1）"
       const foundConstraints: Array<{ name: string; columns: string[] }> = [];
 
       // 检查 Symbol 配置
-      const symbolConfig = tableAny[Symbol.for("drizzle:SQLiteTable")] as Record<
+      const symbolConfig = (tableAny as any)[Symbol.for("drizzle:SQLiteTable")] as Record<
         string,
         unknown
       > | null;
@@ -209,7 +209,7 @@ describe("photos 表复合 UNIQUE 约束 — 验收测试（设计文档 §1）"
 
     it("复合唯一约束应仅包含两列（不包含其他冗余列）", () => {
       const tableAny = photos as unknown as Record<string, unknown>;
-      const symbolConfig = tableAny[Symbol.for("drizzle:SQLiteTable")] as Record<
+      const symbolConfig = (tableAny as any)[Symbol.for("drizzle:SQLiteTable")] as Record<
         string,
         unknown
       > | null;
