@@ -6,8 +6,10 @@ import type {
   ScanProgress,
 } from "@relight/shared";
 import type { Queue } from "bullmq";
+import { inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { db, schema } from "../db";
 import { analyzeQueue, dailyQueue, scanQueue } from "../jobs/queues";
 
 /** 队列配置项 */
@@ -83,10 +85,21 @@ function inferState(job: Record<string, unknown>): QueueJobSummary["state"] {
 function toJobSummary(
   job: Record<string, unknown>,
   progress?: ScanProgress | number | null,
+  photoLabelMap?: Map<string, string>,
 ): QueueJobSummary {
+  const data = job.data as Record<string, unknown> | undefined;
+  const rawName = String(job.name ?? "");
+  let displayName = rawName;
+  if (data?.photoId) {
+    const label = photoLabelMap?.get(String(data.photoId));
+    if (label) {
+      displayName = label;
+    }
+  }
+
   return {
     id: String(job.id ?? ""),
-    name: String(job.name ?? ""),
+    name: displayName,
     state: inferState(job),
     timestamp: Number(job.timestamp ?? 0),
     processedOn: job.processedOn ? Number(job.processedOn) : null,
@@ -101,21 +114,54 @@ function toJobSummary(
 async function getQueueSnapshot(queue: Queue): Promise<QueueSnapshot> {
   const counts = await getTypedCounts(queue);
   const [waiting, active, completed, failed, delayed] = await Promise.all([
-    queue.getJobs("waiting", 0, 19),
-    queue.getJobs("active", 0, 19),
-    queue.getJobs("completed", 0, 19),
-    queue.getJobs("failed", 0, 19),
-    queue.getJobs("delayed", 0, 19),
+    queue.getJobs("waiting", 0, 4),
+    queue.getJobs("active", 0, 4),
+    queue.getJobs("completed", 0, 4),
+    queue.getJobs("failed", 0, 4),
+    queue.getJobs("delayed", 0, 4),
   ]);
 
-  const allJobs = [...waiting, ...active, ...completed, ...failed, ...delayed]
+  // 收集所有 analyze 作业的 photoId，批量查询 filePath 用于展示名
+  const allRawJobs = [...waiting, ...active, ...completed, ...failed, ...delayed];
+  const photoIds = new Set(
+    allRawJobs
+      .map((j) => (j.data as Record<string, unknown> | undefined)?.photoId)
+      .filter((id): id is string => typeof id === "string"),
+  );
+
+  let photoLabelMap: Map<string, string> | undefined;
+  if (photoIds.size > 0) {
+    const photoRows = await db
+      .select({ id: schema.photos.id, filePath: schema.photos.filePath })
+      .from(schema.photos)
+      .where(inArray(schema.photos.id, [...photoIds]));
+    photoLabelMap = new Map(
+      photoRows.map((p) => [p.id, p.filePath.split("/").pop() ?? p.filePath]),
+    );
+  }
+
+  const statePriority: Record<string, number> = {
+    active: 0,
+    completed: 1,
+    failed: 1,
+    delayed: 2,
+    waiting: 3,
+  };
+
+  const allJobs = allRawJobs
     .map((j) =>
       toJobSummary(
         j as unknown as Record<string, unknown>,
         j.progress as ScanProgress | number | null,
+        photoLabelMap,
       ),
     )
-    .sort((a, b) => b.timestamp - a.timestamp)
+    .sort((a, b) => {
+      const pa = statePriority[a.state] ?? 4;
+      const pb = statePriority[b.state] ?? 4;
+      if (pa !== pb) return pa - pb;
+      return b.timestamp - a.timestamp;
+    })
     .slice(0, 20);
 
   // 计算 aggregateProgress：汇总所有 active 作业的 progress

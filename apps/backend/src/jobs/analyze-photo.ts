@@ -68,6 +68,19 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
 
   job.log(`文件大小: ${buffer.length} bytes, MIME: ${mimeType}`);
 
+  // 上报初始进度 — 文件读取/转码完成，即将调用 AI
+  await job.updateProgress({
+    phase: "processing",
+    totalFiles: 1,
+    processed: 0,
+    newCount: 0,
+    updatedCount: 0,
+    skippedCount: 0,
+    errorCount: 0,
+    regeneratedCount: 0,
+    currentFile: photo.filePath,
+  });
+
   // 3. 加载 AI Prompt（使用配置的版本）
   const prompts = await loadPrompts(config.ai.promptVersion);
 
@@ -191,4 +204,16 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
 
   const tagCount = tagMap.size;
   job.log(`AI 分析完成: ${tagCount} 个标签, 美学评分: ${result.aestheticScore}`);
+
+  // 上报完成进度 — 所有 DB 写入已成功
+  await job.updateProgress({
+    phase: "completed",
+    totalFiles: 1,
+    processed: 1,
+    newCount: 0,
+    updatedCount: 0,
+    skippedCount: 0,
+    errorCount: 0,
+    regeneratedCount: 0,
+  });
 }

@@ -19,7 +19,8 @@ export function useQueueSSE(queueName: string): UseQueueSSEReturn {
     // 关闭已有连接
     esRef.current?.close();
 
-    const url = API_ROUTES.queues.events(queueName);
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+    const url = `${baseUrl}${API_ROUTES.queues.events(queueName)}`;
     const es = new EventSource(url);
 
     es.addEventListener("snapshot", (event: MessageEvent) => {
