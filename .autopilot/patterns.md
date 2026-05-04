@@ -1,5 +1,11 @@
 # 模式与教训
 
+### [2026-05-04] macOS SMB 挂载持久化 — LaunchAgent 周期保活 + nsmb.conf 调优
+<!-- tags: macos, smb, nas, mount, launchagent, nsmb-conf, shell -->
+- **问题**: SMB 共享经常自动断开（NAS 空闲超时 + macOS 内核 deadtimer 超时链）
+- **方案**: LaunchAgent `StartInterval: 300` 周期执行幂等挂载脚本 + `/etc/nsmb.conf` 配置 `soft=yes,validate_neg_off=yes,max_resp_timeout=60,notify_off=yes`
+- **macOS 适配**: 无 `flock` 用 `mkdir` 原子锁、无 `timeout` 用后台进程 + sleep + kill、无 `mountpoint` 用 `mount | grep " on $DIR "`
+
 ### [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies
 <!-- tags: pnpm, native-modules, build -->
 
