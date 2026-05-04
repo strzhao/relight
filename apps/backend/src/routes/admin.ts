@@ -388,7 +388,7 @@ export const adminRouter = new Hono()
           orderBySql = desc(schema.photoAnalyses.processedAt);
           break;
         case "takenAt":
-          orderBySql = desc(schema.photos.takenAt);
+          orderBySql = desc(sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`);
           break;
         case "fileSize":
           orderBySql = desc(schema.photos.fileSize);

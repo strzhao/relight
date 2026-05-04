@@ -511,8 +511,8 @@ describe("photoQuerySchema — 后端增强参数", () => {
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
     tagId: z.string().uuid().optional(),
     storageSourceId: z.string().uuid().optional(),
-    sortBy: z.enum(["createdAt", "takenAt", "fileSize"]).default("createdAt"),
-    order: z.enum(["asc", "desc"]).default("desc"),
+    sortBy: z.enum(["createdAt", "takenAt", "fileSize"]).default("takenAt"),
+    order: z.enum(["asc", "desc"]).default("asc"),
     dateFrom: z.string().optional(),
     dateTo: z.string().optional(),
   });
@@ -558,8 +558,8 @@ describe("photoQuerySchema — 后端增强参数", () => {
     });
     expect(result.page).toBe(1);
     expect(result.pageSize).toBe(20);
-    expect(result.sortBy).toBe("createdAt");
-    expect(result.order).toBe("desc");
+    expect(result.sortBy).toBe("takenAt");
+    expect(result.order).toBe("asc");
   });
 
   it("所有原有字段应保持兼容（无 dateFrom/dateTo 时行为不变）", () => {
