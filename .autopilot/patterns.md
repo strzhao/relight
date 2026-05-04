@@ -1,3 +1,16 @@
+### [2026-05-04] 扫描收录与 AI 分析使用两层扩展名过滤，分离关注点
+
+<!-- tags: backend, scan, extension-filter, two-layer, separation-of-concerns -->
+
+**Scenario**: 扫描阶段需要收录所有文件格式（含暂不支持 AI 分析的视频和 RAW），但 AI 分析阶段只处理视觉模型支持的格式。单一扩展名列表无法满足两层不同需求。
+
+**Lesson**: 使用两层扩展名集合分离关注点：
+- `SCAN_EXTENSIONS`（local.ts）：扫描收录层 — 包含所有格式（图片 + RAW + 视频），确保后续可扩展
+- `AI_SUPPORTED_EXTENSIONS`（analyze-photo.ts）：AI 分析层 — 仅含视觉模型可处理的格式（含需转换的 DNG/HEIC）
+- 新增格式时只需在对应的 Set 中添加，互不影响
+
+**Evidence**: `local.ts:10-30` 的 `SCAN_EXTENSIONS` 包含 16 种格式（图片/R AW/视频），`analyze-photo.ts:15-26` 的 `AI_SUPPORTED_EXTENSIONS` 包含 10 种图片格式。两层独立维护。
+
 ### [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload
 
 <!-- tags: ai, vision, sharp, image-resize, performance, base64 -->

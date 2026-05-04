@@ -95,6 +95,39 @@
 
 **Evidence**: 6 个 Lightbox 组件文件（index + context + image + controls + info + keys），Biome 豁免 `useSemanticElements` 规则用于 lightbox 目录。QA 设计符合性审查 6/6 维度通过。
 
+### [2026-05-04] DNG/RAW 使用 dcraw -e 提取嵌入 JPEG 预览而非 RAW 冲印
+
+<!-- tags: raw, dng, dcraw, ai-vision, image-processing, design -->
+
+**Background**: 支持 DNG/RAW 格式的 AI 分析，需要将 RAW 数据转为 AI 视觉模型可接受的 JPEG。
+
+**Choice**: 使用 `dcraw -e -c` 提取相机内嵌的 JPEG 预览，而非 `dcraw -w -T` 进行 RAW 冲印。
+
+**Alternatives rejected**:
+- RAW 冲印（demosaic + 白平衡 + 色彩空间转换）：需要大量参数调优，像素级处理 <2s/张 但在多张并发时 CPU 压力大，且相机内嵌预览已是制造商精心处理的结果
+- sharp/ImageMagick 直接解码 DNG：DNG 嵌入预览使用 lossless JPEG 编码（SOF3），sharp 底层 libvips/ImageMagick 均不支持解码此变体
+
+**Trade-offs**: 嵌入预览分辨率取决于相机设置（通常是全分辨率），质量已足够 AI 分析（美学评分、构图、色彩）。dcraw 无原生 macOS ARM 二进制，需通过 Homebrew 安装（`/opt/homebrew/bin/dcraw`）。
+
+**Evidence**: `dcraw -e -c IMGP5072.DNG` 输出 4928×3264 JPEG (1.4MB)，sharp resize 到 2048px 后 612KB。单张处理 <1s。
+
+### [2026-05-04] 格式门：AI 分析跳过不支持的格式用 return 而非 throw
+
+<!-- tags: backend, bullmq, retry, format-gate, design -->
+
+**Background**: 视频文件（.mp4/.mov 等）入队 AI 分析后因 MIME 类型不合法导致失败，BullMQ 自动重试 3 次浪费资源。需要一个机制快速跳过不支持的格式。
+
+**Choice**: 格式门检查放在 AI 分析 Worker 入口（读取文件之前），不支持的格式写入 `photoAnalyses` 占位记录（`aiModel: "skipped"`）后 `return`（非 `throw`）。
+
+**Alternatives rejected**:
+- 在入队前过滤：需要额外查询，且无法防御路径扩展名变更
+- `throw` 异常：会触发 BullMQ 重试机制（3 次 exponential backoff），浪费 Worker 资源
+- 不写占位记录：下次扫描会重新入队，造成无限循环
+
+**Trade-offs**: 占位记录占用 photoAnalyses 表空间，但提供了幂等性保证。格式判断使用扩展名而非文件内容 magic bytes，极端情况下可能误判（但视频文件扩展名通常可靠）。
+
+**Evidence**: 1123 个视频文件（709 DNG + 414 视频）此前因格式问题反复重试失败。格式门上线后写入 `skipped` 记录，后续扫描不再重复入队。
+
 ### [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数
 
 <!-- tags: backend, bullmq, worker, concurrency, llama-cpp, performance -->

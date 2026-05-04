@@ -6,6 +6,8 @@
 - [2026-05-04] photos 表使用复合 UNIQUE(storage_source_id, file_path) 而非单列 file_path | tags: database, unique-constraint, drizzle, schema-design | → decisions.md
 - [2026-05-04] cleanupOrphans 必须在 listFiles 后、第一个提前返回前执行 | tags: backend, scan, architecture, orphan-cleanup, placement | → decisions.md
 - [2026-05-04] 全屏照片查看器选择自定义 Lightbox 而非 Radix Dialog | tags: lightbox, radix-ui, dialog, frontend, a11y, design | → decisions.md
+- [2026-05-04] DNG/RAW 使用 dcraw -e 提取嵌入 JPEG 预览而非 RAW 冲印 | tags: raw, dng, dcraw, ai-vision, image-processing, design | → decisions.md
+- [2026-05-04] 格式门：AI 分析跳过不支持的格式用 return 而非 throw | tags: backend, bullmq, retry, format-gate, design | → decisions.md
 - [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数 | tags: backend, bullmq, worker, concurrency, llama-cpp, performance | → decisions.md
 
 ## Patterns
@@ -22,4 +24,5 @@
 - [2026-05-04] Biome a11y 规则豁免应使用 biome.json overrides 而非内联注释 | tags: biome, a11y, linting, config, lightbox | → patterns.md
 - [2026-05-04] SSE 进度追踪使用 DB 轮询 + QueueEvents 双向更新模式 | tags: sse, bullmq, queue-events, progress, db-polling, pattern | → patterns.md
 - [2026-05-04] Next.js rewrites 不转发 SSE 流，EventSource 必须直连后端 | tags: nextjs, sse, eventsource, proxy, rewrite, cors | → patterns.md
+- [2026-05-04] 扫描收录与 AI 分析使用两层扩展名过滤，分离关注点 | tags: backend, scan, extension-filter, two-layer, separation-of-concerns | → patterns.md
 - [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload | tags: ai, vision, sharp, image-resize, performance, base64 | → patterns.md
