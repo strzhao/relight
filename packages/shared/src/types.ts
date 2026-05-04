@@ -91,6 +91,14 @@ export interface DailyPick {
   photo?: Photo;
 }
 
+/** 存储源可达性状态 */
+export type StorageSourceStatus =
+  | "unknown"
+  | "healthy"
+  | "inaccessible"
+  | "unmounted"
+  | "permission_denied";
+
 /** 存储源 */
 export interface StorageSource {
   id: string;
@@ -99,6 +107,8 @@ export interface StorageSource {
   rootPath: string;
   enabled: boolean;
   lastScanAt: string | null;
+  status?: StorageSourceStatus;
+  lastError?: string | null;
 }
 
 /** 扫描日志 */
@@ -143,6 +153,8 @@ export interface StorageSourceStats {
   photoCount: number;
   analyzedCount: number;
   lastScanAt: string | null;
+  status?: StorageSourceStatus;
+  lastError?: string | null;
 }
 
 /** 管理后台综合统计 */
@@ -249,7 +261,7 @@ export interface QueueJobSummary {
 }
 
 /** 队列作业详情（含 data 和 stacktrace） */
-export interface QueueJobDetail extends QueueJobSummary {
+export interface QueueJobDetail extends Omit<QueueJobSummary, "progress"> {
   data: unknown;
   progress: number | object;
   returnvalue: unknown;
@@ -386,6 +398,8 @@ export interface UnifiedPhotosResponse {
     rootPath: string;
     enabled: boolean;
     lastScanAt: string | null;
+    status?: StorageSourceStatus;
+    lastError?: string | null;
     photoCount: number;
     analyzedCount: number;
   };

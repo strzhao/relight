@@ -265,7 +265,7 @@ export const queuesRouter = new Hono()
         attemptsMade: job.attemptsMade,
         failedReason: job.failedReason ?? null,
         data: job.data,
-        progress: job.progress as ScanProgress | null,
+        progress: job.progress as number | object,
         returnvalue: job.returnvalue,
         opts: job.opts as Record<string, unknown>,
         stacktrace: job.stacktrace ?? [],

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 interface ScanProgressPanelProps {
   storageSourceId: string;
+  disabled?: boolean;
   onScanStart?: () => void;
   onScanComplete?: () => void;
 }
@@ -26,6 +27,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
 export function ScanProgressPanel({
   storageSourceId,
+  disabled,
   onScanStart,
   onScanComplete,
 }: ScanProgressPanelProps) {
@@ -179,7 +181,14 @@ export function ScanProgressPanel({
       {/* Idle */}
       {status === "idle" && (
         <div className="relative flex items-center" ref={dropdownRef}>
-          <Button variant="default" size="sm" onClick={handleScan} className="rounded-r-none">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleScan}
+            className="rounded-r-none"
+            disabled={disabled}
+            title={disabled ? "存储源路径不可达，无法触发扫描" : undefined}
+          >
             <Play className="size-4" />
             {scanMode === "forceRegenerate" ? "强制重建缩略图" : "触发扫描"}
           </Button>
@@ -188,6 +197,8 @@ export function ScanProgressPanel({
             size="sm"
             className="rounded-l-none border-l border-primary-foreground/20 px-2"
             onClick={() => setDropdownOpen((v) => !v)}
+            disabled={disabled}
+            title={disabled ? "存储源路径不可达，无法触发扫描" : undefined}
           >
             <ChevronDown className="size-3.5" />
           </Button>

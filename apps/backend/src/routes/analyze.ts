@@ -51,6 +51,37 @@ export const analyzeRouter = new Hono()
       );
     }
 
+    // 预检查：查询照片对应的存储源状态
+    const storageSourceIds = await db
+      .select({ storageSourceId: schema.photos.storageSourceId })
+      .from(schema.photos)
+      .where(inArray(schema.photos.id, photoIds));
+
+    const uniqueSourceIds = [...new Set(storageSourceIds.map((r) => r.storageSourceId))];
+
+    const sources = await db
+      .select({
+        id: schema.storageSources.id,
+        status: schema.storageSources.status,
+      })
+      .from(schema.storageSources)
+      .where(inArray(schema.storageSources.id, uniqueSourceIds));
+
+    const blockedStatuses = ["inaccessible", "unmounted", "permission_denied"] as const;
+    const blockedSource = sources.find(
+      (s) => s.status && blockedStatuses.includes(s.status as (typeof blockedStatuses)[number]),
+    );
+
+    if (blockedSource) {
+      return c.json(
+        {
+          success: false,
+          error: `存储源不可用：${blockedSource.status}，请检查路径后重试`,
+        },
+        400,
+      );
+    }
+
     // 3. 过滤已分析的照片（force=true 时跳过过滤）
     let toAnalyze = photoIds;
 

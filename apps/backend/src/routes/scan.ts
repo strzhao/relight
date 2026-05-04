@@ -37,6 +37,34 @@ export const scanRouter = new Hono()
       storageSourceId = sources[0].id;
     }
 
+    // 预检查：存储源可达性状态
+    const [sourceCheck] = await db
+      .select({
+        id: schema.storageSources.id,
+        status: schema.storageSources.status,
+        name: schema.storageSources.name,
+      })
+      .from(schema.storageSources)
+      .where(eq(schema.storageSources.id, storageSourceId));
+
+    if (!sourceCheck) {
+      return c.json({ success: false, error: "存储源不存在" }, 404);
+    }
+
+    const blockedStatuses = ["inaccessible", "unmounted", "permission_denied"] as const;
+    if (
+      sourceCheck.status &&
+      blockedStatuses.includes(sourceCheck.status as (typeof blockedStatuses)[number])
+    ) {
+      return c.json(
+        {
+          success: false,
+          error: `存储源不可用：${sourceCheck.status}，请检查路径后重试`,
+        },
+        400,
+      );
+    }
+
     // 并发守护：检查是否有 active scan（排除 stale 超过阈值日寸）
     const staleCutoff = new Date(Date.now() - STALE_THRESHOLD_MINUTES * 60 * 1000).toISOString();
 

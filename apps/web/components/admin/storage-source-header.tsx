@@ -1,6 +1,7 @@
 "use client";
 
 import { ScanProgressPanel } from "@/components/admin/scan-progress-panel";
+import { StorageSourceStatusBadge } from "@/components/admin/storage-source-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { UnifiedPhotosResponse } from "@relight/shared";
@@ -15,11 +16,15 @@ const typeLabels: Record<string, string> = {
   webdav: "WebDAV",
 };
 
+const blockedStatuses = ["inaccessible", "unmounted", "permission_denied"];
+
 export function StorageSourceHeader({ storageSource }: StorageSourceHeaderProps) {
   const coverage =
     storageSource.photoCount > 0
       ? Math.round((storageSource.analyzedCount / storageSource.photoCount) * 100)
       : 0;
+
+  const isDisabled = !!storageSource.status && blockedStatuses.includes(storageSource.status);
 
   return (
     <Card>
@@ -31,12 +36,16 @@ export function StorageSourceHeader({ storageSource }: StorageSourceHeaderProps)
               <Badge variant="secondary" className="text-xs">
                 {typeLabels[storageSource.type] ?? storageSource.type}
               </Badge>
+              <StorageSourceStatusBadge
+                status={storageSource.status ?? "unknown"}
+                lastError={storageSource.lastError}
+              />
             </div>
             <p className="mt-1 text-sm text-muted-foreground font-mono text-xs">
               {storageSource.rootPath}
             </p>
           </div>
-          <ScanProgressPanel storageSourceId={storageSource.id} />
+          <ScanProgressPanel storageSourceId={storageSource.id} disabled={isDisabled} />
         </div>
       </CardHeader>
       <CardContent>

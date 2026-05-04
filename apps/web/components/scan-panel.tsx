@@ -1,7 +1,7 @@
 "use client";
 
 import { api } from "@/lib/api";
-import type { FileTreeNode, StorageSource } from "@relight/shared";
+import type { FileTreeNode, StorageSource, StorageSourceStatus } from "@relight/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileTree } from "./file-tree";
 import { Button } from "./ui/button";
@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Skeleton } from "./ui/skeleton";
 
 type ScanStatus = "idle" | "scanning" | "scan_complete" | "analyzing" | "complete" | "error";
+
+const blockedStatuses: StorageSourceStatus[] = ["inaccessible", "unmounted", "permission_denied"];
 
 export function ScanPanel() {
   // 存储源
@@ -69,6 +71,11 @@ export function ScanPanel() {
     }
     loadSources();
   }, []);
+
+  // 选中的存储源状态
+  const selectedSource = sources.find((s) => s.id === selectedSourceId);
+  const isSourceBlocked =
+    !!selectedSource?.status && blockedStatuses.includes(selectedSource.status);
 
   // 清理轮询
   useEffect(() => {
@@ -281,10 +288,22 @@ export function ScanPanel() {
 
       {/* 状态区域 */}
       <div className="rounded-lg border bg-card p-4 space-y-3">
+        {/* 存储源不可访问告警 */}
+        {isSourceBlocked && (
+          <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            <strong>存储源不可用：</strong>
+            {selectedSource?.lastError ?? "路径无法访问"}
+          </div>
+        )}
+
         {/* Idle */}
         {status === "idle" && (
           <div className="flex items-center gap-3">
-            <Button onClick={handleStartScan} disabled={!selectedSourceId}>
+            <Button
+              onClick={handleStartScan}
+              disabled={!selectedSourceId || isSourceBlocked}
+              title={isSourceBlocked ? "存储源路径不可达，无法启动扫描" : undefined}
+            >
               开始扫描
             </Button>
             <span className="text-sm text-muted-foreground">扫描文件但先不进行 AI 分析</span>
@@ -339,7 +358,8 @@ export function ScanPanel() {
                   <Button
                     size="sm"
                     onClick={handleTriggerAnalyze}
-                    disabled={selectedIds.size === 0}
+                    disabled={selectedIds.size === 0 || isSourceBlocked}
+                    title={isSourceBlocked ? "存储源路径不可达，无法触发分析" : undefined}
                   >
                     分析选中 ({selectedIds.size})
                   </Button>

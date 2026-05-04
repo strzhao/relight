@@ -13,6 +13,8 @@ export const storageSources = sqliteTable("storage_sources", {
   rootPath: text("root_path").notNull(),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   lastScanAt: text("last_scan_at"),
+  status: text("status"),
+  lastError: text("last_error"),
 });
 
 /** 照片 */
