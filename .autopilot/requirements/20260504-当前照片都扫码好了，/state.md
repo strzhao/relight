@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 2
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: "deep"
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/ai/.autopilot/requirements/20260504-当前照片都扫码好了，"
 session_id: e7faa649-7ff3-444f-9eb3-6770707b922e
 started_at: "2026-05-04T07:15:55Z"
