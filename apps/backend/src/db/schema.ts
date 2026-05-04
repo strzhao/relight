@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, real, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
 
 /** 存储源 */
 export const storageSources = sqliteTable("storage_sources", {
@@ -16,23 +16,29 @@ export const storageSources = sqliteTable("storage_sources", {
 });
 
 /** 照片 */
-export const photos = sqliteTable("photos", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  storageSourceId: text("storage_source_id")
-    .notNull()
-    .references(() => storageSources.id),
-  filePath: text("file_path").notNull(),
-  fileHash: text("file_hash").notNull().unique(),
-  width: integer("width").notNull().default(0),
-  height: integer("height").notNull().default(0),
-  fileSize: integer("file_size").notNull().default(0),
-  thumbnailPath: text("thumbnail_path"),
-  takenAt: text("taken_at"),
-  fileMtime: integer("file_mtime"),
-  createdAt: text("created_at").notNull(),
-});
+export const photos = sqliteTable(
+  "photos",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    storageSourceId: text("storage_source_id")
+      .notNull()
+      .references(() => storageSources.id),
+    filePath: text("file_path").notNull(),
+    fileHash: text("file_hash").notNull().unique(),
+    width: integer("width").notNull().default(0),
+    height: integer("height").notNull().default(0),
+    fileSize: integer("file_size").notNull().default(0),
+    thumbnailPath: text("thumbnail_path"),
+    takenAt: text("taken_at"),
+    fileMtime: integer("file_mtime"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    unq_storage_file: unique().on(t.storageSourceId, t.filePath),
+  }),
+);
 
 /** 标签 */
 export const tags = sqliteTable("tags", {

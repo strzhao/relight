@@ -26,7 +26,30 @@ export async function convertHeicToJpeg(
 ): Promise<Buffer> {
   const { maxWidth, maxHeight, quality = 80 } = options;
 
-  const { width, height, data } = await decode({ buffer });
+  let width: number;
+  let height: number;
+  let data: ArrayBuffer;
+
+  try {
+    const decoded = await decode({ buffer });
+    width = decoded.width;
+    height = decoded.height;
+    data = decoded.data;
+  } catch (heicError) {
+    try {
+      const { data: rawData, info } = await sharp(buffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      width = info.width;
+      height = info.height;
+      data = rawData.buffer;
+    } catch (sharpError) {
+      throw new Error(
+        `HEIC 转换失败：heic-decode 和 sharp 均无法处理该文件。heic-decode: ${(heicError as Error).message}；sharp: ${(sharpError as Error).message}`,
+      );
+    }
+  }
 
   let pipeline = sharp(Buffer.from(data), {
     raw: { width, height, channels: 4 },
