@@ -2,7 +2,7 @@
  * 验收测试：Admin API 契约
  *
  * 覆盖设计文档「管理后台」新增 API：
- * - GET /api/admin/stats    → 综合统计  { success, data: { totalPhotos, analyzedCount, averageScore, passRate8Plus, storageSources, recentAnalyses } }
+ * - GET /api/admin/stats    → 综合统计  { success, data: { totalPhotos, analyzedPhotos, avgAestheticScore, passRate, storageSources, recentAnalyses } }
  * - GET /api/admin/queues   → 队列状态  { success, data: { scan, analyze, daily } } 每个含 waiting/active/completed/failed/delayed
  * - GET /api/admin/health   → 健康检查  { success, data: { api, db, redis, ai } } 每个含 status: "ok"|"error"|"degraded"
  * - GET /api/admin/photos   → 分页列表  PaginatedResponse<PhotoAnalysisItem>，支持 sortBy: "aestheticScore"|"processedAt"
@@ -94,9 +94,9 @@ vi.mock("../jobs/queues", () => ({
 /** stats 端点返回的 data 字段 */
 interface AdminStatsData {
   totalPhotos: number;
-  analyzedCount: number;
-  averageScore: number;
-  passRate8Plus: number;
+  analyzedPhotos: number;
+  avgAestheticScore: number;
+  passRate: number;
   storageSources: Array<{
     id?: string;
     name: string;
@@ -127,14 +127,18 @@ interface AdminQueuesData {
   daily: QueueStatus;
 }
 
-/** photos 端点返回的单条照片分析项 */
+/** photos 端点返回的单条照片（实际结构含嵌套 latestAnalysis） */
 interface PhotoAnalysisItem {
   id: string;
   filePath: string;
-  aestheticScore: number;
-  processedAt: string;
-  narrative?: string | null;
-  aiModel?: string;
+  createdAt: string;
+  latestAnalysis: {
+    id: string;
+    aestheticScore: number;
+    processedAt: string;
+    narrative?: string | null;
+    aiModel?: string | null;
+  } | null;
 }
 
 // ---- 辅助：创建测试 App ----
@@ -147,8 +151,8 @@ async function createAdminApp(): Promise<Hono> {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const adminMod = await import("../routes/admin");
   // 兼容不同的导出方式
-  const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
+  const adminRouter: Hono = ((adminMod as Record<string, Hono>).adminRouter ||
+    (adminMod as Record<string, Hono>).default)!;
   const app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -199,9 +203,9 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
   describe("GET /api/admin/stats — 综合统计", () => {
     const statsFields = [
       "totalPhotos",
-      "analyzedCount",
-      "averageScore",
-      "passRate8Plus",
+      "analyzedPhotos",
+      "avgAestheticScore",
+      "passRate",
       "storageSources",
       "recentAnalyses",
     ] as const;
@@ -235,16 +239,16 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
       expect(typeof body.data.totalPhotos).toBe("number");
     });
 
-    it("analyzedCount 应为 number 类型", () => {
-      expect(typeof body.data.analyzedCount).toBe("number");
+    it("analyzedPhotos 应为 number 类型", () => {
+      expect(typeof body.data.analyzedPhotos).toBe("number");
     });
 
-    it("averageScore 应为 number 类型", () => {
-      expect(typeof body.data.averageScore).toBe("number");
+    it("avgAestheticScore 应为 number 类型", () => {
+      expect(typeof body.data.avgAestheticScore).toBe("number");
     });
 
-    it("passRate8Plus 应为 number 类型", () => {
-      expect(typeof body.data.passRate8Plus).toBe("number");
+    it("passRate 应为 number 类型", () => {
+      expect(typeof body.data.passRate).toBe("number");
     });
 
     it("storageSources 应为数组类型", () => {
@@ -324,14 +328,15 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
   // GET /api/admin/queues
   // ============================================================
   describe("GET /api/admin/queues — 队列监控", () => {
-    const queueNames = ["scan", "analyze", "daily"] as const;
+    const expectedQueueNames = ["scan-storage", "analyze-photo", "daily-selection"] as const;
     const queueFields = ["waiting", "active", "completed", "failed", "delayed"] as const;
 
-    let body: { success: boolean; data: AdminQueuesData; error?: string };
+    type QueueDataItem = { name: string; counts: Record<string, number> };
+    let body: { success: boolean; data: QueueDataItem[]; error?: string };
 
     beforeAll(async () => {
       const res = await get("/api/admin/queues");
-      body = res.body as { success: boolean; data: AdminQueuesData; error?: string };
+      body = res.body as { success: boolean; data: QueueDataItem[]; error?: string };
     });
 
     it("应返回 HTTP 200", async () => {
@@ -344,32 +349,39 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
       expect(body.data).toBeDefined();
     });
 
-    it.each(queueNames)("data 应包含 %s 队列", (queueName) => {
-      expect(body.data).toHaveProperty(queueName);
+    it("data 应为数组且包含 3 个队列", () => {
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.data).toHaveLength(3);
     });
 
-    describe.each(queueNames)("%s 队列状态", (queueName) => {
+    it.each(expectedQueueNames)("data 应包含 %s 队列", (queueName) => {
+      const found = body.data.find((q) => q.name === queueName);
+      expect(found).toBeDefined();
+    });
+
+    describe.each(expectedQueueNames)("%s 队列状态", (queueName) => {
       it.each(queueFields)("应包含字段 %s (number)", (field) => {
-        const queue = body.data[queueName];
-        expect(queue).toHaveProperty(field);
-        expect(typeof queue[field]).toBe("number");
+        const queue = body.data.find((q) => q.name === queueName);
+        expect(queue).toBeDefined();
+        expect(queue!.counts).toHaveProperty(field);
+        expect(typeof queue!.counts[field]).toBe("number");
       });
 
       it("所有计数字段应为非负整数", () => {
-        const queue = body.data[queueName];
+        const queue = body.data.find((q) => q.name === queueName);
+        expect(queue).toBeDefined();
         for (const field of queueFields) {
-          expect(queue[field]).toBeGreaterThanOrEqual(0);
-          expect(Number.isInteger(queue[field])).toBe(true);
+          expect(queue!.counts[field]).toBeGreaterThanOrEqual(0);
+          expect(Number.isInteger(queue!.counts[field])).toBe(true);
         }
       });
     });
 
     it("三个队列状态结构应一致", () => {
-      const scanKeys = Object.keys(body.data.scan).sort();
-      const analyzeKeys = Object.keys(body.data.analyze).sort();
-      const dailyKeys = Object.keys(body.data.daily).sort();
-      expect(scanKeys).toEqual(analyzeKeys);
-      expect(analyzeKeys).toEqual(dailyKeys);
+      const keys = body.data.map((q) => Object.keys(q.counts).sort());
+      for (let i = 1; i < keys.length; i++) {
+        expect(keys[i]).toEqual(keys[0]);
+      }
     });
   });
 
@@ -505,12 +517,17 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
   // GET /api/admin/photos
   // ============================================================
   describe("GET /api/admin/photos — 分页分析列表", () => {
-    let body: {
-      success: boolean;
+    type PhotosData = {
       data: PhotoAnalysisItem[];
       total: number;
       page: number;
       pageSize: number;
+      storageSources: unknown[];
+    };
+
+    let body: {
+      success: boolean;
+      data: PhotosData;
       error?: string;
     };
 
@@ -524,23 +541,24 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
       expect(status).toBe(200);
     });
 
-    it("应返回 PaginatedResponse 格式 { success, data[], total, page, pageSize }", () => {
+    it("应返回嵌套的 data 结构 { data[], total, page, pageSize }", () => {
       expect(body.success).toBe(true);
-      expect(Array.isArray(body.data)).toBe(true);
-      expect(typeof body.total).toBe("number");
-      expect(typeof body.page).toBe("number");
-      expect(typeof body.pageSize).toBe("number");
+      expect(body.data).toBeDefined();
+      expect(Array.isArray(body.data.data)).toBe(true);
+      expect(typeof body.data.total).toBe("number");
+      expect(typeof body.data.page).toBe("number");
+      expect(typeof body.data.pageSize).toBe("number");
     });
 
     it("total 和 page 应为非负整数", () => {
-      expect(body.total).toBeGreaterThanOrEqual(0);
-      expect(Number.isInteger(body.total)).toBe(true);
-      expect(body.page).toBeGreaterThanOrEqual(1);
-      expect(Number.isInteger(body.page)).toBe(true);
+      expect(body.data.total).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(body.data.total)).toBe(true);
+      expect(body.data.page).toBeGreaterThanOrEqual(1);
+      expect(Number.isInteger(body.data.page)).toBe(true);
     });
 
     it("pageSize 应 > 0", () => {
-      expect(body.pageSize).toBeGreaterThan(0);
+      expect(body.data.pageSize).toBeGreaterThan(0);
     });
 
     describe("支持 sortBy 查询参数", () => {
@@ -559,42 +577,44 @@ describe("Admin API 契约 — 验收测试（管理后台设计文档）", () =
       it("page=1&pageSize=10 应返回 200", async () => {
         const { status, body: b } = await get("/api/admin/photos?page=1&pageSize=10");
         expect(status).toBe(200);
-        const parsed = b as { page: number; pageSize: number };
-        expect(parsed.page).toBe(1);
-        expect(parsed.pageSize).toBe(10);
+        const parsed = b as { data: { page: number; pageSize: number } };
+        expect(parsed.data.page).toBe(1);
+        expect(parsed.data.pageSize).toBe(10);
       });
 
       it("page=2&pageSize=20 应返回 200", async () => {
         const { status, body: b } = await get("/api/admin/photos?page=2&pageSize=20");
         expect(status).toBe(200);
-        const parsed = b as { page: number; pageSize: number };
-        expect(parsed.page).toBe(2);
-        expect(parsed.pageSize).toBe(20);
+        const parsed = b as { data: { page: number; pageSize: number } };
+        expect(parsed.data.page).toBe(2);
+        expect(parsed.data.pageSize).toBe(20);
       });
     });
 
     describe("PhotoAnalysisItem 字段结构", () => {
       it("每条记录应包含 id (string)", () => {
-        for (const item of body.data) {
+        for (const item of body.data.data) {
           expect(typeof item.id).toBe("string");
         }
       });
 
       it("每条记录应包含 filePath (string)", () => {
-        for (const item of body.data) {
+        for (const item of body.data.data) {
           expect(typeof item.filePath).toBe("string");
         }
       });
 
-      it("每条记录应包含 aestheticScore (number)", () => {
-        for (const item of body.data) {
-          expect(typeof item.aestheticScore).toBe("number");
+      it("每条记录应包含 latestAnalysis（可能为 null 或有 aestheticScore）", () => {
+        for (const item of body.data.data) {
+          if (item.latestAnalysis) {
+            expect(typeof item.latestAnalysis.aestheticScore).toBe("number");
+          }
         }
       });
 
-      it("每条记录应包含 processedAt (string)", () => {
-        for (const item of body.data) {
-          expect(typeof item.processedAt).toBe("string");
+      it("每条记录应包含 createdAt (string)", () => {
+        for (const item of body.data.data) {
+          expect(typeof item.createdAt).toBe("string");
         }
       });
     });

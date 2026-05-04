@@ -140,7 +140,7 @@ test.describe("/photos 页面滚动体验", () => {
     const pages = apiCalls
       .map((url) => {
         const match = url.match(/page=(\d+)/);
-        return match ? Number.parseInt(match[1]) : null;
+        return match ? Number.parseInt(match[1] as string) : null;
       })
       .filter(Boolean);
 

@@ -1,9 +1,9 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 qa_scope: ""
-iteration: 2
+iteration: 3
 max_iterations: 30
 max_retries: 3
 retry_count: 1
@@ -12,7 +12,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/link/.autopilot/sessions/link/requirements/20260504-3-个都做"
 session_id: 0f01ccf1-e49f-4594-a21a-07bd1345a9d8
 started_at: "2026-05-04T08:40:12Z"
@@ -158,3 +158,5 @@ notify_off=yes
 - [2026-05-04T09:30:00Z] QA 完成: Wave 1 全部 ✅, Wave 1.5 4场景 ✅, Wave 2 design-reviewer ✅, code-quality-reviewer ❌ (2 Critical)
 - [2026-05-04T09:45:00Z] auto-fix: 修复 5 个问题 — osascript 超时保护 (Critical)、mkdir 并发锁 (Critical)、日志轮转 (Important)、wait 子进程 (Important)、权限 600 (Important)、mount \| grep 精确匹配 (Minor)
 - [2026-05-04T10:00:00Z] QA 轮次 2: 全部 ✅，gate: review-accept
+- [2026-05-04T10:15:00Z] merge: git commit 69ca766 (session) + 5c981fd (knowledge)
+- [2026-05-04T10:15:00Z] 知识提取: macOS SMB 挂载持久化模式沉淀至 patterns.md

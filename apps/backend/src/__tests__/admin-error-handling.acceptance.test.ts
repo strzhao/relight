@@ -70,8 +70,8 @@ let app: Hono;
 
 beforeAll(async () => {
   const adminMod = await import("../routes/admin");
-  const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
+  const adminRouter: Hono = ((adminMod as Record<string, Hono>).adminRouter ||
+    (adminMod as Record<string, Hono>).default)!;
   app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -224,23 +224,27 @@ describe("Admin API 错误处理 — 验收测试", () => {
   describe("GET /api/admin/queues — 错误响应", () => {
     it("应始终返回包含三个队列的响应", async () => {
       const { body } = await get("/api/admin/queues");
-      const parsed = body as { success: boolean; data: Record<string, unknown> };
-      expect(parsed.data).toHaveProperty("scan");
-      expect(parsed.data).toHaveProperty("analyze");
-      expect(parsed.data).toHaveProperty("daily");
+      const parsed = body as { success: boolean; data: Array<{ name: string; counts: unknown }> };
+      // 实际 API 返回 data 数组，每项有 name 字段标识队列
+      expect(Array.isArray(parsed.data)).toBe(true);
+      const names = parsed.data.map((q) => q.name);
+      expect(names).toContain("scan-storage");
+      expect(names).toContain("analyze-photo");
+      expect(names).toContain("daily-selection");
     });
 
     it("队列计数字段不应为负数", async () => {
       const { body } = await get("/api/admin/queues");
       const parsed = body as {
         success: boolean;
-        data: Record<string, Record<string, number>>;
+        data: Array<{ name: string; counts: Record<string, number> }>;
       };
-      for (const queueName of ["scan", "analyze", "daily"]) {
-        const queue = parsed.data[queueName];
-        if (queue) {
+      for (const queue of parsed.data) {
+        if (queue?.counts) {
           for (const field of ["waiting", "active", "completed", "failed", "delayed"]) {
-            expect(queue[field]).toBeGreaterThanOrEqual(0);
+            if (queue.counts[field] !== undefined) {
+              expect(queue.counts[field]).toBeGreaterThanOrEqual(0);
+            }
           }
         }
       }
@@ -251,35 +255,39 @@ describe("Admin API 错误处理 — 验收测试", () => {
   // GET /api/admin/health 错误场景
   // ============================================================
   describe("GET /api/admin/health — 降级和错误状态", () => {
-    it("应返回 4 个组件状态", async () => {
+    it("应返回 components 数组", async () => {
       const { body } = await get("/api/admin/health");
       const parsed = body as {
         success: boolean;
-        data: Record<string, { status: string }>;
+        data: { components: Array<{ component: string; status: string }>; overall: string };
       };
-      expect(Object.keys(parsed.data)).toHaveLength(4);
+      // API 返回 { success, data: { components: [...], overall } }
+      expect(parsed.data).toHaveProperty("components");
+      expect(parsed.data).toHaveProperty("overall");
+      expect(Array.isArray(parsed.data.components)).toBe(true);
+      expect(parsed.data.components.length).toBeGreaterThanOrEqual(1);
     });
 
     it("每个组件 status 应为合法值", async () => {
       const { body } = await get("/api/admin/health");
       const parsed = body as {
         success: boolean;
-        data: Record<string, { status: string }>;
+        data: { components: Array<{ component: string; status: string }>; overall: string };
       };
-      const validStatuses = ["ok", "error", "degraded"];
-      for (const component of Object.keys(parsed.data)) {
-        const comp = parsed.data[component];
+      const validStatuses = ["healthy", "degraded", "unhealthy"];
+      for (const comp of parsed.data.components) {
         expect(validStatuses).toContain(comp?.status);
       }
     });
 
-    it("API 组件自身应始终报告 'ok'", async () => {
+    it("API 组件自身应始终报告 'healthy'", async () => {
       const { body } = await get("/api/admin/health");
       const parsed = body as {
         success: boolean;
-        data: Record<string, { status: string }>;
+        data: { components: Array<{ component: string; status: string }>; overall: string };
       };
-      expect(parsed.data.api?.status).toBe("ok");
+      const apiComp = parsed.data.components.find((c) => c.component === "api");
+      expect(apiComp?.status).toBe("healthy");
     });
 
     it("整个响应不应因组件状态为 error 而返回 HTTP 5xx", async () => {

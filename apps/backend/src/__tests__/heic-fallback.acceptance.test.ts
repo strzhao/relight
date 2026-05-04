@@ -12,7 +12,7 @@
  * 此时应降级到 sharp 处理。sharp 能自动检测真实图片格式 (JPEG/PNG/WebP 等)，
  * 从而正确处理伪装文件。
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock heic-decode — 控制解码成功/失败
 const mockDecode = vi.fn();
@@ -60,6 +60,7 @@ describe("HEIC fallback — convertHeicToJpeg 验证（设计文档 §2）", () 
     mockSharpResize.mockReset();
     mockSharpJpeg.mockReset();
     mockSharpToBuffer.mockReset();
+    mockSharpToFile.mockReset();
 
     // 重新设置 mock 工厂
     mockSharp.mockImplementation(() => ({
@@ -69,6 +70,7 @@ describe("HEIC fallback — convertHeicToJpeg 验证（设计文档 §2）", () 
       resize: mockSharpResize.mockReturnThis(),
       jpeg: mockSharpJpeg.mockReturnThis(),
       toBuffer: mockSharpToBuffer,
+      toFile: mockSharpToFile,
     }));
   });
 
@@ -131,26 +133,9 @@ describe("HEIC fallback — convertHeicToJpeg 验证（设计文档 §2）", () 
         new Error("heic-decode: unsupported format or corrupted file"),
       );
 
-      // 模拟 sharp fallback:
-      // 1. metadata() 返回宽高
-      mockSharpMetadata.mockResolvedValueOnce({
-        width: 200,
-        height: 150,
-        format: "jpeg", // 表示这是一张伪装的 JPEG
-      });
-
-      // 2. ensureAlpha().raw().toBuffer() 返回 RGBA 数据
-      mockSharpToBuffer.mockResolvedValueOnce({
-        data: Buffer.alloc(200 * 150 * 4),
-        info: { width: 200, height: 150, channels: 4 },
-      });
-
-      // 3. 第二个 sharp pipeline 返回 JPEG buffer
-      // 注意：convertHeicToJpeg 内部会调用两次 sharp
-      // 第一次: sharp(buffer).metadata() + sharp(buffer).ensureAlpha().raw().toBuffer()
-      // 第二次: sharp(Buffer.from(data), { raw: ... }).resize().jpeg().toBuffer()
-      // 两个 sharp 调用共享同一个 mock，但每次 mockSharp() 返回同一个 pipeline
-      // 需要让 toBuffer 第二次返回 JPEG 结果
+      // 模拟 sharp fallback: ensureAlpha().raw().toBuffer() 返回 RGBA 数据
+      // 注：实际实现不调用 metadata()，而是直接 ensureAlpha().raw().toBuffer()
+      // 然后第二个 sharp pipeline 返回 JPEG buffer
       mockSharpToBuffer
         .mockResolvedValueOnce({
           data: Buffer.alloc(200 * 150 * 4),
@@ -166,22 +151,16 @@ describe("HEIC fallback — convertHeicToJpeg 验证（设计文档 §2）", () 
       // 验证 heic-decode 被调用且失败
       expect(mockDecode).toHaveBeenCalledWith({ buffer: testBuffer });
 
-      // 验证 sharp fallback 被触发：metadata() 被调用
-      expect(mockSharpMetadata).toHaveBeenCalled();
+      // 验证 sharp fallback 被触发：sharp() 被调用处理 buffer
+      expect(mockSharp).toHaveBeenCalledWith(testBuffer);
 
       // 验证返回了 JPEG buffer
       expect(result).toBeInstanceOf(Buffer);
     });
 
-    it("sharp fallback 应通过 metadata() 检测真实格式（JPEG/PNG/WebP 等）", async () => {
-      // sharp.metadata() 会返回 format 字段，能自动识别 JPEG/PNG 等
+    it("sharp fallback 应通过 ensureAlpha().raw() 处理伪装格式（JPEG/PNG/WebP 等）", async () => {
+      // sharp 的 ensureAlpha().raw() 能自动检测图片实际格式并提取 RGBA 像素
       mockDecode.mockRejectedValueOnce(new Error("decode failed"));
-
-      mockSharpMetadata.mockResolvedValueOnce({
-        width: 300,
-        height: 200,
-        format: "png", // 实际是 PNG 伪装成 HEIC
-      });
 
       mockSharpToBuffer
         .mockResolvedValueOnce({
@@ -195,8 +174,8 @@ describe("HEIC fallback — convertHeicToJpeg 验证（设计文档 §2）", () 
       const testBuffer = Buffer.from("png-disguised-as-heic");
       const result = await convertHeicToJpeg(testBuffer);
 
-      // sharp metadata 被调用来检测格式
-      expect(mockSharpMetadata).toHaveBeenCalled();
+      // sharp fallback 被触发：ensureAlpha().raw().toBuffer() 处理 buffer
+      expect(mockSharp).toHaveBeenCalledWith(testBuffer);
       expect(result).toBeInstanceOf(Buffer);
     });
   });

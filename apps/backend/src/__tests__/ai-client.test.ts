@@ -8,7 +8,7 @@
  * - response_format: { type: "json_object" } 和 seed: 42 在首次调用中
  * - 首次调用失败时不带 response_format 和 seed 进行回退
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---- Mock OpenAI (必须使用 vi.hoisted 因为 vi.mock 会被提升) ----
 
@@ -107,25 +107,19 @@ describe("AI Client 参数与行为 — 验收测试", () => {
           content: Array<{ type: string; image_url?: { url: string }; text?: string }>;
         }>;
       };
-      const userMessage = callArgs.messages.find(
-        (m: { role: string }) => m.role === "user",
-      );
+      const userMessage = callArgs.messages.find((m: { role: string }) => m.role === "user");
       expect(userMessage).toBeDefined();
 
       const userContent = userMessage!.content;
       expect(userContent).toBeInstanceOf(Array);
 
       // 应包含 image_url 类型
-      const imagePart = userContent.find(
-        (p: { type: string }) => p.type === "image_url",
-      );
+      const imagePart = userContent.find((p: { type: string }) => p.type === "image_url");
       expect(imagePart).toBeDefined();
       expect(imagePart!.image_url!.url).toBe("data:image/webp;base64,Zm9v");
 
       // 应包含 text 类型
-      const textPart = userContent.find(
-        (p: { type: string }) => p.type === "text",
-      );
+      const textPart = userContent.find((p: { type: string }) => p.type === "text");
       expect(textPart).toBeDefined();
       expect(textPart!.text).toBe("分析这张照片");
     });

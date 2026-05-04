@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     name: "web",
     environment: "jsdom",
+    exclude: ["e2e/**", "**/node_modules/**", "**/dist/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

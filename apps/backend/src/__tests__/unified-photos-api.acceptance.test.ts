@@ -130,8 +130,8 @@ interface UnifiedPhotosResponseBody {
 
 async function createAdminApp(): Promise<Hono> {
   const adminMod = await import("../routes/admin");
-  const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
+  const adminRouter: Hono = ((adminMod as Record<string, Hono>).adminRouter ||
+    (adminMod as Record<string, Hono>).default)!;
   const app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);

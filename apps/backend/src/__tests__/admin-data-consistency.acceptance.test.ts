@@ -2,7 +2,7 @@
  * 验收测试：Admin API 数据一致性
  *
  * 覆盖设计文档「管理后台」数据流：
- * - stats 端点返回的 totalPhotos / analyzedCount / averageScore / passRate8Plus 应与 DB 实际数据一致
+ * - stats 端点返回的 totalPhotos / analyzedPhotos / avgAestheticScore / passRate 应与 DB 实际数据一致
  * - storageSources 中 photoCount 应与实际关联照片数一致
  * - recentAnalyses 最多 10 条，按 processedAt 降序
  * - photos 端点支持 sortBy=aestheticScore|processedAt 排序
@@ -22,9 +22,9 @@ import * as realSchema from "../db/schema";
 
 interface AdminStatsData {
   totalPhotos: number;
-  analyzedCount: number;
-  averageScore: number;
-  passRate8Plus: number;
+  analyzedPhotos: number;
+  avgAestheticScore: number;
+  passRate: number;
   storageSources: Array<{ name: string; type: string; photoCount: number }>;
   recentAnalyses: Array<{ filePath: string; aestheticScore: number; processedAt: string }>;
 }
@@ -32,16 +32,24 @@ interface AdminStatsData {
 interface PhotoAnalysisItem {
   id: string;
   filePath: string;
-  aestheticScore: number;
-  processedAt: string;
+  createdAt: string;
+  latestAnalysis: {
+    aestheticScore: number;
+    processedAt: string;
+    id?: string;
+    aiModel?: string | null;
+    narrative?: string | null;
+  } | null;
 }
 
 interface PaginatedPhotosResponse {
   success: boolean;
-  data: PhotoAnalysisItem[];
-  total: number;
-  page: number;
-  pageSize: number;
+  data: {
+    data: PhotoAnalysisItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
 }
 
 // ---- 测试 DB Holder（vi.hoisted 确保在 mock 提升前可用） ----
@@ -170,7 +178,7 @@ beforeAll(async () => {
     });
   }
 
-  // 5. 插入一张未分析的照片（验证 totalPhotos > analyzedCount）
+  // 5. 插入一张未分析的照片（验证 totalPhotos > analyzedPhotos）
   const unanalyzedId = crypto.randomUUID();
   photoIds.push(unanalyzedId);
   await db.insert(realSchema.photos).values({
@@ -211,8 +219,8 @@ beforeAll(async () => {
 
   // 7. 动态导入 admin router 并创建测试 App
   const adminMod = await import("../routes/admin");
-  const adminRouter: Hono =
-    (adminMod as Record<string, Hono>).adminRouter || (adminMod as Record<string, Hono>).default;
+  const adminRouter: Hono = ((adminMod as Record<string, Hono>).adminRouter ||
+    (adminMod as Record<string, Hono>).default)!;
   app = new Hono();
   app.use("*", cors());
   app.route("/api/admin", adminRouter);
@@ -250,19 +258,19 @@ describe("Admin API 数据一致性 — 验收测试", () => {
       expect(stats.totalPhotos).toBe(9);
     });
 
-    it("analyzedCount 应与 DB 中 photoAnalyses 表的唯一 photoId 数一致", () => {
+    it("analyzedPhotos 应与 DB 中 photoAnalyses 表的唯一 photoId 数一致", () => {
       // 已插入 8 条分析记录
-      expect(stats.analyzedCount).toBe(8);
+      expect(stats.analyzedPhotos).toBe(8);
     });
 
-    it("averageScore 应等于所有分析记录 aestheticScore 的平均值", () => {
+    it("avgAestheticScore 应等于所有分析记录 aestheticScore 的平均值", () => {
       // 评分: 9+8+7+6+5+8+9+4 = 56, avg = 7.0
-      expect(stats.averageScore).toBe(7.0);
+      expect(stats.avgAestheticScore).toBe(7.0);
     });
 
-    it("passRate8Plus 应等于 aestheticScore >= 8 的比例", () => {
-      // >=8 的有: 9, 8, 8, 9 → 4 张 out of 8 → 50%
-      expect(stats.passRate8Plus).toBe(50);
+    it("passRate 应等于 aestheticScore >= 8 的比例", () => {
+      // >=8 的有: 9, 8, 8, 9 → 4 张 out of 8 → 0.5（API 返回小数，非百分比）
+      expect(stats.passRate).toBe(0.5);
     });
 
     it("storageSources 应包含正确的 photoCount", () => {
@@ -306,14 +314,14 @@ describe("Admin API 数据一致性 — 验收测试", () => {
     it("默认应返回第 1 页数据", async () => {
       const { body } = await get("/api/admin/photos");
       const parsed = body as PaginatedPhotosResponse;
-      expect(parsed.page).toBe(1);
-      expect(parsed.total).toBe(8); // 只返回有分析记录的照片
+      expect(parsed.data.page).toBe(1);
+      expect(parsed.data.total).toBe(9); // 所有照片（含未分析的）
     });
 
     it("sortBy=aestheticScore 应按评分降序排列", async () => {
       const { body } = await get("/api/admin/photos?sortBy=aestheticScore");
       const parsed = body as PaginatedPhotosResponse;
-      const scores = parsed.data.map((p) => p.aestheticScore);
+      const scores = parsed.data.data.map((p) => p.latestAnalysis?.aestheticScore ?? 0);
       for (let i = 1; i < scores.length; i++) {
         expect(scores[i - 1]).toBeGreaterThanOrEqual(scores[i] ?? 0);
       }
@@ -322,7 +330,9 @@ describe("Admin API 数据一致性 — 验收测试", () => {
     it("sortBy=processedAt 应按处理时间降序排列", async () => {
       const { body } = await get("/api/admin/photos?sortBy=processedAt");
       const parsed = body as PaginatedPhotosResponse;
-      const times = parsed.data.map((p) => new Date(p.processedAt).getTime());
+      const times = parsed.data.data.map((p) =>
+        p.latestAnalysis?.processedAt ? new Date(p.latestAnalysis.processedAt).getTime() : 0,
+      );
       for (let i = 1; i < times.length; i++) {
         expect(times[i - 1]).toBeGreaterThanOrEqual(times[i] ?? 0);
       }
@@ -331,31 +341,31 @@ describe("Admin API 数据一致性 — 验收测试", () => {
     it("page=1&pageSize=3 应返回 3 条记录", async () => {
       const { body } = await get("/api/admin/photos?page=1&pageSize=3");
       const parsed = body as PaginatedPhotosResponse;
-      expect(parsed.data).toHaveLength(3);
-      expect(parsed.page).toBe(1);
-      expect(parsed.pageSize).toBe(3);
+      expect(parsed.data.data).toHaveLength(3);
+      expect(parsed.data.page).toBe(1);
+      expect(parsed.data.pageSize).toBe(3);
     });
 
     it("page=2&pageSize=3 应返回第 2 页的 3 条记录", async () => {
       const { body } = await get("/api/admin/photos?page=2&pageSize=3");
       const parsed = body as PaginatedPhotosResponse;
-      expect(parsed.page).toBe(2);
-      expect(parsed.data.length).toBeGreaterThanOrEqual(1);
-      expect(parsed.data.length).toBeLessThanOrEqual(3);
+      expect(parsed.data.page).toBe(2);
+      expect(parsed.data.data.length).toBeGreaterThanOrEqual(1);
+      expect(parsed.data.data.length).toBeLessThanOrEqual(3);
     });
 
-    it("page=3&pageSize=3 应返回最后 2 条记录（总共 8 条，每页 3 条）", async () => {
+    it("page=3&pageSize=3 应返回最后 3 条记录（总共 9 条，每页 3 条）", async () => {
       const { body } = await get("/api/admin/photos?page=3&pageSize=3");
       const parsed = body as PaginatedPhotosResponse;
-      expect(parsed.data).toHaveLength(2);
-      expect(parsed.page).toBe(3);
+      expect(parsed.data.data).toHaveLength(3);
+      expect(parsed.data.page).toBe(3);
     });
 
-    it("page=4&pageSize=3 应返回空数组，total 仍是 8", async () => {
+    it("page=4&pageSize=3 应返回空数组，total 仍是 9", async () => {
       const { body } = await get("/api/admin/photos?page=4&pageSize=3");
       const parsed = body as PaginatedPhotosResponse;
-      expect(parsed.data).toHaveLength(0);
-      expect(parsed.total).toBe(8);
+      expect(parsed.data.data).toHaveLength(0);
+      expect(parsed.data.total).toBe(9);
     });
 
     it("连续翻页不应丢失记录", async () => {
@@ -363,13 +373,13 @@ describe("Admin API 数据一致性 — 验收测试", () => {
       for (let page = 1; ; page++) {
         const { body } = await get(`/api/admin/photos?page=${page}&pageSize=3`);
         const parsed = body as PaginatedPhotosResponse;
-        for (const item of parsed.data) {
+        for (const item of parsed.data.data) {
           allIds.add(item.id);
         }
-        if (parsed.data.length < 3) break;
+        if (parsed.data.data.length < 3) break;
       }
-      // 总共应有 8 条唯一记录
-      expect(allIds.size).toBe(8);
+      // 总共应有 9 条唯一记录（含未分析照片）
+      expect(allIds.size).toBe(9);
     });
   });
 
@@ -377,26 +387,26 @@ describe("Admin API 数据一致性 — 验收测试", () => {
   // Stats 边界情况验证
   // ============================================================
   describe("Stats 边界情况", () => {
-    it("analyzedCount 不应超过 totalPhotos", async () => {
+    it("analyzedPhotos 不应超过 totalPhotos", async () => {
       const { body } = await get("/api/admin/stats");
       const stats = (body as { success: boolean; data: AdminStatsData }).data;
-      expect(stats.analyzedCount).toBeLessThanOrEqual(stats.totalPhotos);
+      expect(stats.analyzedPhotos).toBeLessThanOrEqual(stats.totalPhotos);
     });
 
-    it("averageScore 应在 1-10 范围内（当有分析记录时）", async () => {
+    it("avgAestheticScore 应在 1-10 范围内（当有分析记录时）", async () => {
       const { body } = await get("/api/admin/stats");
       const stats = (body as { success: boolean; data: AdminStatsData }).data;
-      if (stats.analyzedCount > 0) {
-        expect(stats.averageScore).toBeGreaterThanOrEqual(1);
-        expect(stats.averageScore).toBeLessThanOrEqual(10);
+      if (stats.analyzedPhotos > 0) {
+        expect(stats.avgAestheticScore).toBeGreaterThanOrEqual(1);
+        expect(stats.avgAestheticScore).toBeLessThanOrEqual(10);
       }
     });
 
-    it("passRate8Plus 应在 0-100 范围内", async () => {
+    it("passRate 应在 0-1 范围内", async () => {
       const { body } = await get("/api/admin/stats");
       const stats = (body as { success: boolean; data: AdminStatsData }).data;
-      expect(stats.passRate8Plus).toBeGreaterThanOrEqual(0);
-      expect(stats.passRate8Plus).toBeLessThanOrEqual(100);
+      expect(stats.passRate).toBeGreaterThanOrEqual(0);
+      expect(stats.passRate).toBeLessThanOrEqual(1);
     });
 
     it("recentAnalyses 的每条记录 filePath 应对应 DB 中存在的照片", async () => {
@@ -418,11 +428,11 @@ describe("Admin API 数据一致性 — 验收测试", () => {
   // Photos 端点字段完整性
   // ============================================================
   describe("GET /api/admin/photos 字段完整性", () => {
-    it("每条记录应包含 id, filePath, aestheticScore, processedAt 四个必填字段", async () => {
+    it("每条记录应包含 id, filePath, createdAt, latestAnalysis 四个必填字段", async () => {
       const { body } = await get("/api/admin/photos?pageSize=5");
       const parsed = body as PaginatedPhotosResponse;
 
-      for (const item of parsed.data) {
+      for (const item of parsed.data.data) {
         expect(item).toHaveProperty("id");
         expect(typeof item.id).toBe("string");
         expect(item.id.length).toBeGreaterThan(0);
@@ -430,20 +440,25 @@ describe("Admin API 数据一致性 — 验收测试", () => {
         expect(item).toHaveProperty("filePath");
         expect(typeof item.filePath).toBe("string");
 
-        expect(item).toHaveProperty("aestheticScore");
-        expect(typeof item.aestheticScore).toBe("number");
+        expect(item).toHaveProperty("createdAt");
+        expect(typeof item.createdAt).toBe("string");
 
-        expect(item).toHaveProperty("processedAt");
-        expect(typeof item.processedAt).toBe("string");
+        // latestAnalysis 可能为 null（未分析照片）
+        if (item.latestAnalysis) {
+          expect(typeof item.latestAnalysis.aestheticScore).toBe("number");
+          expect(typeof item.latestAnalysis.processedAt).toBe("string");
+        }
       }
     });
 
     it("aestheticScore 值应在 1-10 范围内", async () => {
       const { body } = await get("/api/admin/photos?pageSize=20");
       const parsed = body as PaginatedPhotosResponse;
-      for (const item of parsed.data) {
-        expect(item.aestheticScore).toBeGreaterThanOrEqual(1);
-        expect(item.aestheticScore).toBeLessThanOrEqual(10);
+      for (const item of parsed.data.data) {
+        if (item.latestAnalysis) {
+          expect(item.latestAnalysis.aestheticScore).toBeGreaterThanOrEqual(1);
+          expect(item.latestAnalysis.aestheticScore).toBeLessThanOrEqual(10);
+        }
       }
     });
   });
@@ -472,6 +487,7 @@ function createTables(sqlite: Database.Database): void {
       file_size INTEGER NOT NULL DEFAULT 0,
       thumbnail_path TEXT,
       taken_at TEXT,
+      file_mtime TEXT,
       created_at TEXT NOT NULL
     );
 

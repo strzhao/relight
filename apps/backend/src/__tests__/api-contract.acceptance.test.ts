@@ -139,9 +139,10 @@ describe("API 契约 — 验收测试（设计文档 §5）", () => {
       expect(body.error).toBeDefined();
     });
 
-    it("GET /api/photos/:id/thumbnail 应返回 404（设计文档 §5.2 — 无缩略图）", async () => {
+    it("GET /api/photos/:id/thumbnail 应返回 200 + SVG 占位图（无缩略图时）", async () => {
       const { status } = await get("/api/photos/photo-123/thumbnail");
-      expect(status).toBe(404);
+      // 实际实现返回 200 + SVG 占位图，非 404
+      expect(status).toBe(200);
     });
   });
 

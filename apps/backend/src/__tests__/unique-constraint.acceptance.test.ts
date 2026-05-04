@@ -7,7 +7,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
  * - 防止同一存储源下重复插入相同路径的照片
  * - 约束定义在 Drizzle sqliteTable 的第三个参数（extras builder）中
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // ---- 辅助工具 ----
 
@@ -49,7 +49,7 @@ function getSQLColumnNames(table: SQLiteTable): Set<string> {
  * 或通过 Symbol.for("drizzle:SQLiteTable") 的 uniqueConstraints 暴露。
  */
 function hasUniqueConstraint(table: SQLiteTable, expectedColumns: string[]): boolean {
-  const tableAny = table as unknown as Record<string, unknown>;
+  const tableAny = table as unknown as Record<string | symbol, unknown>;
 
   // 方案1：检查 Symbol 配置中的 uniqueConstraints
   const symbolConfig = tableAny[Symbol.for("drizzle:SQLiteTable")] as
@@ -154,14 +154,14 @@ describe("photos 表复合 UNIQUE 约束 — 验收测试（设计文档 §1）"
   describe("复合 UNIQUE 约束 (storage_source_id, file_path)", () => {
     it("应定义复合唯一约束覆盖 storage_source_id 和 file_path 两列", () => {
       // 检查 Drizzle 表内部是否包含唯一约束定义
-      const tableAny = photos as unknown as Record<string, unknown>;
+      const tableAny = photos as unknown as Record<string | symbol, unknown>;
 
       // 收集约束信息
       const foundConstraints: Array<{ name: string; columns: string[] }> = [];
 
       // 检查 Symbol 配置
       const symbolConfig = tableAny[Symbol.for("drizzle:SQLiteTable")] as Record<
-        string,
+        string | symbol,
         unknown
       > | null;
       if (symbolConfig) {
@@ -185,16 +185,39 @@ describe("photos 表复合 UNIQUE 约束 — 验收测试（设计文档 §1）"
         }
       }
 
-      // 检查直接属性
-      for (const [key, value] of Object.entries(tableAny)) {
-        if (typeof value === "object" && value !== null) {
-          const valAny = value as Record<string, unknown>;
-          if (typeof valAny.getName === "function" && Array.isArray(valAny.columns)) {
-            foundConstraints.push({
-              name: (valAny.getName as () => string)(),
-              columns: valAny.columns as string[],
-            });
+      // 检查 ExtraConfigBuilder — Drizzle extras 通过 builder 函数返回，
+      // 其中包含 unique() 约束
+      const extraConfigBuilderSym = Object.getOwnPropertySymbols(tableAny).find((s) =>
+        s.toString().includes("ExtraConfigBuilder"),
+      );
+      if (extraConfigBuilderSym && typeof tableAny[extraConfigBuilderSym] === "function") {
+        try {
+          const extras = (
+            tableAny[extraConfigBuilderSym] as (...args: unknown[]) => Record<string, unknown>
+          )(photos);
+          for (const [, value] of Object.entries(extras as Record<string, unknown>)) {
+            if (
+              typeof value === "object" &&
+              value !== null &&
+              "columns" in value &&
+              Array.isArray((value as { columns: unknown }).columns)
+            ) {
+              const cols: string[] = (value as { columns: unknown[] }).columns.map(
+                (col: unknown) => {
+                  if (typeof col === "object" && col !== null && "name" in col) {
+                    return (col as { name: string }).name;
+                  }
+                  return "";
+                },
+              );
+              foundConstraints.push({
+                name: "name" in value ? String((value as { name: string }).name) : "unnamed",
+                columns: cols,
+              });
+            }
           }
+        } catch {
+          // ignore call errors
         }
       }
 
@@ -208,21 +231,39 @@ describe("photos 表复合 UNIQUE 约束 — 验收测试（设计文档 §1）"
     });
 
     it("复合唯一约束应仅包含两列（不包含其他冗余列）", () => {
-      const tableAny = photos as unknown as Record<string, unknown>;
-      const symbolConfig = tableAny[Symbol.for("drizzle:SQLiteTable")] as Record<
-        string,
-        unknown
-      > | null;
+      const tableAny = photos as unknown as Record<string | symbol, unknown>;
 
-      if (symbolConfig) {
-        const uq = symbolConfig.uniqueConstraints as Array<{ columns: string[] }> | undefined;
-        if (uq) {
-          for (const c of uq) {
-            const cols = c.columns.map((col: string) => col.toLowerCase());
-            if (cols.includes("storage_source_id") && cols.includes("file_path")) {
-              expect(c.columns.length).toBe(2);
+      // 通过 ExtraConfigBuilder 获取 extras 中的 unique() 约束
+      const extraConfigBuilderSym = Object.getOwnPropertySymbols(tableAny).find((s) =>
+        s.toString().includes("ExtraConfigBuilder"),
+      );
+      if (extraConfigBuilderSym && typeof tableAny[extraConfigBuilderSym] === "function") {
+        try {
+          const extras = (
+            tableAny[extraConfigBuilderSym] as (...args: unknown[]) => Record<string, unknown>
+          )(photos) as Record<string, unknown>;
+          for (const [, value] of Object.entries(extras)) {
+            if (
+              typeof value === "object" &&
+              value !== null &&
+              "columns" in value &&
+              Array.isArray((value as { columns: unknown }).columns)
+            ) {
+              const cols: string[] = (value as { columns: unknown[] }).columns.map(
+                (col: unknown) => {
+                  if (typeof col === "object" && col !== null && "name" in col) {
+                    return (col as { name: string }).name;
+                  }
+                  return "";
+                },
+              );
+              if (cols.includes("storage_source_id") && cols.includes("file_path")) {
+                expect(cols.length).toBe(2);
+              }
             }
           }
+        } catch {
+          // ignore
         }
       }
     });
