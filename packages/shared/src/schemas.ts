@@ -56,6 +56,13 @@ export const analyzePhotosSchema = z.object({
   photoIds: z.array(z.string().uuid()).min(1).max(50),
 });
 
+/** 管理后台批量分析（按筛选条件） */
+export const analyzeBatchSchema = z.object({
+  storageSourceId: z.string().uuid().optional(),
+  minScore: z.number().min(0).max(10).optional(),
+  force: z.boolean().optional().default(false),
+});
+
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;
 export type UpdateSettings = z.infer<typeof updateSettingsSchema>;
 export type ScanNow = z.infer<typeof scanNowSchema>;
@@ -63,3 +70,4 @@ export type AnalyzeFiles = z.infer<typeof analyzeFilesSchema>;
 export type DailyPickQuery = z.infer<typeof dailyPickQuerySchema>;
 export type PhotoQuery = z.infer<typeof photoQuerySchema>;
 export type AnalyzePhotos = z.infer<typeof analyzePhotosSchema>;
+export type AnalyzeBatch = z.infer<typeof analyzeBatchSchema>;

@@ -1,6 +1,6 @@
 "use client";
 
-import { ScanProgressPanel } from "@/components/admin/scan-progress-panel";
+import { ProgressPanel } from "@/components/admin/scan-progress-panel";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { UnifiedPhotosResponse } from "@relight/shared";
@@ -36,7 +36,7 @@ export function StorageSourceHeader({ storageSource }: StorageSourceHeaderProps)
               {storageSource.rootPath}
             </p>
           </div>
-          <ScanProgressPanel storageSourceId={storageSource.id} />
+          <ProgressPanel mode="scan" storageSourceId={storageSource.id} />
         </div>
       </CardHeader>
       <CardContent>

@@ -135,6 +135,27 @@ export const scanLogs = sqliteTable("scan_logs", {
   finishedAt: text("finished_at"),
 });
 
+/** 批量分析批次 — 追踪批量分析整体进度 */
+export const analyzeBatches = sqliteTable("analyze_batches", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  filterJson: text("filter_json").notNull(),
+  totalCount: integer("total_count").notNull().default(0),
+  completedCount: integer("completed_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+});
+
+/** 批量分析作业映射 (jobId -> batchId) */
+export const analyzeBatchJobs = sqliteTable("analyze_batch_jobs", {
+  jobId: text("job_id").primaryKey(),
+  batchId: text("batch_id")
+    .notNull()
+    .references(() => analyzeBatches.id, { onDelete: "cascade" }),
+});
+
 /** 设置 (key-value) */
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -191,5 +212,16 @@ export const scanLogsRelations = relations(scanLogs, ({ one }) => ({
   storageSource: one(storageSources, {
     fields: [scanLogs.storageSourceId],
     references: [storageSources.id],
+  }),
+}));
+
+export const analyzeBatchesRelations = relations(analyzeBatches, ({ many }) => ({
+  jobs: many(analyzeBatchJobs),
+}));
+
+export const analyzeBatchJobsRelations = relations(analyzeBatchJobs, ({ one }) => ({
+  batch: one(analyzeBatches, {
+    fields: [analyzeBatchJobs.batchId],
+    references: [analyzeBatches.id],
   }),
 }));
