@@ -49,8 +49,31 @@ const scanQueue = new Queue("scan:storage", {
 new Worker("scan:storage", scanStorageWorker, { connection, concurrency: 1 });
 ```
 
-### [2026-05-03] @tanstack/react-virtual sentinel 必须放在虚拟容器内部而非作为虚拟项
-<!-- tags: react, virtual-scroll, tanstack-virtual, IntersectionObserver, frontend -->
+### [2026-05-04] sharp 处理网络/SMB 挂载路径文件时先 readFile 读入 Buffer
+
+<!-- tags: sharp, smb, network-path, seek-error, image-processing -->
+
+**Scenario**: 缩略图生成和照片元数据提取使用 `sharp(filePath)` 直接从文件路径读取。当文件位于 SMB 网络挂载盘（如 macOS `/Volumes/` 挂载）时，sharp 内部触发 `bad seek` 错误导致处理失败。
+
+**Lesson**: 对所有来自网络存储（SMB/NFS/WebDAV）的文件，先通过 `readFile(sourcePath)` 将完整文件读入内存 Buffer，再将 Buffer 传给 `sharp(buffer)`。这同样适用于 `sharp().metadata()` 调用——先 `readFile` 再 `sharp(buf).metadata()`。
+
+**注意**: HEIC 转换路径已有独立的 `heicFileToJpeg` 函数（内部已使用 `readFile`），无需额外修改。视频处理走 ffmpeg，不受 sharp 影响。
+
+**Evidence**: 生产环境 37 个文件触发 `Error: bad seek` 错误。修复后缩略图生成和元数据提取管线使用 Buffer 路径。参见 `thumbnail.ts:17` (`readFile` → `sharp(buffer)`) 和 `local.ts:260` (`fs.readFile` → `sharp(buf).metadata()`)。
+
+### [2026-05-04] HEIC 文件可能伪装：扩展名 .heic 实际为 JPEG 内容
+
+<!-- tags: heic, jpeg, content-detection, format-disguise, sharp, heic-decode -->
+
+**Scenario**: 照片库中存在大量文件扩展名为 `.heic` 但实际内容为 JPEG（魔术数字 `ffd8ff`）。仅依赖扩展名选择解码器会导致 `heic-decode` 解码失败。
+
+**Lesson**: HEIC 处理应采用双路径降级策略：
+1. 主路径：`heic-decode({ buffer })` 尝试解码
+2. fallback 路径：catch → `sharp(buffer)` 按内容自动检测格式
+
+sharp 能从文件内容（而非扩展名）自动识别 JPEG/PNG/WebP 等真实格式，无需预先判断。
+
+**Evidence**: 生产扫描日志中 294 个文件 `heic-decode` 失败。`file` 命令确认这些 `.heic` 文件实际为 "JPEG image data"。参见 `heic.ts:33-46` try/catch 降级实现。
 
 **Scenario**: 实现照片管理页面的无限滚动时，需要在虚拟列表底部放置 sentinel 元素，用 IntersectionObserver 监听触发加载更多。
 

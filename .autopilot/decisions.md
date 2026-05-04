@@ -1,5 +1,21 @@
 # 架构决策日志
 
+### [2026-05-04] photos 表使用复合 UNIQUE(storage_source_id, file_path) 而非单列 file_path
+
+<!-- tags: database, unique-constraint, drizzle, schema-design -->
+
+**Background**: photos 表存在 668 组重复记录（同一存储源下相同 file_path 的多条记录）。需要添加 UNIQUE 约束防止后续扫描产生新重复。
+
+**Choice**: 使用复合唯一约束 `UNIQUE(storage_source_id, file_path)` 而非单列 `UNIQUE(file_path)`。
+
+**Alternatives rejected**:
+- `UNIQUE(file_path)`: 过于严格——同一文件路径可能出现在多个存储源中（例如本地备份 + NAS 同步），不应阻止这种情况
+- 仅靠应用层去重：不可靠，无法防止多 Worker 并发或手动插入导致重复
+
+**Trade-offs**: 复合约束允许不同存储源有相同文件路径，但同一存储源内路径唯一。此约束同时保护了 `existingMap` 覆盖逻辑无法处理的并发场景。
+
+**Evidence**: 清理后 `GROUP BY storage_source_id, file_path HAVING COUNT(*) > 1` 返回 0 行。重复插入测试被 SQLITE_CONSTRAINT 正确拦截。参见 `schema.ts:34-36`。
+
 ### [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例
 <!-- tags: tech-stack, backend, orm, conventions, design -->
 
