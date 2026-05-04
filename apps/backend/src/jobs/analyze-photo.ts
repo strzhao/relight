@@ -123,6 +123,7 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     mimeType = "image/jpeg";
   } else {
     job.log("缩放图片到 2048px 以减少 AI payload");
+    buffer = await adapter.getFileBuffer(photo.filePath);
     buffer = await sharp(buffer)
       .resize(2048, 2048, { fit: "inside" })
       .jpeg({ quality: 85 })

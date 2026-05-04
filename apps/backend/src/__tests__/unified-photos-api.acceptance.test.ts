@@ -239,7 +239,6 @@ describe("统一照片管理 API 契约 — 验收测试", () => {
   // =========================================================================
   describe("Photos 数据项字段结构", () => {
     /** 验证单个照片项的必要字段类型 */
-    // biome-ignore lint/suspicious/noExplicitAny: test utility
     function validatePhotoItem(item: any): void {
       // 基础标识字段
       expect(typeof item.id).toBe("string");
@@ -278,7 +277,6 @@ describe("统一照片管理 API 契约 — 验收测试", () => {
     }
 
     /** 验证 LatestAnalysis 对象字段 */
-    // biome-ignore lint/suspicious/noExplicitAny: test utility
     function validateLatestAnalysis(la: any): void {
       expect(typeof la.id).toBe("string");
       expect(la.id.length).toBeGreaterThan(0);

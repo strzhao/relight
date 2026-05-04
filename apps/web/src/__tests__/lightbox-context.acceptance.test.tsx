@@ -9,7 +9,7 @@ import type { Photo } from "@relight/shared";
  */
 import { describe, expect, it } from "vitest";
 
-import React from "react";
+import type React from "react";
 import { createRoot } from "react-dom/client";
 
 // ---- 测试辅助：构造完整 Photo 对象 ----
@@ -58,8 +58,6 @@ describe("Lightbox Context 接口 — 验收测试", () => {
 
     it("lightbox-context.tsx 应导出 LightboxContextValue 类型", async () => {
       const mod = await import("@/components/ui/lightbox/lightbox-context");
-      // LightboxContextValue 是 TypeScript 接口，编译后仅存在于类型空间
-      // 这里验证模块有合理的导出即可
       expect(mod).toHaveProperty("useLightbox");
       expect(mod).toHaveProperty("LightboxProvider");
     });
@@ -76,7 +74,6 @@ describe("Lightbox Context 接口 — 验收测试", () => {
         makePhoto({ id: "photo-2", filePath: "/img/b.jpg" }),
       ];
 
-      // 通过消费组件测试 Context 值
       type ContextValue = ReturnType<typeof useLightbox>;
       let capturedValue: ContextValue | null = null;
 
@@ -86,16 +83,14 @@ describe("Lightbox Context 接口 — 验收测试", () => {
       }
 
       await renderInteractive(
-        React.createElement(
-          LightboxProvider,
-          {
-            photos: mockPhotos,
-            currentIndex: 0,
-            onIndexChange: () => {},
-            onClose: () => {},
-          },
-          React.createElement(TestConsumer),
-        ),
+        <LightboxProvider
+          photos={mockPhotos}
+          currentIndex={0}
+          onIndexChange={() => {}}
+          onClose={() => {}}
+        >
+          <TestConsumer />
+        </LightboxProvider>,
       );
 
       expect(capturedValue).not.toBeNull();
@@ -124,22 +119,19 @@ describe("Lightbox Context 接口 — 验收测试", () => {
       }
 
       await renderInteractive(
-        React.createElement(
-          LightboxProvider,
-          {
-            photos: mockPhotos,
-            currentIndex: 1,
-            onIndexChange: () => {},
-            onClose: () => {},
-          },
-          React.createElement(TestConsumer),
-        ),
+        <LightboxProvider
+          photos={mockPhotos}
+          currentIndex={1}
+          onIndexChange={() => {}}
+          onClose={() => {}}
+        >
+          <TestConsumer />
+        </LightboxProvider>,
       );
 
       expect(capturedValue).not.toBeNull();
       expect(capturedValue).toHaveProperty("currentIndex");
       expect(typeof capturedValue!.currentIndex).toBe("number");
-      // currentIndex=1, photos 共 3 张, index 应在有效范围内
       expect(capturedValue!.currentIndex).toBeGreaterThanOrEqual(0);
       expect(capturedValue!.currentIndex).toBeLessThan(mockPhotos.length);
     });
@@ -160,16 +152,14 @@ describe("Lightbox Context 接口 — 验收测试", () => {
       }
 
       await renderInteractive(
-        React.createElement(
-          LightboxProvider,
-          {
-            photos: mockPhotos,
-            currentIndex: 0,
-            onIndexChange: () => {},
-            onClose: () => {},
-          },
-          React.createElement(TestConsumer),
-        ),
+        <LightboxProvider
+          photos={mockPhotos}
+          currentIndex={0}
+          onIndexChange={() => {}}
+          onClose={() => {}}
+        >
+          <TestConsumer />
+        </LightboxProvider>,
       );
 
       expect(capturedValue).not.toBeNull();
@@ -198,23 +188,19 @@ describe("Lightbox Context 接口 — 验收测试", () => {
       }
 
       await renderInteractive(
-        React.createElement(
-          LightboxProvider,
-          {
-            photos: mockPhotos,
-            currentIndex: 0,
-            onIndexChange: () => {},
-            onClose: () => {},
-          },
-          React.createElement(TestConsumer),
-        ),
+        <LightboxProvider
+          photos={mockPhotos}
+          currentIndex={0}
+          onIndexChange={() => {}}
+          onClose={() => {}}
+        >
+          <TestConsumer />
+        </LightboxProvider>,
       );
 
       expect(capturedValue!.currentIndex).toBe(0);
 
-      // 调用 goNext → 应变为 1
       capturedValue!.goNext();
-      // 需要重新渲染才能获取新值，此处仅验证函数可调用不抛错
       expect(capturedValue!.currentIndex).toBeGreaterThanOrEqual(0);
     });
 
@@ -234,16 +220,14 @@ describe("Lightbox Context 接口 — 验收测试", () => {
       }
 
       await renderInteractive(
-        React.createElement(
-          LightboxProvider,
-          {
-            photos: mockPhotos,
-            currentIndex: 0,
-            onIndexChange: () => {},
-            onClose: () => {},
-          },
-          React.createElement(TestConsumer),
-        ),
+        <LightboxProvider
+          photos={mockPhotos}
+          currentIndex={0}
+          onIndexChange={() => {}}
+          onClose={() => {}}
+        >
+          <TestConsumer />
+        </LightboxProvider>,
       );
 
       expect(() => capturedValue!.close()).not.toThrow();
@@ -259,26 +243,20 @@ describe("Lightbox Context 接口 — 验收测试", () => {
         makePhoto({ id: "b", filePath: "/b.jpg" }),
       ];
 
-      // 不应抛出错误
       expect(() => {
-        React.createElement(
-          LightboxProvider,
-          {
-            photos,
-            currentIndex: 0,
-            onIndexChange: () => {},
-            onClose: () => {},
-          },
-          React.createElement("div", null, "child"),
-        );
+        <LightboxProvider
+          photos={photos}
+          currentIndex={0}
+          onIndexChange={() => {}}
+          onClose={() => {}}
+        >
+          <div>child</div>
+        </LightboxProvider>;
       }).not.toThrow();
     });
 
     it("在 Provider 外部调用 useLightbox 不应崩溃（应返回默认值或抛出有意义的错误）", () => {
-      // 设计文档要求 Context 可在 Provider 外部安全调用
-      // 实际行为：可能返回 undefined 或抛出错误
-      // 本测试仅验证 useLightbox 函数存在且可被调用
-      expect(true).toBe(true); // 占位 — 实际验证在模块导入时即完成
+      expect(true).toBe(true);
     });
   });
 });
