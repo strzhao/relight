@@ -24,7 +24,7 @@ export const photos = sqliteTable("photos", {
     .notNull()
     .references(() => storageSources.id),
   filePath: text("file_path").notNull(),
-  fileHash: text("file_hash").notNull(),
+  fileHash: text("file_hash").notNull().unique(),
   width: integer("width").notNull().default(0),
   height: integer("height").notNull().default(0),
   fileSize: integer("file_size").notNull().default(0),
