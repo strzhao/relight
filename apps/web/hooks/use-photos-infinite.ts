@@ -80,6 +80,7 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
   const { pageSize = 50, sortBy, order, tagId, storageSourceId, dateFrom, dateTo } = options;
   const [state, dispatch] = useReducer(reducer, initialState);
   const throttleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cooldownUntilRef = useRef(0);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -102,6 +103,9 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
   const loadMoreInternal = useRef<() => void>(() => {});
 
   loadMoreInternal.current = () => {
+    // 加载冷却期: 打断「加载完成 → observer 重建 → 触发加载」级联循环
+    if (Date.now() < cooldownUntilRef.current) return;
+
     const s = stateRef.current;
     if (s.isFetchingMore || !s.hasMore) return;
 
@@ -129,6 +133,8 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
           page: nextPage,
           pageSize,
         });
+        // 加载成功后设置 800ms 冷却期，防止 sentinel observer 重建后立即触发
+        cooldownUntilRef.current = Date.now() + 800;
       } catch (err) {
         dispatch({
           type: "LOAD_ERROR",
