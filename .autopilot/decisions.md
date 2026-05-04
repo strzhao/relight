@@ -78,3 +78,19 @@
 **Trade-offs**: 扫描流程中嵌入清理增加了一次 DB 查询的开销（每个存储源一次 SELECT + 可能的 DELETE），但利用已有的 `files` 数组零额外 I/O。清理失败不阻断扫描（try/catch 包裹）。安全阀（>50 且 >80% 跳过）防止 NAS 断连误删。
 
 **Evidence**: 代码审查确认 `cleanupOrphans` 在第 108 行调用，第一个提前返回在第 138 行。29 个验收测试通过。参见 `scan-storage.ts:108-111`。
+
+### [2026-05-04] 全屏照片查看器选择自定义 Lightbox 而非 Radix Dialog
+
+<!-- tags: lightbox, radix-ui, dialog, frontend, a11y, design -->
+
+**Background**: photos 页面需要大图查看器（Lightbox）— 全屏遮罩、原始尺寸图片、缩放/平移/翻页。需要选择一个对话框基础组件。
+
+**Choice**: 自定义 Lightbox 组件（`components/ui/lightbox/`），使用 Context + Provider 组合式架构，纯 CSS transform 实现缩放/平移。自行实现无障碍（`role="dialog" aria-modal="true"` + 焦点管理 + body scroll lock）。
+
+**Alternatives rejected**:
+- Radix Dialog：有 `max-h` 限制，focus trap 行为与全屏图片查看场景冲突（需要图片区域自由接收键盘/滚轮事件），且额外的 Portal 层增加 DOM 复杂度
+- 第三方 Lightbox 库（yet-another-react-lightbox 等）：引入额外依赖，定制能力受限，且不支持后端原始图端点
+
+**Trade-offs**: 自行实现增加约 300 行代码（6 个组件文件），但获得完全控制权——缩放范围 0.5x-5x 自由设定、与后端 original 端点直接集成、信息面板按需加载等。需手动处理焦点陷阱（当前已知限制）。
+
+**Evidence**: 6 个 Lightbox 组件文件（index + context + image + controls + info + keys），Biome 豁免 `useSemanticElements` 规则用于 lightbox 目录。QA 设计符合性审查 6/6 维度通过。
