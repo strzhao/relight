@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 1
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/photo/.autopilot/sessions/photo/requirements/20260505-http---localhost-3001-photos"
 session_id: 3b2f1417-54e5-4082-9697-b48a94e6f6d3
 started_at: "2026-05-04T16:43:09Z"
