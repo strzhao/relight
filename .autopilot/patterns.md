@@ -57,3 +57,20 @@ new Worker("scan:storage", scanStorageWorker, { connection, concurrency: 1 });
 **Lesson**: sentinel 不能作为 useVirtualizer 的虚拟项渲染——因为当它不在可视范围内时虚拟滚动不会渲染它（永远不可见=永远不触发回调）。正确做法是 sentinel 放在虚拟容器内部、所有虚拟行之后，通过绝对定位（transform: translateY(totalSize)）固定在列表末尾。另一方案是为 sentinel 额外增加一个计数槽位（count + 1），用虚拟化渲染它。
 
 **Evidence**: 初次实现时 sentinel 始终不可见、无限加载不触发。修改后 sentinelRef 附加到 index >= flatItems.length 的 slot（count + 1），IntersectionObserver 正常回调。参见 `use-virtual-grid.ts` 第 116 行 `count: flatItems.length + (hasMore ? 1 : 0)` 和第 143-163 行 sentinel 渲染逻辑。
+
+### [2026-05-04] Sharp EXIF Buffer 格式兼容 + 轻量 TIFF 解析器
+<!-- tags: sharp, exif, tiff, metadata, image-processing -->
+
+**Scenario**: 从照片 EXIF 提取拍摄时间（DateTimeOriginal），使用已有的 sharp 依赖获取 EXIF Buffer，但 sharp 不解析 EXIF 字段值，只返回原始 Buffer。
+
+**Lesson**: Sharp `metadata().exif` 返回的 Buffer 有两种格式：
+1. 纯 TIFF 格式 — Byte order marker (II/MM) 在 offset 0
+2. APP1 包装格式 — "Exif\0\0" 前缀在 offset 0-5，TIFF 从 offset 6 开始
+
+编写轻量 TIFF 解析器（~60 行）即可提取 tag 0x9003，无需引入第三方 EXIF 库（增加 ~500KB）。解析器需处理：
+- 双字节序（little-endian "II" / big-endian "MM"）
+- 12 字节固定 IFD 条目
+- inline value（≤4 bytes）vs offset value（>4 bytes）
+- ASCII 字符串 null terminator 裁剪
+
+**Evidence**: `storage/local.ts:28-96` 的 `findTiffStart()` + `parseExifDateTimeOriginal()`，兼容 Sharp 创建的测试 JPEG（无 EXIF prefix，纯 TIFF 从 offset 0 开始）。全部 25 个 storage adapter 测试和 21 个 scan-storage 测试通过。

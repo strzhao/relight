@@ -10,3 +10,4 @@
 - [2026-05-01] Biome 1.9.4 使用 organizeImports 顶层键，非 assist | tags: biome, linting, config | → patterns.md
 - [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数 | tags: bullmq, queue, worker, retry | → patterns.md
 - [2026-05-03] @tanstack/react-virtual sentinel 必须放在虚拟容器内部而非作为虚拟项 | tags: react, virtual-scroll, tanstack-virtual, frontend | → patterns.md
+- [2026-05-04] Sharp EXIF Buffer 格式兼容 + 轻量 TIFF 解析器 | tags: sharp, exif, tiff, metadata, image-processing | → patterns.md
