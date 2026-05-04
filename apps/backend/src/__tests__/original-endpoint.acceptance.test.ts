@@ -96,26 +96,26 @@ describe("原始图 API 端点 — 验收测试", () => {
       expect(res.status).not.toBe(500);
     });
 
-    it("不存在的照片应返回 404", async () => {
+    it("不存在的照片应返回 200 和 SVG 占位图（非 404）", async () => {
       const app = await createApp();
       const res = await app.request("/api/photos/nonexistent-id/original", {
         method: "GET",
       });
-      // 空 DB mock → 照片不存在 → 404
-      expect(res.status).toBe(404);
+      // 照片不存在 → 返回 SVG 占位图兜底，状态码 200
+      expect(res.status).toBe(200);
     });
 
-    it("404 响应应返回 JSON 格式错误信息", async () => {
+    it("应返回 SVG 占位图而非 JSON 错误信息", async () => {
       const app = await createApp();
       const res = await app.request("/api/photos/nonexistent-id/original", {
         method: "GET",
       });
       const contentType = res.headers.get("Content-Type") ?? "";
-      expect(contentType).toContain("application/json");
+      expect(contentType).toContain("image/svg+xml");
 
-      const body = await res.json();
-      expect(body).toHaveProperty("success", false);
-      expect(body).toHaveProperty("error");
+      const body = await res.text();
+      expect(body).toContain("<svg");
+      expect(body).toContain("</svg>");
     });
 
     it("路由不应与 detail 路由冲突", async () => {

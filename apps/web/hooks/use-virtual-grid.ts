@@ -133,7 +133,9 @@ export function useVirtualGrid(options: UseVirtualGridOptions) {
     estimateSize: useCallback(
       (index: number) => {
         const item = flatItemsRef.current[index];
-        return item?.type === "header" ? headerSize : cellSize;
+        if (item?.type === "header") return headerSize;
+        if (item?.type === "photoRow") return cellSize + 8;
+        return cellSize;
       },
       [cellSize, headerSize],
     ),
