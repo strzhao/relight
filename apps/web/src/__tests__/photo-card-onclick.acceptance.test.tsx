@@ -6,11 +6,23 @@
  * - onClick 为可选回调，点击 PhotoCard 时触发
  * - 传递 photo 对象作为参数或至少触发回调
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+
+// jsdom 缺少 IntersectionObserver，需要 mock
+beforeAll(() => {
+  Object.defineProperty(globalThis, "IntersectionObserver", {
+    writable: true,
+    value: vi.fn().mockImplementation(() => ({
+      observe: vi.fn(),
+      unobserve: vi.fn(),
+      disconnect: vi.fn(),
+    })),
+  });
+});
 
 // ---- 辅助函数 ----
 

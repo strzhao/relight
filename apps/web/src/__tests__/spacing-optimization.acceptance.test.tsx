@@ -118,11 +118,12 @@ describe("间距优化 — 验收测试", () => {
         }),
       );
 
-      // label 和 count 始终渲染
-      expect(htmlWithFirst).toContain("测试分组");
-      expect(htmlWithFirst).toContain("99张");
+      // label 和 count 始终渲染（renderToString 在文本节点间插入 <!-- -->，用正则匹配）
+      expect(htmlWithFirst).toMatch(/99.*?张/);
       expect(htmlWithoutFirst).toContain("测试分组");
-      expect(htmlWithoutFirst).toContain("99张");
+      expect(htmlWithoutFirst).toMatch(/99.*?张/);
+
+      expect(htmlWithFirst).toContain("测试分组");
     });
   });
 

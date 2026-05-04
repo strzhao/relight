@@ -17,9 +17,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockEq = vi.hoisted(() =>
   vi.fn((a: unknown, b: unknown) => ({ __op: "eq", left: a, right: b })),
 );
+const mockInArray = vi.hoisted(() =>
+  vi.fn((column: unknown, values: unknown) => ({ __op: "inArray", column, values })),
+);
 
 vi.mock("drizzle-orm", () => ({
   eq: mockEq,
+  inArray: mockInArray,
+  sql: ((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    __op: "sql",
+    strings,
+    values,
+  })) as unknown as typeof import("drizzle-orm").sql,
 }));
 
 // ---- 捕获 Drizzle ORM 的 values() / set() 参数 ----
@@ -132,6 +141,23 @@ const mockEvaluateResponse = vi.hoisted(() => vi.fn());
 
 vi.mock("../ai/evaluation/evaluator", () => ({
   evaluateResponse: mockEvaluateResponse,
+}));
+
+// ---- Mock sharp ----
+
+const mockSharp = vi.hoisted(() => {
+  const chainObj = {
+    resize: () => chainObj,
+    jpeg: () => chainObj,
+    toBuffer: () => Promise.resolve(Buffer.from("fake-resized-image")),
+  };
+  const fn = vi.fn(() => chainObj);
+  (fn as unknown as Record<string, unknown>).default = fn;
+  return fn;
+});
+
+vi.mock("sharp", () => ({
+  default: mockSharp,
 }));
 
 // ---- Mock config ----

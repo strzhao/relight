@@ -16,7 +16,7 @@
  * - AnalyzeTriggerResponse 响应结构（queuedCount + skippedCount + jobIds）
  * - 输入校验：无效载荷返回 400
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // =========================================================================
 // Mock 设置（与 api-contract 测试相同模式）
@@ -40,8 +40,20 @@ function chainableMock(result: unknown[] = []) {
   });
 }
 
+const sourceRecord = {
+  id: "550e8400-e29b-41d4-a716-446655440000",
+  name: "Test Source",
+  status: null,
+};
+
+const mockDb = vi.hoisted(() => ({
+  select: vi.fn(),
+  insert: vi.fn(),
+  update: vi.fn(),
+}));
+
 vi.mock("../db", () => ({
-  db: chainableMock([]),
+  db: mockDb,
   schema: chainableMock([]),
 }));
 
@@ -86,11 +98,22 @@ async function post(path: string, data?: unknown) {
 // =========================================================================
 
 describe("扫描/分析 API 契约 — 验收测试", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDb.select.mockReturnValue(chainableMock([]));
+    mockDb.insert.mockReturnValue(chainableMock([]));
+    mockDb.update.mockReturnValue(chainableMock([]));
+  });
+
   // =========================================================================
   // POST /api/scan — skipAnalysis 支持
   // =========================================================================
   describe("POST /api/scan — skipAnalysis", () => {
     it("应接受 skipAnalysis: true 并返回 ApiResponse 含 jobId", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([sourceRecord]))
+        .mockReturnValueOnce(chainableMock([]));
+
       const { status, body } = await post("/api/scan", {
         storageSourceId: "550e8400-e29b-41d4-a716-446655440000",
         skipAnalysis: true,
@@ -102,6 +125,10 @@ describe("扫描/分析 API 契约 — 验收测试", () => {
     });
 
     it("应接受 skipAnalysis: false 并返回 ApiResponse", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([sourceRecord]))
+        .mockReturnValueOnce(chainableMock([]));
+
       const { status, body } = await post("/api/scan", {
         storageSourceId: "550e8400-e29b-41d4-a716-446655440000",
         skipAnalysis: false,
@@ -113,6 +140,10 @@ describe("扫描/分析 API 契约 — 验收测试", () => {
     });
 
     it("不传 skipAnalysis 时应正常运行（默认行为）", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([sourceRecord]))
+        .mockReturnValueOnce(chainableMock([]));
+
       const { status, body } = await post("/api/scan", {
         storageSourceId: "550e8400-e29b-41d4-a716-446655440000",
       });

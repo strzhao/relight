@@ -1206,14 +1206,16 @@ function createAllTables(sqlite: Database.Database): void {
       type TEXT NOT NULL DEFAULT 'local',
       root_path TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT
+      last_scan_at TEXT,
+      status TEXT,
+      last_error TEXT
     );
 
     CREATE TABLE IF NOT EXISTS photos (
       id TEXT PRIMARY KEY,
       storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
       file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL,
+      file_hash TEXT NOT NULL UNIQUE,
       width INTEGER NOT NULL DEFAULT 0,
       height INTEGER NOT NULL DEFAULT 0,
       file_size INTEGER NOT NULL DEFAULT 0,

@@ -11,7 +11,7 @@
  *
  * 响应格式遵循 @relight/shared 中定义的 ApiResponse<T> 和 PaginatedResponse<T>
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * 创建可链式调用的 Mock 对象。
@@ -29,7 +29,6 @@ function chainableMock(result: unknown[] = []) {
       if (prop === Symbol.toPrimitive || prop === "toString" || prop === "valueOf") {
         return () => "[]";
       }
-      // 数字字符串属性 -> 模拟数组索引，返回 undefined
       if (typeof prop === "string" && /^\d+$/.test(prop)) {
         return undefined;
       }
@@ -38,9 +37,14 @@ function chainableMock(result: unknown[] = []) {
   });
 }
 
-// 防止 db/index.ts 尝试打开真实数据库文件
+const mockDb = vi.hoisted(() => ({
+  select: vi.fn(),
+  insert: vi.fn(),
+  update: vi.fn(),
+}));
+
 vi.mock("../db", () => ({
-  db: chainableMock([]),
+  db: mockDb,
   schema: chainableMock([]),
 }));
 
@@ -92,6 +96,13 @@ async function put(path: string, data?: unknown) {
 // ---- 测试 ----
 
 describe("API 契约 — 验收测试（设计文档 §5）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDb.select.mockReturnValue(chainableMock([]));
+    mockDb.insert.mockReturnValue(chainableMock([]));
+    mockDb.update.mockReturnValue(chainableMock([]));
+  });
+
   describe("健康检查", () => {
     it("GET /api/health 应返回 { status: 'ok' }", async () => {
       const { status, body } = await get("/api/health");
@@ -102,6 +113,18 @@ describe("API 契约 — 验收测试（设计文档 §5）", () => {
 
   describe("扫描 API", () => {
     it("POST /api/scan 应返回 ApiResponse 含 jobId（设计文档 §5.1）", async () => {
+      mockDb.select
+        .mockReturnValueOnce(
+          chainableMock([
+            {
+              id: "550e8400-e29b-41d4-a716-446655440000",
+              name: "Test Source",
+              status: null,
+            },
+          ]),
+        )
+        .mockReturnValueOnce(chainableMock([]));
+
       const { status, body } = await post("/api/scan", {
         storageSourceId: "550e8400-e29b-41d4-a716-446655440000",
       });
@@ -113,6 +136,21 @@ describe("API 契约 — 验收测试（设计文档 §5）", () => {
     });
 
     it("GET /api/scan/:id 应返回 ApiResponse 含 status（设计文档 §5.1）", async () => {
+      mockDb.select.mockReturnValueOnce(
+        chainableMock([
+          {
+            id: "scan-log-1",
+            storageSourceId: "test-source-id",
+            status: null,
+            scannedCount: 10,
+            newCount: 5,
+            errorCount: 0,
+            startedAt: "2024-01-01T00:00:00.000Z",
+            finishedAt: "2024-01-01T00:01:00.000Z",
+          },
+        ]),
+      );
+
       const { status, body } = await get("/api/scan/test-source-id");
       expect(status).toBe(200);
       expect(body.success).toBe(true);

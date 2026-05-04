@@ -88,7 +88,9 @@ function createTestTables(sqlite: Database.Database): void {
       type TEXT NOT NULL DEFAULT 'local',
       root_path TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT
+      last_scan_at TEXT,
+      status TEXT,
+      last_error TEXT
     );
 
     CREATE TABLE IF NOT EXISTS photos (
