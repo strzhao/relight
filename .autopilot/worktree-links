@@ -1,0 +1,12 @@
+# Worktree 符号链接映射 — 创建 worktree 时自动建立符号链接
+# 格式：<目标路径> -> <源路径>
+# 源路径相对于主仓库，目标路径在 worktree 中
+
+# 环境变量文件（按需复制到 worktree）
+.env.local -> .env.local
+
+# SQLite 数据库文件（大型二进制，通过符号链接避免拷贝）
+data/ -> data/
+
+# 照片存储目录（大型二进制，通过符号链接避免拷贝）
+photos/ -> photos/

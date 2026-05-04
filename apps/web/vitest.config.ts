@@ -6,5 +6,10 @@ export default defineConfig({
   test: {
     name: "web",
     environment: "jsdom",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["app/**", "components/**", "hooks/**", "lib/**"],
+    },
   },
 });

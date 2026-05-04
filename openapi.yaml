@@ -1,0 +1,450 @@
+openapi: "3.0.3"
+info:
+  title: relight API
+  description: 照片 AI 分析与管理平台 API
+  version: "0.0.1"
+
+servers:
+  - url: http://localhost:3000
+    description: 本地开发服务器
+
+paths:
+  /api/health:
+    get:
+      summary: 健康检查
+      operationId: healthCheck
+      responses:
+        "200":
+          description: 服务正常运行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/photos:
+    get:
+      summary: 照片列表（分页 + 过滤 + 排序）
+      operationId: listPhotos
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - name: tagId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: storageSourceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [createdAt, takenAt, fileSize], default: createdAt }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: dateFrom
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: dateTo
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+      responses:
+        "200":
+          description: 分页照片列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoListResponse"
+
+  /api/photos/{id}:
+    get:
+      summary: 照片详情（含关联标签和分析）
+      operationId: getPhoto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 照片详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoDetailResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/photos/{id}/thumbnail:
+    get:
+      summary: 照片缩略图
+      operationId: getThumbnail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: JPEG 缩略图
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "public, max-age=86400" }
+        "404":
+          description: 无缩略图
+
+  /api/tags:
+    get:
+      summary: 标签列表（含计数）
+      operationId: listTags
+      responses:
+        "200":
+          description: 标签列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagListResponse"
+
+  /api/scan:
+    post:
+      summary: 触发照片扫描
+      operationId: triggerScan
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                storageSourceId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: 扫描任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanTriggerResponse"
+
+  /api/scan/{id}:
+    get:
+      summary: 扫描任务状态
+      operationId: getScanStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 扫描任务状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanStatusResponse"
+
+  /api/settings:
+    get:
+      summary: 获取设置
+      operationId: getSettings
+      responses:
+        "200":
+          description: 设置键值对
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+    put:
+      summary: 更新设置
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: { type: string }
+                value: { type: string }
+              required: [key, value]
+      responses:
+        "200":
+          description: 设置已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+
+  /api/daily/today:
+    get:
+      summary: 今日精选
+      operationId: getDailyToday
+      responses:
+        "200":
+          description: 今日精选照片
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyPickResponse"
+
+  /api/daily:
+    get:
+      summary: 精选历史（分页）
+      operationId: listDailyPicks
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - name: date
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+      responses:
+        "200":
+          description: 分页精选列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyPickListResponse"
+
+  /api/daily/{id}:
+    get:
+      summary: 精选详情
+      operationId: getDailyPick
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 精选详情（含关联照片）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyPickDetailResponse"
+
+components:
+  responses:
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: false }
+              error: { type: string }
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data: {}
+        error: { type: string }
+
+    PaginatedResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data: { type: array, items: {} }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    HealthResponse:
+      type: object
+      properties:
+        status: { type: string, example: "ok" }
+
+    Tag:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        category: { type: string, enum: [scene, emotion, people, color, event, object, style] }
+        photoCount: { type: integer }
+
+    Photo:
+      type: object
+      properties:
+        id: { type: string }
+        storageSourceId: { type: string }
+        filePath: { type: string }
+        fileHash: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        fileSize: { type: integer }
+        thumbnailPath: { type: string, nullable: true }
+        takenAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    PhotoDetail:
+      allOf:
+        - $ref: "#/components/schemas/Photo"
+        - type: object
+          properties:
+            tags: { type: array, items: { $ref: "#/components/schemas/PhotoTag" } }
+            analyses: { type: array, items: { $ref: "#/components/schemas/PhotoAnalysis" } }
+            storageSource: { $ref: "#/components/schemas/StorageSource" }
+
+    PhotoTag:
+      type: object
+      properties:
+        photoId: { type: string }
+        tagId: { type: string }
+        tagName: { type: string }
+        tagCategory: { type: string }
+        confidence: { type: number }
+
+    PhotoAnalysis:
+      type: object
+      properties:
+        id: { type: string }
+        photoId: { type: string }
+        aiModel: { type: string }
+        narrative: { type: string, nullable: true }
+        aestheticScore: { type: number, nullable: true }
+        tags: { type: array, items: { $ref: "#/components/schemas/AnalysisTag" } }
+        composition: { $ref: "#/components/schemas/CompositionAnalysis" }
+        colorAnalysis: { $ref: "#/components/schemas/ColorAnalysis" }
+        emotionalAnalysis: { $ref: "#/components/schemas/EmotionalAnalysis" }
+        rawResponse: { type: string }
+        processedAt: { type: string, format: date-time }
+
+    AnalysisTag:
+      type: object
+      properties:
+        name: { type: string }
+        category: { type: string }
+        confidence: { type: number }
+
+    CompositionAnalysis:
+      type: object
+      properties:
+        type: { type: string }
+        score: { type: number }
+        description: { type: string }
+
+    ColorAnalysis:
+      type: object
+      properties:
+        palette: { type: array, items: { type: string } }
+        dominant: { type: string }
+        mood: { type: string }
+
+    EmotionalAnalysis:
+      type: object
+      properties:
+        primary: { type: string }
+        secondary: { type: string }
+        intensity: { type: number }
+
+    StorageSource:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [local, smb, webdav] }
+        rootPath: { type: string }
+        enabled: { type: boolean }
+        lastScanAt: { type: string, format: date-time, nullable: true }
+
+    DailyPick:
+      type: object
+      properties:
+        id: { type: string }
+        photoId: { type: string }
+        pickDate: { type: string, format: date }
+        title: { type: string }
+        narrative: { type: string }
+        score: { type: number }
+        createdAt: { type: string, format: date-time }
+        photo: { $ref: "#/components/schemas/Photo" }
+
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error: { type: string }
+        code: { type: string }
+
+    PhotoListResponse:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedResponse"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/Photo" } }
+
+    PhotoDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/PhotoDetail" }
+
+    TagListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/Tag" } }
+
+    ScanTriggerResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                jobId: { type: string }
+                storageSourceId: { type: string }
+
+    ScanStatusResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                id: { type: string }
+                storageSourceId: { type: string }
+                status: { type: string }
+
+    SettingsResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data: { type: object }
+
+    DailyPickResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DailyPick" }
+
+    DailyPickListResponse:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedResponse"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/DailyPick" } }
+
+    DailyPickDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DailyPick" }
