@@ -202,7 +202,7 @@ export const photosRouter = new Hono()
       return c.json({ success: false, error: "照片不存在" }, 404);
     }
 
-    const fullPath = path.join(photo.rootPath, photo.filePath);
+    const fullPath = path.resolve(photo.rootPath, photo.filePath);
 
     // 检查文件是否存在
     try {
