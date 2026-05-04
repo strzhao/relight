@@ -19,3 +19,4 @@
 - [2026-05-04] DB 与文件系统反向校验时需加安全阀防止存储断连误删 | tags: backend, scan, safety, orphan-cleanup, storage, nas | → patterns.md
 - [2026-05-04] Biome a11y 规则豁免应使用 biome.json overrides 而非内联注释 | tags: biome, a11y, linting, config, lightbox | → patterns.md
 - [2026-05-04] SSE 进度追踪使用 DB 轮询 + QueueEvents 双向更新模式 | tags: sse, bullmq, queue-events, progress, db-polling, pattern | → patterns.md
+- [2026-05-04] Next.js rewrites 不转发 SSE 流，EventSource 必须直连后端 | tags: nextjs, sse, eventsource, proxy, rewrite, cors | → patterns.md
