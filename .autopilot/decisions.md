@@ -61,3 +61,20 @@
 - 放弃 EXIF 仅用 mtime：丢失真实拍摄时间，AI 分析线索减少
 
 **Trade-offs**: 自定义解析器仅支持 ASCII 字符串 tag（type=2），不支持 GPS、快门速度等复杂类型。当前够用——仅需 DateTimeOriginal；未来需要更多 EXIF 字段时，可渐进替换为 exifr。所有路径外有 try/catch 兜底，解析失败不阻塞扫描。
+
+### [2026-05-04] cleanupOrphans 必须在 listFiles 后、第一个提前返回前执行
+
+<!-- tags: backend, scan, architecture, orphan-cleanup, placement -->
+
+**Background**: scanStorageWorker 有两个提前返回路径（无新文件 / 元信息全部失败）。如果 cleanupOrphans 放在 try 块末尾，当无新文件时清理永远不会执行。
+
+**Choice**: 将 cleanupOrphans 放在 `adapter.listFiles()` 完成后、SHA256 去重之前。此时 `files` 数组已就绪，且尚未进入任何可能导致提前返回的逻辑。
+
+**Alternatives rejected**:
+- 放在 try 块末尾：被两个 `return` 跳过，清理永远不会触发
+- 独立 cron/定时任务：需要额外的文件列表 I/O，且与扫描异步可能导致竞态
+- 在 listFiles 之前执行：此时没有文件列表，需要额外调用 listFiles
+
+**Trade-offs**: 扫描流程中嵌入清理增加了一次 DB 查询的开销（每个存储源一次 SELECT + 可能的 DELETE），但利用已有的 `files` 数组零额外 I/O。清理失败不阻断扫描（try/catch 包裹）。安全阀（>50 且 >80% 跳过）防止 NAS 断连误删。
+
+**Evidence**: 代码审查确认 `cleanupOrphans` 在第 108 行调用，第一个提前返回在第 138 行。29 个验收测试通过。参见 `scan-storage.ts:108-111`。

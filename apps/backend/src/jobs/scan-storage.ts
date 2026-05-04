@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { Job } from "bullmq";
 import { eq, inArray } from "drizzle-orm";
@@ -13,6 +14,68 @@ interface ScanJobData {
 
 /** 缩略图并发生成批大小 */
 const THUMBNAIL_CONCURRENCY = 4;
+
+/**
+ * 清理孤儿记录 — 删除 DB 中存有但磁盘上已不存在的照片
+ * @returns 清理的孤儿记录数（失败返回 0，不抛出）
+ */
+async function cleanupOrphans(
+  storageSourceId: string,
+  diskFiles: { path: string }[],
+): Promise<number> {
+  try {
+    // 1. 构建磁盘路径集合
+    const diskPaths = new Set(diskFiles.map((f) => f.path));
+
+    // 2. 查询该存储源所有 DB 照片 (id, filePath, thumbnailPath)
+    const dbPhotos = await db
+      .select({
+        id: schema.photos.id,
+        filePath: schema.photos.filePath,
+        thumbnailPath: schema.photos.thumbnailPath,
+      })
+      .from(schema.photos)
+      .where(eq(schema.photos.storageSourceId, storageSourceId));
+
+    // 3. 差集: DB有但磁盘无
+    const orphans = dbPhotos.filter((p) => !diskPaths.has(p.filePath));
+    if (orphans.length === 0) return 0;
+
+    // 安全阀：孤儿比例 > 80% 且绝对数 > 50 时，判定为存储源不可用（如 NAS 断连），
+    // 跳过清理避免误删全部记录
+    if (orphans.length > 50) {
+      const orphanRatio = orphans.length / dbPhotos.length;
+      if (orphanRatio > 0.8) {
+        console.error(
+          `[cleanupOrphans] 已跳过清理: ${orphans.length}/${dbPhotos.length} 条记录被识别为孤儿 ` +
+            `(比例 ${(orphanRatio * 100).toFixed(0)}%)，可能是存储源不可用`,
+        );
+        return 0;
+      }
+    }
+
+    const orphanIds = orphans.map((p) => p.id);
+
+    // 4. 同一事务: 先删 daily_picks 引用 + 再删 photos
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.dailyPicks).where(inArray(schema.dailyPicks.photoId, orphanIds));
+      await tx.delete(schema.photos).where(inArray(schema.photos.id, orphanIds));
+    });
+    // photo_tags 和 photo_analyses 通过 ON DELETE CASCADE 自动清理
+
+    // 5. 清理缩略图文件 (用 thumbnailPath 精确删除)
+    for (const orphan of orphans) {
+      if (orphan.thumbnailPath) {
+        fs.unlink(orphan.thumbnailPath).catch(() => {});
+      }
+    }
+
+    return orphans.length;
+  } catch (err) {
+    console.error("孤儿记录清理失败:", err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
 
 /**
  * scan-storage Worker
@@ -53,6 +116,12 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     const files = await adapter.listFiles(source.rootPath);
     scannedCount = files.length;
     job.log(`找到 ${scannedCount} 个图片文件`);
+
+    // ★ 孤儿记录清理（始终执行，早于提前返回）
+    const cleaned = await cleanupOrphans(storageSourceId, files);
+    if (cleaned > 0) {
+      job.log(`清理 ${cleaned} 条孤儿记录（源文件已不存在）`);
+    }
 
     // 3. 流式计算每个文件的 SHA256 hash，构建 hash→file 映射
     const fileHashMap = new Map<string, (typeof files)[number]>();
