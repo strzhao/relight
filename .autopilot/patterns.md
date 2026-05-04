@@ -11,6 +11,21 @@
 
 **Evidence**: `local.ts:10-30` 的 `SCAN_EXTENSIONS` 包含 16 种格式（图片/R AW/视频），`analyze-photo.ts:15-26` 的 `AI_SUPPORTED_EXTENSIONS` 包含 10 种图片格式。两层独立维护。
 
+### [2026-05-04] Tailwind v4 语义色彩 Token 三层映射模式 — 消除硬编码颜色
+
+<!-- tags: tailwind, css-variables, design-system, semantic-tokens, oklch, shadcn -->
+
+**Scenario**: 使用 shadcn/ui + Tailwind v4 的项目需要建立统一色彩体系，消除组件中散落的 `bg-green-500`/`text-red-600`/`bg-blue-100` 等硬编码颜色。
+
+**Lesson**: 采用三层架构实现语义化颜色管理：
+1. **CSS 变量层** (`:root` + `.dark`): 定义 OKLCH 色值，亮暗双模
+2. **Tailwind 映射层** (`@theme inline`): `--color-{name}: var(--{css-var})` 将 CSS 变量暴露为 Tailwind class
+3. **组件引用层**: 所有组件使用 `bg-{token}` / `text-{token}` 语义 class，禁止硬编码 Tailwind 原生颜色
+
+新增颜色 Token 时严格遵循：先 `:root` + `.dark` 定义 CSS 变量 → 再 `@theme inline` 注册 Tailwind class → 最后组件使用。`grep` 扫描可自动化验证零硬编码残留。
+
+**Evidence**: 66 处硬编码色迁移为 18 个语义 Token（score-high/mid/low, status-waiting/active/completed/failed/delayed/paused, info/fg/bg/border, warning/fg），grep 确认零残留。typecheck/lint/test 全部通过。
+
 ### [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload
 
 <!-- tags: ai, vision, sharp, image-resize, performance, base64 -->

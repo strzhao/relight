@@ -128,6 +128,22 @@
 
 **Evidence**: 1123 个视频文件（709 DNG + 414 视频）此前因格式问题反复重试失败。格式门上线后写入 `skipped` 记录，后续扫描不再重复入队。
 
+### [2026-05-04] 色彩空间选型：OKLCH 替代 hex/sRGB 作为设计系统基础
+
+<!-- tags: design-system, oklch, color-space, tailwind, css -->
+
+**Background**: 应用需要统一的色彩设计体系。用户提供了基于 OKLCH 的个人色彩空间设计，需要映射到 shadcn/ui 的 CSS 变量体系。传统 hex/sRGB 在暗色模式下需手动调整色值，HSL 色相不均匀（蓝/绿同 Lightness 感知亮度差异大）。
+
+**Choice**: 全量使用 OKLCH (L=感知亮度, C=饱和度, H=色相角) 作为设计 Token 的色彩空间，Tailwind v4 原生支持。
+
+**Alternatives rejected**:
+- hex/sRGB: 不可感知均匀，暗色模式需逐色手动计算，维护成本高
+- HSL: 色相感知不均匀，Lightness 值相同的蓝色和绿色肉眼亮度差异大
+
+**Trade-offs**: OKLCH 在 iOS Safari <15.4 不支持，但目标用户设备较新可接受。Tailwind v4 原生支持 OKLCH 语法，无需额外配置。
+
+**Evidence**: 18 个文件 66 处硬编码色迁移至 OKLCH 语义 Token，亮色/暗色模式均通过 WCAG AA 对比度验证。
+
 ### [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数
 
 <!-- tags: backend, bullmq, worker, concurrency, llama-cpp, performance -->
