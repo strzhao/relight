@@ -1,6 +1,7 @@
 import type { TagCategory } from "@relight/shared";
 import type { Job } from "bullmq";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import sharp from "sharp";
 import { aiClient } from "../ai/client";
 import { evaluateResponse } from "../ai/evaluation/evaluator";
 import { loadPrompts } from "../ai/prompts";
@@ -61,6 +62,13 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
       maxHeight: 2048,
       quality: 85,
     });
+    mimeType = "image/jpeg";
+  } else {
+    job.log("缩放图片到 2048px 以减少 AI payload");
+    buffer = await sharp(buffer)
+      .resize(2048, 2048, { fit: "inside" })
+      .jpeg({ quality: 85 })
+      .toBuffer();
     mimeType = "image/jpeg";
   }
 
@@ -125,39 +133,62 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     }
   }
 
-  for (const [, t] of tagMap) {
-    // upsert tag
-    const existingTags = await db
-      .select({ id: schema.tags.id })
-      .from(schema.tags)
-      .where(eq(schema.tags.name, t.name));
+  const uniqueTags = [...tagMap.values()];
+  const tagNames = uniqueTags.map((t) => t.name);
 
-    let tagId: string;
-    if (existingTags[0]) {
-      tagId = existingTags[0].id;
-      // 更新 category 以防变化
-      await db.update(schema.tags).set({ category: t.category }).where(eq(schema.tags.id, tagId));
-    } else {
-      tagId = crypto.randomUUID();
-      await db.insert(schema.tags).values({
-        id: tagId,
-        name: t.name,
-        category: t.category,
-        createdAt: now,
-      });
-    }
+  // 批量查询已有标签
+  const existingTags = await db
+    .select()
+    .from(schema.tags)
+    .where(inArray(schema.tags.name, tagNames));
 
-    // 插入 photo_tags（复合主键，重复则忽略）
-    try {
-      await db.insert(schema.photoTags).values({
-        photoId,
-        tagId,
-        confidence: t.confidence,
+  const existingTagMap = new Map(existingTags.map((t) => [t.name, t]));
+
+  // 为新标签预生成 ID，批量插入（onConflictDoUpdate 应对竞争条件）
+  const newTags = uniqueTags
+    .filter((t) => !existingTagMap.has(t.name))
+    .map((t) => ({
+      id: crypto.randomUUID(),
+      name: t.name,
+      category: t.category,
+      createdAt: now,
+    }));
+
+  if (newTags.length > 0) {
+    await db
+      .insert(schema.tags)
+      .values(newTags)
+      .onConflictDoUpdate({
+        target: schema.tags.name,
+        set: { category: sql`excluded.category` },
       });
-    } catch {
-      // 复合主键冲突，忽略
+  }
+
+  // 更新已有标签的 category（如有变化）
+  for (const t of uniqueTags) {
+    const existing = existingTagMap.get(t.name);
+    if (existing && existing.category !== t.category) {
+      await db
+        .update(schema.tags)
+        .set({ category: t.category })
+        .where(eq(schema.tags.id, existing.id));
     }
   }
+
+  // 构建 name → id 映射
+  const tagNameToId = new Map<string, string>();
+  for (const t of existingTags) tagNameToId.set(t.name, t.id);
+  for (const t of newTags) tagNameToId.set(t.name, t.id);
+
+  // 批量插入 photoTags（onConflictDoNothing 替代 try-catch）
+  const photoTagValues = uniqueTags
+    .map((t) => {
+      const tagId = tagNameToId.get(t.name);
+      return tagId ? { photoId, tagId, confidence: t.confidence } : null;
+    })
+    .filter((v): v is NonNullable<typeof v> => v !== null);
+
+  await db.insert(schema.photoTags).values(photoTagValues).onConflictDoNothing();
 
   // 6b. 检查是否已有分析记录（幂等性）
   const existingAnalysis = await db
