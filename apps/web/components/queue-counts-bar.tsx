@@ -4,12 +4,12 @@ import { cn } from "@/lib/utils";
 import type { QueueJobCounts } from "@relight/shared";
 
 const STATE_CONFIG: Record<keyof QueueJobCounts, { label: string; color: string }> = {
-  waiting: { label: "等待", color: "bg-slate-400" },
-  active: { label: "活跃", color: "bg-blue-500" },
-  completed: { label: "完成", color: "bg-green-500" },
-  failed: { label: "失败", color: "bg-red-500" },
-  delayed: { label: "延迟", color: "bg-amber-400" },
-  paused: { label: "暂停", color: "bg-gray-400" },
+  waiting: { label: "等待", color: "bg-status-waiting" },
+  active: { label: "活跃", color: "bg-status-active" },
+  completed: { label: "完成", color: "bg-status-completed" },
+  failed: { label: "失败", color: "bg-status-failed" },
+  delayed: { label: "延迟", color: "bg-status-delayed" },
+  paused: { label: "暂停", color: "bg-status-paused" },
 };
 
 interface QueueCountsBarProps {

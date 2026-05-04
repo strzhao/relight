@@ -47,20 +47,20 @@ export function QueueCard({ queue, isSelected }: QueueCardProps) {
           <div className="flex h-1.5 overflow-hidden rounded-full">
             {activeCount > 0 && (
               <div
-                className="bg-blue-500 transition-all"
+                className="bg-status-active transition-all"
                 style={{ width: `${Math.max((activeCount / total) * 100, 1)}%` }}
               />
             )}
             {failedCount > 0 && (
               <div
-                className="bg-red-500 transition-all"
+                className="bg-status-failed transition-all"
                 style={{ width: `${Math.max((failedCount / total) * 100, 1)}%` }}
               />
             )}
           </div>
           <div className="flex gap-2 text-[10px] text-muted-foreground">
             <span>活跃 {activeCount}</span>
-            {failedCount > 0 && <span className="text-red-500">失败 {failedCount}</span>}
+            {failedCount > 0 && <span className="text-status-failed">失败 {failedCount}</span>}
           </div>
         </div>
       )}

@@ -8,12 +8,12 @@ interface JobCountsBarProps {
 }
 
 const SEGMENTS = [
-  { key: "waiting" as const, label: "等待中", color: "bg-gray-400" },
-  { key: "active" as const, label: "执行中", color: "bg-blue-500" },
-  { key: "completed" as const, label: "已完成", color: "bg-green-500" },
-  { key: "failed" as const, label: "失败", color: "bg-red-500" },
-  { key: "delayed" as const, label: "延迟", color: "bg-yellow-500" },
-  { key: "paused" as const, label: "暂停", color: "bg-purple-400" },
+  { key: "waiting" as const, label: "等待中", color: "bg-status-waiting" },
+  { key: "active" as const, label: "执行中", color: "bg-status-active" },
+  { key: "completed" as const, label: "已完成", color: "bg-status-completed" },
+  { key: "failed" as const, label: "失败", color: "bg-status-failed" },
+  { key: "delayed" as const, label: "延迟", color: "bg-status-delayed" },
+  { key: "paused" as const, label: "暂停", color: "bg-status-paused" },
 ];
 
 export function JobCountsBar({ counts }: JobCountsBarProps) {

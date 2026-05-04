@@ -23,9 +23,9 @@ const statusIconMap = {
 };
 
 const statusColorMap = {
-  healthy: "text-green-600",
-  degraded: "text-yellow-600",
-  unhealthy: "text-red-600",
+  healthy: "text-status-completed",
+  degraded: "text-status-delayed",
+  unhealthy: "text-status-failed",
 };
 
 const statusLabelMap = {

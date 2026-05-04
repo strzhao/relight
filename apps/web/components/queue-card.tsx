@@ -34,12 +34,12 @@ function CountsMiniBar({ counts }: { counts: QueueInfo["counts"] }) {
   }
 
   const segments = [
-    { label: "等", value: counts.waiting, color: "bg-gray-400" },
-    { label: "活", value: counts.active, color: "bg-blue-500" },
-    { label: "完", value: counts.completed, color: "bg-green-500" },
-    { label: "败", value: counts.failed, color: "bg-red-500" },
-    { label: "延", value: counts.delayed, color: "bg-yellow-500" },
-    { label: "停", value: counts.paused, color: "bg-purple-400" },
+    { label: "等", value: counts.waiting, color: "bg-status-waiting" },
+    { label: "活", value: counts.active, color: "bg-status-active" },
+    { label: "完", value: counts.completed, color: "bg-status-completed" },
+    { label: "败", value: counts.failed, color: "bg-status-failed" },
+    { label: "延", value: counts.delayed, color: "bg-status-delayed" },
+    { label: "停", value: counts.paused, color: "bg-status-paused" },
   ].filter((s) => s.value > 0);
 
   return (

@@ -109,9 +109,9 @@ describe("JobRow — 验收测试", () => {
       });
       const html = renderHtml(React.createElement(JobRow, { job, onClick: vi.fn() }));
 
-      // 失败原因应具有红色样式标记：
-      // 可以是 text-red-* class、color: red inline style、或 data-* 属性
+      // 失败原因应具有红色/错误样式标记（语义 Token: text-destructive）
       const hasRedIndicator =
+        html.includes("text-destructive") ||
         html.includes("text-red") ||
         html.includes("color:red") ||
         html.includes("#ef") || // hex red variants

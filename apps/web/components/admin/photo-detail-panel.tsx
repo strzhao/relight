@@ -202,7 +202,7 @@ export function PhotoDetailPanel({ photoId, open, onClose }: PhotoDetailPanelPro
           <div
             className={`mx-6 mt-6 rounded-lg border px-4 py-3 text-sm ${
               analyzeFeedback.type === "info"
-                ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                ? "border-info-border bg-info-bg text-info-fg"
                 : "border-destructive/50 bg-destructive/5 text-destructive"
             }`}
           >
@@ -418,7 +418,7 @@ function ScoreBadge({
   size: "sm" | "lg";
 }) {
   const colorClass =
-    score >= 8 ? "text-green-600" : score >= 6 ? "text-yellow-600" : "text-gray-500";
+    score >= 8 ? "text-score-high" : score >= 6 ? "text-score-mid" : "text-score-low";
 
   const sizeClass = size === "lg" ? "text-4xl" : "text-sm";
 

@@ -81,7 +81,7 @@ export function JobDetailDialog({ queueName, jobId, open, onClose }: JobDetailDi
           </div>
         )}
 
-        {error && <div className="text-sm text-red-500 p-4">{error}</div>}
+        {error && <div className="text-sm text-destructive p-4">{error}</div>}
 
         {detail && (
           <div className="space-y-4">
@@ -125,8 +125,8 @@ export function JobDetailDialog({ queueName, jobId, open, onClose }: JobDetailDi
 
             {detail.failedReason && (
               <div>
-                <span className="text-xs font-semibold text-red-500">失败原因</span>
-                <p className="text-sm text-red-600 mt-1">{detail.failedReason}</p>
+                <span className="text-xs font-semibold text-destructive">失败原因</span>
+                <p className="text-sm text-destructive mt-1">{detail.failedReason}</p>
               </div>
             )}
 
@@ -153,11 +153,11 @@ export function JobDetailDialog({ queueName, jobId, open, onClose }: JobDetailDi
 
             {detail.stacktrace.length > 0 && (
               <div className="space-y-1.5">
-                <h4 className="text-xs font-semibold text-red-500">堆栈跟踪 (stacktrace)</h4>
+                <h4 className="text-xs font-semibold text-destructive">堆栈跟踪 (stacktrace)</h4>
                 {detail.stacktrace.map((line, i) => (
                   <pre
                     key={`trace-${i}-${line.slice(0, 20)}`}
-                    className="text-xs text-red-600 whitespace-pre-wrap break-all bg-red-50 rounded p-2 dark:bg-red-950"
+                    className="text-xs text-destructive whitespace-pre-wrap break-all bg-destructive/10 rounded p-2 dark:bg-destructive/15"
                   >
                     {line}
                   </pre>

@@ -28,7 +28,7 @@ export function QueueDetail() {
           <span
             className={cn(
               "inline-flex h-2 w-2 rounded-full",
-              error ? "bg-red-500" : "bg-green-500",
+              error ? "bg-status-failed" : "bg-status-completed",
             )}
             title={error ?? "已连接"}
           />
@@ -90,9 +90,9 @@ function AggregateProgress({
     progress.totalFiles > 0 ? Math.round((progress.processed / progress.totalFiles) * 100) : 0;
 
   return (
-    <Card className="border-blue-200 bg-blue-50/30">
+    <Card className="border-info-border bg-info-bg/30">
       <CardHeader className="pb-2">
-        <h2 className="text-sm font-semibold text-blue-700">汇总进度</h2>
+        <h2 className="text-sm font-semibold text-info-fg">汇总进度</h2>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
@@ -104,9 +104,9 @@ function AggregateProgress({
               </span>
               <span>{pct}%</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-blue-100">
+            <div className="h-2 overflow-hidden rounded-full bg-info/20">
               <div
-                className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                className="h-full rounded-full bg-info transition-all duration-300"
                 style={{ width: `${Math.max(pct, 1)}%` }}
               />
             </div>
@@ -116,32 +116,32 @@ function AggregateProgress({
             <MetricBadge
               label="新增"
               value={progress.newCount}
-              color="text-green-600"
-              dot="bg-green-500"
+              color="text-status-completed"
+              dot="bg-status-completed"
             />
             <MetricBadge
               label="跳过"
               value={progress.skippedCount}
-              color="text-slate-500"
-              dot="bg-slate-400"
+              color="text-muted-foreground"
+              dot="bg-status-waiting"
             />
             <MetricBadge
               label="更新"
               value={progress.updatedCount}
-              color="text-amber-600"
-              dot="bg-amber-500"
+              color="text-status-delayed"
+              dot="bg-status-delayed"
             />
             <MetricBadge
               label="重建"
               value={progress.regeneratedCount}
-              color="text-blue-600"
-              dot="bg-blue-500"
+              color="text-status-active"
+              dot="bg-status-active"
             />
             <MetricBadge
               label="错误"
               value={progress.errorCount}
-              color="text-red-600"
-              dot="bg-red-500"
+              color="text-status-failed"
+              dot="bg-status-failed"
             />
           </div>
         </div>
@@ -239,26 +239,28 @@ function JobRow({ job }: { job: QueueJobSummary }) {
           )}
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
             {progress.newCount > 0 && (
-              <span className="text-green-600">新增 {progress.newCount}</span>
+              <span className="text-status-completed">新增 {progress.newCount}</span>
             )}
             {progress.skippedCount > 0 && (
-              <span className="text-slate-500">跳过 {progress.skippedCount}</span>
+              <span className="text-muted-foreground">跳过 {progress.skippedCount}</span>
             )}
             {progress.updatedCount > 0 && (
-              <span className="text-amber-600">更新 {progress.updatedCount}</span>
+              <span className="text-status-delayed">更新 {progress.updatedCount}</span>
             )}
             {progress.regeneratedCount > 0 && (
-              <span className="text-blue-600">重建 {progress.regeneratedCount}</span>
+              <span className="text-status-active">重建 {progress.regeneratedCount}</span>
             )}
             {progress.errorCount > 0 && (
-              <span className="text-red-600">错误 {progress.errorCount}</span>
+              <span className="text-status-failed">错误 {progress.errorCount}</span>
             )}
           </div>
         </div>
       )}
 
       {/* 失败原因 */}
-      {job.failedReason && <p className="mt-1 truncate text-xs text-red-600">{job.failedReason}</p>}
+      {job.failedReason && (
+        <p className="mt-1 truncate text-xs text-destructive">{job.failedReason}</p>
+      )}
     </div>
   );
 }
