@@ -28,6 +28,16 @@
           }
         }
       }
+    },
+    {
+      "include": ["apps/web/components/ui/lightbox/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          }
+        }
+      }
     }
   ]
 }

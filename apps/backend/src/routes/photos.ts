@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { analyzePhotosSchema, photoQuerySchema } from "@relight/shared";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 import { analyzeQueue } from "../jobs/queues";
+import { convertHeicToJpeg, isHeicFile } from "../lib/heic";
+import { createStorageAdapter } from "../storage";
 
 export const photosRouter = new Hono()
   /** 照片列表（分页 + 过滤 + 排序） */
@@ -174,6 +177,65 @@ export const photosRouter = new Hono()
         "Content-Type": "image/svg+xml",
         "Cache-Control": "public, max-age=300",
       });
+    }
+  })
+
+  /** 原始文件 */
+  .get("/:id/original", async (c) => {
+    const id = c.req.param("id");
+
+    // 查询照片基本信息 + 关联的存储源
+    const photos = await db
+      .select({
+        filePath: schema.photos.filePath,
+        fileName: schema.photos.filePath,
+        storageSourceId: schema.photos.storageSourceId,
+        rootPath: schema.storageSources.rootPath,
+        storageType: schema.storageSources.type,
+      })
+      .from(schema.photos)
+      .innerJoin(schema.storageSources, eq(schema.photos.storageSourceId, schema.storageSources.id))
+      .where(eq(schema.photos.id, id));
+
+    const photo = photos[0];
+    if (!photo) {
+      return c.json({ success: false, error: "照片不存在" }, 404);
+    }
+
+    const fullPath = path.join(photo.rootPath, photo.filePath);
+
+    // 检查文件是否存在
+    try {
+      await fs.access(fullPath);
+    } catch {
+      return c.json({ success: false, error: "文件不存在" }, 404);
+    }
+
+    try {
+      const adapter = createStorageAdapter(photo.storageType);
+      let buffer = await adapter.getFileBuffer(fullPath);
+      let contentType = adapter.getMimeType(fullPath);
+      const etagBase = `${photo.filePath}`;
+
+      // HEIC 转码为 JPEG
+      if (isHeicFile(fullPath)) {
+        buffer = await convertHeicToJpeg(buffer);
+        contentType = "image/jpeg";
+      }
+
+      return c.body(buffer, 200, {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=3600",
+        ETag: `"${Buffer.from(etagBase).toString("base64").slice(0, 32)}"`,
+      });
+    } catch (err) {
+      return c.json(
+        {
+          success: false,
+          error: `读取文件失败: ${(err as Error).message}`,
+        },
+        500,
+      );
     }
   })
 

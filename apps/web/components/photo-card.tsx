@@ -10,9 +10,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 interface PhotoCardProps {
   photo: Photo;
   priority?: boolean;
+  onClick?: (photo: Photo) => void;
 }
 
-export const PhotoCard = memo(function PhotoCard({ photo, priority = false }: PhotoCardProps) {
+export const PhotoCard = memo(function PhotoCard({
+  photo,
+  priority = false,
+  onClick,
+}: PhotoCardProps) {
   const [shouldLoad, setShouldLoad] = useState(priority);
   const [hasError, setHasError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,8 +49,31 @@ export const PhotoCard = memo(function PhotoCard({ photo, priority = false }: Ph
     setHasError(true);
   }, []);
 
+  const handleClick = useCallback(() => {
+    onClick?.(photo);
+  }, [onClick, photo]);
+
   return (
-    <div ref={containerRef} className="aspect-square relative overflow-hidden rounded-md bg-muted">
+    <div
+      ref={containerRef}
+      className={cn(
+        "aspect-square relative overflow-hidden rounded-md bg-muted",
+        onClick && "cursor-pointer hover:opacity-90 transition-opacity",
+      )}
+      onClick={onClick ? handleClick : undefined}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleClick();
+              }
+            }
+          : undefined
+      }
+    >
       {shouldLoad && !hasError ? (
         <img
           src={`${API_BASE}/api/photos/${photo.id}/thumbnail`}
