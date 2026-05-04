@@ -4,6 +4,8 @@ import { config } from "../lib/config";
 const client = new OpenAI({
   baseURL: config.ai.baseUrl,
   apiKey: config.ai.apiKey,
+  timeout: 120000,
+  maxRetries: 0,
 });
 
 export class RelightAIClient {
