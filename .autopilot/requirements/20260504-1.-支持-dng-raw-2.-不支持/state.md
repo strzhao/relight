@@ -2,7 +2,7 @@
 active: true
 phase: "done"
 gate: ""
-iteration: 1
+iteration: 2
 max_iterations: 30
 max_retries: 3
 retry_count: 0
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260504-1.-支持-dng-raw-2.-不支持"
 session_id: 377dfb64-79a5-40b9-9df1-35830807b8f1
 started_at: "2026-05-04T10:47:18Z"
