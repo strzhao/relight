@@ -74,7 +74,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `evaluation/evaluator.ts` — 5 维度 100 分制自动评分（格式合规/标签准确/描述相关/评分合理/覆盖完整），纯规则无 AI 依赖
 
 **存储适配器** (`src/storage/`):
-- `interface.ts` — `IStorageAdapter` 接口: listFiles, getFileBuffer, getMimeType, getMetadata
+- `interface.ts` — `IStorageAdapter` 接口: listFiles, getFileBuffer, getMimeType, getMetadata, computeFileHash
 - `local.ts` — 本地文件系统实现，支持图片+视频格式，手动解析 EXIF 提取 DateTimeOriginal
 - `index.ts` — 工厂函数 `createStorageAdapter(type)`，目前仅实现 local，SMB/WebDAV 待扩展
 

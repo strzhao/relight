@@ -947,7 +947,8 @@ describe("PhotoSectionHeader — 分组标题", () => {
       groupPhotos([makePhoto({ takenAt: "2026-05-03T00:00:00Z" })], "year")[0]?.label,
     ];
     for (const label of labels) {
-      expect(label.length).toBeGreaterThan(0);
+      expect(label).toBeDefined();
+      expect(label!.length).toBeGreaterThan(0);
     }
   });
 });

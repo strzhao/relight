@@ -146,7 +146,14 @@ export const photosRouter = new Hono()
     const photo = photos[0];
 
     if (!photo?.thumbnailPath) {
-      return c.json({ success: false, error: "No thumbnail available" }, 404);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+        <rect fill="#f3f4f6" width="200" height="200"/>
+        <text fill="#9ca3af" font-family="system-ui" font-size="14" text-anchor="middle" x="100" y="104">无缩略图</text>
+      </svg>`;
+      return c.body(svg, 200, {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=300",
+      });
     }
 
     try {
@@ -159,7 +166,14 @@ export const photosRouter = new Hono()
         ETag: etag,
       });
     } catch {
-      return c.json({ success: false, error: "Thumbnail file not found" }, 404);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+        <rect fill="#fef2f2" width="200" height="200"/>
+        <text fill="#ef4444" font-family="system-ui" font-size="14" text-anchor="middle" x="100" y="104">缩略图缺失</text>
+      </svg>`;
+      return c.body(svg, 200, {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=300",
+      });
     }
   })
 

@@ -101,10 +101,24 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
   );
 
   const loadMoreInternal = useRef<() => void>(() => {});
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   loadMoreInternal.current = () => {
     // 加载冷却期: 打断「加载完成 → observer 重建 → 触发加载」级联循环
-    if (Date.now() < cooldownUntilRef.current) return;
+    // IntersectionObserver 仅在交叉状态变化时触发——sentinel 持续可见时不会重新回调。
+    // 因此被冷却期阻止后需主动调度重试，避免加载永久卡住。
+    if (Date.now() < cooldownUntilRef.current) {
+      if (!cooldownTimer.current) {
+        cooldownTimer.current = setTimeout(
+          () => {
+            cooldownTimer.current = null;
+            loadMoreInternal.current();
+          },
+          cooldownUntilRef.current - Date.now() + 50,
+        );
+      }
+      return;
+    }
 
     const s = stateRef.current;
     if (s.isFetchingMore || !s.hasMore) return;
@@ -153,6 +167,11 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
       clearTimeout(throttleTimer.current);
       throttleTimer.current = null;
     }
+    if (cooldownTimer.current) {
+      clearTimeout(cooldownTimer.current);
+      cooldownTimer.current = null;
+    }
+    cooldownUntilRef.current = 0;
     dispatch({ type: "RESET" });
     // 下一帧触发重新加载
     setTimeout(() => loadMoreInternal.current(), 50);
@@ -168,6 +187,9 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
     return () => {
       if (throttleTimer.current) {
         clearTimeout(throttleTimer.current);
+      }
+      if (cooldownTimer.current) {
+        clearTimeout(cooldownTimer.current);
       }
     };
   }, []);

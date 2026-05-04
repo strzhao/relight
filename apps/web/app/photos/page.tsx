@@ -8,15 +8,46 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePhotosInfinite } from "@/hooks/use-photos-infinite";
 import { type GroupedPhotos, groupPhotos, useVirtualGrid } from "@/hooks/use-virtual-grid";
-import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
+function calcGridParams(containerWidth: number) {
+  const gap = 8;
+  const minCellSize = 150;
+  const cols = Math.max(1, Math.floor((containerWidth + gap) / (minCellSize + gap)));
+  const cellW = (containerWidth - (cols - 1) * gap) / cols;
+  return { cols, cellW };
+}
+
+function getInitialContentWidth() {
+  if (typeof window === "undefined") return 200;
+  return window.innerWidth - 32;
+}
 
 export default function PhotosPage() {
   const [dateViewMode, setDateViewMode] = useState<DateViewMode>("year");
-  const [columnCount, setColumnCount] = useState(3);
+  const [columnCount, setColumnCount] = useState(
+    () => calcGridParams(getInitialContentWidth()).cols,
+  );
+  const [cellSize, setCellSize] = useState(() => calcGridParams(getInitialContentWidth()).cellW);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // ResizeObserver: 响应式列数计算 (150ms 防抖)
+  // ResizeObserver: 响应式列数计算 + cellSize (150ms 防抖)
+  // 同时使用 useLayoutEffect 确保首次渲染前获取正确的容器宽度
+  const updateGridParams = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const style = getComputedStyle(container);
+    const padX = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+    const { cols, cellW } = calcGridParams(container.clientWidth - padX);
+    setColumnCount(cols);
+    setCellSize(cellW);
+  }, []);
+
+  useLayoutEffect(() => {
+    updateGridParams();
+  }, [updateGridParams]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -27,11 +58,7 @@ export default function PhotosPage() {
       if (!entry) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const width = entry.contentRect.width;
-        const gap = 8; // gap-2 = 8px
-        const minCellSize = 150;
-        const cols = Math.max(1, Math.floor((width + gap) / (minCellSize + gap)));
-        setColumnCount(cols);
+        updateGridParams();
       }, 150);
     });
 
@@ -40,7 +67,7 @@ export default function PhotosPage() {
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, []);
+  }, [updateGridParams]);
 
   const { photos, isLoading, isFetchingMore, error, hasMore, loadMore, reset } =
     usePhotosInfinite();
@@ -66,6 +93,7 @@ export default function PhotosPage() {
     hasMore,
     isFetchingMore,
     onLoadMore: loadMore,
+    cellSize,
   });
 
   // 骨架屏 id 列表（稳定引用，避免 array index key）
@@ -122,35 +150,24 @@ export default function PhotosPage() {
       {/* 顶部工具栏 */}
       <div className="flex shrink-0 items-center justify-between px-4 py-3">
         <h1 className="text-2xl font-bold">照片库</h1>
-        <DateViewControl value={dateViewMode} onChange={handleViewModeChange} />
+        <div className="flex items-center gap-2">
+          <DateViewControl value={dateViewMode} onChange={handleViewModeChange} />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={reset}
+            disabled={isLoading || isFetchingMore}
+            title="刷新"
+          >
+            <RefreshCw className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {/* 虚拟滚动容器 */}
       <div ref={containerRef} className="flex-1 overflow-auto px-2">
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
-            // Sentinel: 底部触发加载更多
-            if (virtualItem.index >= flatItems.length) {
-              return (
-                <div
-                  key={virtualItem.key}
-                  ref={sentinelRef}
-                  className="absolute top-0 left-0 flex w-full items-center justify-center py-4"
-                  style={{
-                    height: `${virtualItem.size}px`,
-                    transform: `translateY(${virtualItem.start}px)`,
-                  }}
-                >
-                  {isFetchingMore && (
-                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
-                  )}
-                  {!isFetchingMore && hasMore && (
-                    <span className="text-xs text-muted-foreground">上滑加载更多</span>
-                  )}
-                </div>
-              );
-            }
-
             const item = flatItems[virtualItem.index];
             if (!item) return null;
 
@@ -194,6 +211,24 @@ export default function PhotosPage() {
               </div>
             );
           })}
+
+          {/* Sentinel: 始终渲染在虚拟容器底部，不依赖虚拟器可见范围 */}
+          {hasMore && (
+            <div
+              key="__sentinel__"
+              ref={sentinelRef}
+              className="absolute top-0 left-0 flex w-full items-center justify-center py-4"
+              style={{
+                height: "40px",
+                transform: `translateY(${virtualizer.getTotalSize()}px)`,
+              }}
+            >
+              {isFetchingMore && <Loader2 className="size-5 animate-spin text-muted-foreground" />}
+              {!isFetchingMore && (
+                <span className="text-xs text-muted-foreground">上滑加载更多</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 底部没有更多提示 */}

@@ -1,6 +1,6 @@
 ---
-active: true
-phase: "merge"
+active: false
+phase: "done"
 gate: ""
 iteration: 9
 max_iterations: 30
