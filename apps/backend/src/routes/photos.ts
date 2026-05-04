@@ -199,7 +199,14 @@ export const photosRouter = new Hono()
 
     const photo = photos[0];
     if (!photo) {
-      return c.json({ success: false, error: "照片不存在" }, 404);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+        <rect fill="#fef2f2" width="200" height="200"/>
+        <text fill="#ef4444" font-family="system-ui" font-size="14" text-anchor="middle" x="100" y="104">照片不存在</text>
+      </svg>`;
+      return c.body(svg, 200, {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=300",
+      });
     }
 
     const fullPath = path.join(photo.rootPath, photo.filePath);
@@ -208,7 +215,14 @@ export const photosRouter = new Hono()
     try {
       await fs.access(fullPath);
     } catch {
-      return c.json({ success: false, error: "文件不存在" }, 404);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+        <rect fill="#fef2f2" width="200" height="200"/>
+        <text fill="#ef4444" font-family="system-ui" font-size="14" text-anchor="middle" x="100" y="104">文件不存在</text>
+      </svg>`;
+      return c.body(svg, 200, {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=300",
+      });
     }
 
     try {
@@ -228,14 +242,15 @@ export const photosRouter = new Hono()
         "Cache-Control": "public, max-age=3600",
         ETag: `"${Buffer.from(etagBase).toString("base64").slice(0, 32)}"`,
       });
-    } catch (err) {
-      return c.json(
-        {
-          success: false,
-          error: `读取文件失败: ${(err as Error).message}`,
-        },
-        500,
-      );
+    } catch {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+        <rect fill="#fef2f2" width="200" height="200"/>
+        <text fill="#ef4444" font-family="system-ui" font-size="14" text-anchor="middle" x="100" y="104">读取失败</text>
+      </svg>`;
+      return c.body(svg, 200, {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=300",
+      });
     }
   })
 

@@ -4,8 +4,6 @@ import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLightbox } from "./lightbox-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
-
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 5;
 
@@ -132,7 +130,7 @@ export function LightboxImage() {
       {hasError && <span className="text-white/60">加载失败</span>}
 
       <img
-        src={`${API_BASE}/api/photos/${photo.id}/original`}
+        src={`/api/photos/${photo.id}/original`}
         alt=""
         className={cn("max-h-full max-w-full select-none", isLoading ? "opacity-0" : "opacity-100")}
         style={{

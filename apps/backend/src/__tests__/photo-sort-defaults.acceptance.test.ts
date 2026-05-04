@@ -3,13 +3,13 @@
  *
  * 覆盖设计文档「修复照片排序 — photoQuerySchema 默认值」：
  * - photoQuerySchema.parse({}) 默认 sortBy="takenAt"（非 "createdAt"）
- * - photoQuerySchema.parse({}) 默认 order="asc"（非 "desc"）
+ * - photoQuerySchema.parse({}) 默认 order="desc"（非 "asc"）
  * - 原有默认值保留：page=1, pageSize=20
  * - 显式传参可覆盖默认值
  * - sortBy 枚举仅允许 createdAt / takenAt / fileSize
  * - order 枚举仅允许 asc / desc
  *
- * 设计文档要求默认排序为按拍摄时间升序（旧→新），
+ * 设计文档要求默认排序为按拍摄时间降序（新→旧），
  * 无 EXIF 的照片（takenAt=NULL）由后端 COALESCE(takenAt, createdAt) 回退处理。
  */
 import { photoQuerySchema } from "@relight/shared";
@@ -26,9 +26,9 @@ describe("photoQuerySchema — 排序默认值验收", () => {
       expect(result.sortBy).toBe("takenAt");
     });
 
-    it("order 默认值应为 asc（升序：旧照片在前，新照片在后）", () => {
+    it("order 默认值应为 desc（降序：新照片在前，旧照片在后）", () => {
       const result = photoQuerySchema.parse({});
-      expect(result.order).toBe("asc");
+      expect(result.order).toBe("desc");
     });
 
     it("page 默认值应为 1（首页）", () => {
@@ -41,10 +41,10 @@ describe("photoQuerySchema — 排序默认值验收", () => {
       expect(result.pageSize).toBe(20);
     });
 
-    it("sortBy + order 组合语义：默认按拍摄时间升序（旧→新），前端不传参即可获得正确排序", () => {
+    it("sortBy + order 组合语义：默认按拍摄时间降序（新→旧），前端不传参即可获得正确排序", () => {
       const result = photoQuerySchema.parse({});
       expect(result.sortBy).toBe("takenAt");
-      expect(result.order).toBe("asc");
+      expect(result.order).toBe("desc");
       // 组合断言：前端 usePhotosInfinite() 不传参 → sortBy=takenAt, order=asc
     });
   });
@@ -57,12 +57,12 @@ describe("photoQuerySchema — 排序默认值验收", () => {
     it("sortBy=createdAt 可覆盖默认的 takenAt（用户主动切换排序）", () => {
       const result = photoQuerySchema.parse({ sortBy: "createdAt" });
       expect(result.sortBy).toBe("createdAt");
-      expect(result.order).toBe("asc"); // order 保持默认
+      expect(result.order).toBe("desc"); // order 保持默认
     });
 
-    it("order=desc 可覆盖默认的 asc（用户切换降序）", () => {
-      const result = photoQuerySchema.parse({ order: "desc" });
-      expect(result.order).toBe("desc");
+    it("order=asc 可覆盖默认的 desc（用户切换升序）", () => {
+      const result = photoQuerySchema.parse({ order: "asc" });
+      expect(result.order).toBe("asc");
       expect(result.sortBy).toBe("takenAt"); // sortBy 保持默认
     });
 
@@ -124,7 +124,7 @@ describe("photoQuerySchema — 排序默认值验收", () => {
         dateTo: "2026-12-31",
       });
       expect(result.sortBy).toBe("takenAt");
-      expect(result.order).toBe("asc");
+      expect(result.order).toBe("desc");
       expect(result.dateFrom).toBe("2026-01-01");
       expect(result.dateTo).toBe("2026-12-31");
     });
@@ -136,7 +136,7 @@ describe("photoQuerySchema — 排序默认值验收", () => {
         tagId: "550e8400-e29b-41d4-a716-446655440000",
       });
       expect(result.sortBy).toBe("takenAt");
-      expect(result.order).toBe("asc");
+      expect(result.order).toBe("desc");
     });
 
     it("传 storageSourceId 不影响 sortBy 和 order 默认值", () => {
@@ -144,7 +144,7 @@ describe("photoQuerySchema — 排序默认值验收", () => {
         storageSourceId: "550e8400-e29b-41d4-a716-446655440000",
       });
       expect(result.sortBy).toBe("takenAt");
-      expect(result.order).toBe("asc");
+      expect(result.order).toBe("desc");
     });
   });
 
