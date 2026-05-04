@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -15,7 +16,8 @@ export async function generateThumbnail(
   const outputPath = path.join(outputDir, outputName);
 
   await fs.mkdir(outputDir, { recursive: true });
-  await sharp(sourcePath)
+  const imageBuffer = await readFile(sourcePath);
+  await sharp(imageBuffer)
     .resize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, { fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 80 })
     .toFile(outputPath);

@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, real, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
 
 /** 存储源 */
 export const storageSources = sqliteTable("storage_sources", {
@@ -31,7 +31,9 @@ export const photos = sqliteTable("photos", {
   thumbnailPath: text("thumbnail_path"),
   takenAt: text("taken_at"),
   createdAt: text("created_at").notNull(),
-});
+}, (t) => ({
+  unq_storage_file: unique().on(t.storageSourceId, t.filePath),
+}));
 
 /** 标签 */
 export const tags = sqliteTable("tags", {
