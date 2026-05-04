@@ -15,6 +15,7 @@
 - [2026-05-03] @tanstack/react-virtual sentinel 必须放在虚拟容器内部而非作为虚拟项 | tags: react, virtual-scroll, tanstack-virtual, frontend | → patterns.md
 - [2026-05-04] IntersectionObserver 在 React 中的生命周期管理——避免级联加载循环 | tags: react, intersectionobserver, infinite-scroll, ref, useeffect, cascade | → patterns.md
 - [2026-05-04] sharp 处理网络/SMB 挂载路径文件时先 readFile 读入 Buffer | tags: sharp, smb, network-path, seek-error, image-processing | → patterns.md
+- [2026-05-04] macOS SMB 挂载持久化 — LaunchAgent 周期保活 + nsmb.conf 调优 | tags: macos, smb, nas, mount, launchagent, shell | → patterns.md
 - [2026-05-04] HEIC 文件可能伪装：扩展名 .heic 实际为 JPEG 内容 | tags: heic, jpeg, content-detection, format-disguise, sharp | → patterns.md
 - [2026-05-04] DB 与文件系统反向校验时需加安全阀防止存储断连误删 | tags: backend, scan, safety, orphan-cleanup, storage, nas | → patterns.md
 - [2026-05-04] Biome a11y 规则豁免应使用 biome.json overrides 而非内联注释 | tags: biome, a11y, linting, config, lightbox | → patterns.md
