@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Web JS (初始)",
+    "path": "apps/web/.next/static/chunks/*.js",
+    "limit": "500 KB",
+    "brotli": true
+  },
+  {
+    "name": "Shared 包",
+    "path": "packages/shared/dist/*.js",
+    "limit": "50 KB",
+    "brotli": true
+  }
+]
