@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 1
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "skipped"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260504-参考当前触发扫描的逻"
 session_id: 06362679-37c2-47d0-a162-b4744c089df3
 started_at: "2026-05-04T15:25:27Z"
