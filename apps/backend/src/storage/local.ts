@@ -1,87 +1,12 @@
-import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
-import { createHeicDecoder } from "../lib/heic-decoder";
 import type { FileInfo, IStorageAdapter } from "./interface";
 
-/**
- * 从 sharp 返回的原始 EXIF Buffer 中提取 DateTimeOriginal 标签 (0x9003)
- * 返回 Date 对象或 null
- */
-function extractExifDate(exifBuf: Buffer): Date | null {
-  if (exifBuf.length < 14) return null;
-
-  // 判断字节序：0x4949 = little-endian (Intel), 0x4D4D = big-endian (Motorola)
-  const le = exifBuf[0] === 0x49 && exifBuf[1] === 0x49;
-
-  function read16(offset: number): number {
-    return le ? exifBuf.readUInt16LE(offset) : exifBuf.readUInt16BE(offset);
-  }
-
-  function read32(offset: number): number {
-    return le ? exifBuf.readUInt32LE(offset) : exifBuf.readUInt32BE(offset);
-  }
-
-  // TIFF 头：字节 4-7 = 第一个 IFD 的偏移（从 TIFF 头起始即字节 0 算起）
-  // 实际 TIFF 头从 EXIF buffer 的某个偏移开始
-  // 简化：遍历常见起始偏移查找 TIFF 魔数 0x002A
-  let tiffStart = -1;
-  for (let i = 0; i < Math.min(exifBuf.length - 8, 256); i++) {
-    const tag = read16(i);
-    if (tag === 0x002a) {
-      tiffStart = i - 2; // 字节序标记在此前 2 字节
-      break;
-    }
-  }
-  if (tiffStart < 0) return null;
-
-  // 第一个 IFD 偏移在 tiffStart + 4
-  let ifdOffset = tiffStart + read32(tiffStart + 4);
-
-  while (ifdOffset > 0 && ifdOffset < exifBuf.length - 2) {
-    const entryCount = read16(ifdOffset);
-    ifdOffset += 2;
-
-    for (let i = 0; i < entryCount && ifdOffset + 12 <= exifBuf.length; i++) {
-      const tag = read16(ifdOffset);
-      if (tag === 0x9003) {
-        // DateTimeOriginal — 值是 ASCII 字符串的偏移
-        const valueOffset = tiffStart + read32(ifdOffset + 8);
-        // 读取 19 个字符
-        let str = "";
-        for (let j = 0; j < 19 && valueOffset + j < exifBuf.length; j++) {
-          const ch = exifBuf[valueOffset + j];
-          if (ch === 0 || ch == null) break;
-          str += String.fromCharCode(ch);
-        }
-        // 格式: "YYYY:MM:DD HH:MM:SS"
-        const match = str.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
-        if (match) {
-          return new Date(
-            Number(match[1]),
-            Number(match[2]) - 1,
-            Number(match[3]),
-            Number(match[4]),
-            Number(match[5]),
-            Number(match[6]),
-          );
-        }
-        return null;
-      }
-      ifdOffset += 12;
-    }
-
-    // 下一个 IFD 偏移
-    const nextOffset = read32(ifdOffset);
-    ifdOffset = nextOffset > 0 ? tiffStart + nextOffset : -1;
-  }
-
-  return null;
-}
-
-const SUPPORTED_EXTENSIONS = new Set([
+const IMAGE_EXTENSIONS = new Set([
   ".jpg",
   ".jpeg",
   ".png",
@@ -91,116 +16,101 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".heif",
   ".bmp",
   ".tiff",
-  ".dng",
-  ".mov",
-  ".mp4",
-  ".avi",
-  ".mkv",
 ]);
 
-export const VIDEO_EXTENSIONS = new Set([".mov", ".mp4", ".avi", ".mkv"]);
+/** EXIF DateTimeOriginal tag */
+const TAG_DATE_TIME_ORIGINAL = 0x9003;
 
-const HEIC_EXTENSIONS = new Set([".heic", ".heif"]);
-
-function isHeic(filePath: string): boolean {
-  return HEIC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+/**
+ * 在 EXIF Buffer 中定位 TIFF 头起始位置。
+ * 兼容 "Exif\0\0" APP1 前缀（offset 6）和直接在 offset 0 的纯 TIFF 格式。
+ */
+function findTiffStart(buf: Buffer): number {
+  if (buf.length < 4) return -1;
+  const b0 = buf[0] ?? -1;
+  const b1 = buf[1] ?? -1;
+  // Byte order markers: II (little-endian) or MM (big-endian)
+  if ((b0 === 0x49 && b1 === 0x49) || (b0 === 0x4d && b1 === 0x4d)) return 0;
+  // Try after "Exif\0\0" APP1 prefix
+  if (buf.length >= 10) {
+    const b6 = buf[6] ?? -1;
+    const b7 = buf[7] ?? -1;
+    if ((b6 === 0x49 && b7 === 0x49) || (b6 === 0x4d && b7 === 0x4d)) return 6;
+  }
+  return -1;
 }
 
-export async function getVideoMetadata(
-  filePath: string,
-): Promise<{ width?: number; height?: number; takenAt?: Date }> {
+/**
+ * 轻量 EXIF TIFF 解析器，提取 DateTimeOriginal (0x9003)。
+ * 不依赖第三方 EXIF 库，零额外依赖。
+ *
+ * @param exifBuffer sharp metadata() 返回的 .exif Buffer
+ * @returns "YYYY:MM:DD HH:MM:SS" 格式的日期时间字符串，解析失败返回 null
+ */
+function parseExifDateTimeOriginal(exifBuffer: Buffer): string | null {
   try {
-    const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(
-        "ffprobe",
-        ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", filePath],
-        { timeout: 30000 },
-        (err, stdout) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(stdout);
-          }
-        },
-      );
-    });
+    const tiffStart = findTiffStart(exifBuffer);
+    if (tiffStart < 0) return null;
 
-    const probe = JSON.parse(stdout);
+    const buf = exifBuffer;
+    const base = tiffStart;
 
-    // 从第一个 video stream 获取宽高
-    let width: number | undefined;
-    let height: number | undefined;
-    let rotation = 0;
+    // Byte order: 0x49 = "II" (Intel, little-endian), 0x4D = "MM" (Motorola, big-endian)
+    const isLE = buf[base] === 0x49;
 
-    const videoStream = probe.streams?.find(
-      (s: { codec_type?: string }) => s.codec_type === "video",
-    );
+    const read16 = (offset: number): number =>
+      isLE ? buf.readUInt16LE(offset) : buf.readUInt16BE(offset);
 
-    if (videoStream) {
-      width = videoStream.width;
-      height = videoStream.height;
+    const read32 = (offset: number): number =>
+      isLE ? buf.readUInt32LE(offset) : buf.readUInt32BE(offset);
 
-      // 检查 side_data_list 中的 rotation
-      if (videoStream.side_data_list) {
-        for (const data of videoStream.side_data_list) {
-          if (data.rotation !== undefined && data.rotation !== null) {
-            rotation = data.rotation;
-            break;
-          }
-        }
+    // TIFF magic number must be 0x002A
+    if (read16(base + 2) !== 0x002a) return null;
+
+    // IFD0 offset (relative to TIFF start)
+    const ifdStart = read32(base + 4) + base;
+    const entryCount = read16(ifdStart);
+
+    let entryOffset = ifdStart + 2;
+    for (let i = 0; i < entryCount; i++) {
+      const tag = read16(entryOffset);
+      if (tag === TAG_DATE_TIME_ORIGINAL) {
+        const type = read16(entryOffset + 2);
+        const count = read32(entryOffset + 4);
+
+        // ASCII string: type=2, count includes null terminator
+        if (type !== 2) return null;
+
+        // Values <= 4 bytes are stored inline at entryOffset + 8;
+        // longer values store a 4-byte offset (relative to TIFF start) at entryOffset + 8
+        const valueStart = count <= 4 ? entryOffset + 8 : read32(entryOffset + 8) + base;
+        // Trim the null terminator
+        return buf.toString("utf8", valueStart, valueStart + count - 1);
       }
-
-      // 如果是 -90 或 90 度旋转，交换宽高（竖拍视频修正）
-      if (rotation === -90 || rotation === 90) {
-        [width, height] = [height, width];
-      }
-    } else {
-      return {};
+      entryOffset += 12; // Each IFD entry is exactly 12 bytes
     }
-
-    // 从 format.tags.creation_time 解析 takenAt
-    let takenAt: Date | undefined;
-    const creationTime = probe.format?.tags?.creation_time;
-    if (creationTime) {
-      const parsed = new Date(creationTime);
-      if (!Number.isNaN(parsed.getTime())) {
-        takenAt = parsed;
-      }
-    }
-
-    return { width, height, takenAt };
-  } catch (err: unknown) {
-    const nodeErr = err as NodeJS.ErrnoException;
-    if (nodeErr.code === "ENOENT") {
-      console.warn("ffprobe 未找到，请安装 ffmpeg 以获取视频元数据");
-    } else {
-      console.warn("ffprobe 执行失败，视频元数据不可用:", nodeErr.message ?? err);
-    }
-    return {};
+  } catch {
+    // Silently ignore parse errors for robustness
   }
+  return null;
 }
 
 export class LocalFilesystemAdapter implements IStorageAdapter {
-  async listFiles(rootPath: string, onProgress?: (count: number) => void): Promise<FileInfo[]> {
+  async listFiles(rootPath: string): Promise<FileInfo[]> {
     const files: FileInfo[] = [];
-    await this.walk(rootPath, rootPath, files, onProgress);
+    await this.walk(rootPath, rootPath, files);
     return files;
   }
 
-  private async walk(
-    rootPath: string,
-    currentPath: string,
-    files: FileInfo[],
-    onProgress?: (count: number) => void,
-  ): Promise<void> {
+  private async walk(rootPath: string, currentPath: string, files: FileInfo[]): Promise<void> {
     const entries = await fs.readdir(currentPath, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
-        await this.walk(rootPath, fullPath, files, onProgress);
+        await this.walk(rootPath, fullPath, files);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        if (SUPPORTED_EXTENSIONS.has(ext)) {
+        if (IMAGE_EXTENSIONS.has(ext)) {
           const stat = await fs.stat(fullPath);
           files.push({
             path: fullPath,
@@ -208,10 +118,6 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
             size: stat.size,
             modifiedAt: stat.mtime,
           });
-          // 每 100 个文件回调一次进度
-          if (onProgress && files.length % 100 === 0) {
-            onProgress(files.length);
-          }
         }
       }
     }
@@ -233,105 +139,60 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
       ".heif": "image/heif",
       ".bmp": "image/bmp",
       ".tiff": "image/tiff",
-      ".dng": "image/dng",
-      ".mov": "video/quicktime",
-      ".mp4": "video/mp4",
-      ".avi": "video/x-msvideo",
-      ".mkv": "video/x-matroska",
     };
     return mimeMap[ext] ?? "application/octet-stream";
   }
 
+  /**
+   * 获取图片元信息。
+   * 使用 sharp 读取文件头部获取宽高和 EXIF 数据，
+   * 不会将整个图片加载到内存（sharp 只读取必要的文件片段）。
+   * 拍摄时间优先从 EXIF DateTimeOriginal 提取，fallback 到 fs.stat mtime。
+   */
   async getMetadata(
     filePath: string,
   ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
-    const ext = path.extname(filePath).toLowerCase();
-    // 视频格式用 ffprobe 提取元数据
-    if (VIDEO_EXTENSIONS.has(ext)) {
-      return getVideoMetadata(filePath);
-    }
-
-    // HEIC 先转临时 JPEG 再提取元数据
-    if (isHeic(filePath)) {
-      return this.getHeicMetadata(filePath);
-    }
-
     try {
       const metadata = await sharp(filePath).metadata();
-      const result: { width?: number; height?: number; takenAt?: Date } = {};
+      const width = metadata.width;
+      const height = metadata.height;
+      let takenAt: Date | undefined;
 
-      // EXIF orientations 5-8 involve 90°/270° rotation → swap width/height
-      const orientation = metadata.orientation;
-      const swapDimensions = orientation != null && orientation >= 5 && orientation <= 8;
-
-      if (metadata.width && metadata.height) {
-        result.width = swapDimensions ? metadata.height : metadata.width;
-        result.height = swapDimensions ? metadata.width : metadata.height;
-      } else {
-        if (metadata.width) result.width = metadata.width;
-        if (metadata.height) result.height = metadata.height;
-      }
       if (metadata.exif) {
-        try {
-          const dateTimeOriginal = extractExifDate(metadata.exif);
-          if (dateTimeOriginal) {
-            result.takenAt = dateTimeOriginal;
-          }
-        } catch {
-          // EXIF 解析失败，忽略
+        const dateTimeStr = parseExifDateTimeOriginal(metadata.exif);
+        if (dateTimeStr) {
+          // EXIF DateTimeOriginal format: "YYYY:MM:DD HH:MM:SS"
+          takenAt = new Date(dateTimeStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3"));
         }
       }
-      return result;
+
+      // Fallback to file modification time
+      if (!takenAt) {
+        const stat = await fs.stat(filePath);
+        takenAt = stat.mtime;
+      }
+
+      return { width, height, takenAt };
     } catch {
-      return {};
+      // 容错：sharp 解析失败时 fallback 到 fs.stat mtime
+      try {
+        const stat = await fs.stat(filePath);
+        return { takenAt: stat.mtime };
+      } catch {
+        return {};
+      }
     }
   }
 
-  private async getHeicMetadata(
-    filePath: string,
-  ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
-    const decoder = createHeicDecoder();
-
-    const ts = Date.now();
-    const rand = Math.random().toString(36).slice(2, 8);
-    const tempDir = path.join(os.tmpdir(), `relight-meta-${ts}-${rand}`);
-    await fs.mkdir(tempDir, { recursive: true });
-    const intermediateJpeg = path.join(tempDir, `meta-intermediate-${ts}.jpg`);
-
-    try {
-      await decoder.convertToJpeg(filePath, intermediateJpeg);
-      const meta = await sharp(intermediateJpeg).metadata();
-      const result: { width?: number; height?: number; takenAt?: Date } = {};
-
-      const orientation = meta.orientation;
-      const swapDimensions = orientation != null && orientation >= 5 && orientation <= 8;
-
-      if (meta.width && meta.height) {
-        result.width = swapDimensions ? meta.height : meta.width;
-        result.height = swapDimensions ? meta.width : meta.height;
-      } else {
-        if (meta.width) result.width = meta.width;
-        if (meta.height) result.height = meta.height;
-      }
-      if (meta.exif) {
-        try {
-          const dateTimeOriginal = extractExifDate(meta.exif);
-          if (dateTimeOriginal) {
-            result.takenAt = dateTimeOriginal;
-          }
-        } catch {
-          // EXIF 解析失败，忽略
-        }
-      }
-      return result;
-    } catch {
-      return {};
-    } finally {
-      try {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      } catch {
-        // best-effort cleanup
-      }
-    }
+  /**
+   * 流式计算文件 SHA256 哈希。
+   * 使用 64KB chunk 流式读取，内存占用恒定，
+   * 不会将大文件完全加载到内存。
+   */
+  async computeFileHash(filePath: string): Promise<string> {
+    const hash = createHash("sha256");
+    const readStream = createReadStream(filePath, { highWaterMark: 64 * 1024 });
+    await pipeline(readStream, hash);
+    return hash.digest("hex");
   }
 }

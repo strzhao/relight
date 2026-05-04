@@ -19,4 +19,7 @@ export interface IStorageAdapter {
 
   /** 获取文件元信息 */
   getMetadata(filePath: string): Promise<{ width?: number; height?: number; takenAt?: Date }>;
+
+  /** 流式计算文件 SHA256 哈希值（64KB chunk 流式读取，内存恒定） */
+  computeFileHash(filePath: string): Promise<string>;
 }

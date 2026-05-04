@@ -112,18 +112,44 @@ export function useVirtualGrid(options: UseVirtualGridOptions) {
     return items;
   }, [groups, columnCount]);
 
+  // flatItemsRef: 每次渲染同步最新值，供稳定闭包（getItemKey / estimateSize）读取
+  const flatItemsRef = useRef(flatItems);
+  flatItemsRef.current = flatItems;
+
+  // getItemKey: 为 virtualizer 提供稳定身份，避免 count 变化导致 React reconciliation 失效
+  // 零依赖 useCallback — 通过 flatItemsRef.current 读取最新值
+  const getItemKey = useCallback((index: number) => {
+    const items = flatItemsRef.current;
+    if (index >= items.length) return "__sentinel__";
+    const item = items[index];
+    if (!item) return `unknown_${index}`;
+    switch (item.type) {
+      case "header":
+        return `hdr_${item.groupIndex}_${item.label || "unknown"}`;
+      case "photoRow": {
+        const firstPhotoId = item.photoRowPhotos?.[0]?.id ?? "empty";
+        return `row_${item.groupIndex}_${firstPhotoId}`;
+      }
+      default:
+        return `unknown_${index}`;
+    }
+  }, []);
+
   // +1 为 sentinel
   const virtualizer = useVirtualizer({
     count: flatItems.length + (hasMore ? 1 : 0),
     getScrollElement: () => containerRef.current,
     estimateSize: useCallback(
       (index: number) => {
-        if (index >= flatItems.length) return headerSize; // sentinel
-        const item = flatItems[index];
+        const items = flatItemsRef.current;
+        if (index >= items.length) return headerSize; // sentinel
+        const item = items[index];
         return item?.type === "header" ? headerSize : cellSize;
       },
-      [flatItems, cellSize, headerSize],
+      // 稳定依赖: 仅 [cellSize, headerSize]，不包含 flatItems
+      [cellSize, headerSize],
     ),
+    getItemKey,
     overscan,
   });
 

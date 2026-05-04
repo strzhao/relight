@@ -133,7 +133,7 @@ export default function PhotosPage() {
             if (virtualItem.index >= flatItems.length) {
               return (
                 <div
-                  key="sentinel"
+                  key={virtualItem.key}
                   ref={sentinelRef}
                   className="absolute top-0 left-0 flex w-full items-center justify-center py-4"
                   style={{
@@ -158,7 +158,7 @@ export default function PhotosPage() {
             if (item.type === "header") {
               return (
                 <div
-                  key={`h-${item.groupIndex}`}
+                  key={virtualItem.key}
                   className="absolute top-0 left-0 w-full"
                   style={{
                     height: `${virtualItem.size}px`,
@@ -178,7 +178,7 @@ export default function PhotosPage() {
                 : "100%";
             return (
               <div
-                key={`r-${item.groupIndex}-${virtualItem.index}`}
+                key={virtualItem.key}
                 className="absolute top-0 left-0 flex w-full"
                 style={{
                   height: `${virtualItem.size}px`,

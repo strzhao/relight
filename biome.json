@@ -17,5 +17,17 @@
   },
   "files": {
     "ignore": [".next", ".turbo", "dist", "node_modules", "*.db"]
-  }
+  },
+  "overrides": [
+    {
+      "include": ["**/__tests__/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -1,75 +1,38 @@
-import { createHash } from "node:crypto";
 import path from "node:path";
-import type { ScanProgress } from "@relight/shared";
 import type { Job } from "bullmq";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { generateThumbnail } from "../lib/thumbnail";
 import { createStorageAdapter } from "../storage";
+import { analyzeQueue } from "./queues";
 
 interface ScanJobData {
   storageSourceId: string;
-  scanLogId?: string;
-  skipAnalysis?: boolean;
-  forceRegenerate?: boolean;
 }
 
-interface ExistingPhotoCache {
-  id: string;
-  filePath: string;
-  fileHash: string;
-  fileMtime: number | null;
-  fileSize: number;
-}
-
-/** 每 N 个文件批量 updateProgress */
-const PROGRESS_BATCH_SIZE = 10;
+/** 缩略图并发生成批大小 */
+const THUMBNAIL_CONCURRENCY = 4;
 
 /**
  * scan-storage Worker
  *
- * 增量扫描流程：
+ * 流程：
  * 1. 查找存储源
- * 2. 查询所有已有照片（filePath + mtime + size）构建缓存
- * 3. 遍历目录，mtime+size 命中则跳过 SHA256（增量优化）
- * 4. 仅对新文件/修改文件执行 SHA256 + 缩略图生成
- * 5. INSERT 新记录 + UPDATE 变更记录
- * 6. UPDATE scan_log（而非 INSERT）
- *
- * AI 分析由外部显式触发，不在扫描流程中自动入队。
+ * 2. 遍历目录获取所有图片文件
+ * 3. 流式 SHA256 去重（适配器 computeFileHash）
+ * 4. 收集元信息 → 批量 INSERT（db.transaction 包裹）
+ * 5. 并发生成缩略图（每批 4 个 Promise.all，失败不阻塞）
+ * 6. 查询已有分析 → 跳过已分析 photo → addBulk 入队
  */
 export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
-  const { storageSourceId, scanLogId } = job.data;
+  const { storageSourceId } = job.data;
   job.log(`开始扫描存储源: ${storageSourceId}`);
 
   const scanStartedAt = new Date().toISOString();
   let scannedCount = 0;
   let newCount = 0;
-  let skippedCount = 0;
-  let updatedCount = 0;
-  let regeneratedCount = 0;
   let errorCount = 0;
-
-  // 辅助函数：推送进度到 BullMQ + 更新 scan_log
-  const pushProgress = async (phase: ScanProgress["phase"], extra?: Partial<ScanProgress>) => {
-    const progress: ScanProgress = {
-      phase,
-      totalFiles: scannedCount,
-      processed: skippedCount + newCount + updatedCount + regeneratedCount + errorCount,
-      newCount,
-      updatedCount,
-      skippedCount,
-      errorCount,
-      regeneratedCount,
-      ...extra,
-    };
-    try {
-      await job.updateProgress(progress as unknown as number | object);
-    } catch {
-      // updateProgress 失败不影响扫描流程
-    }
-  };
 
   try {
     // 1. 查找存储源
@@ -85,129 +48,64 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
 
     job.log(`存储源: ${source.name} (${source.rootPath})`);
 
-    // 2. 查询已有照片，构建 filePath → ExistingPhoto 缓存
+    // 2. 遍历目录获取图片文件
+    const adapter = createStorageAdapter(source.type);
+    const files = await adapter.listFiles(source.rootPath);
+    scannedCount = files.length;
+    job.log(`找到 ${scannedCount} 个图片文件`);
+
+    // 3. 流式计算每个文件的 SHA256 hash，构建 hash→file 映射
+    const fileHashMap = new Map<string, (typeof files)[number]>();
+
+    for (const file of files) {
+      const hash = await adapter.computeFileHash(file.path);
+      fileHashMap.set(hash, file);
+    }
+
+    // 查询已有照片的 hash
     const existingPhotos = await db
-      .select({
-        id: schema.photos.id,
-        filePath: schema.photos.filePath,
-        fileHash: schema.photos.fileHash,
-        fileMtime: schema.photos.fileMtime,
-        fileSize: schema.photos.fileSize,
-      })
+      .select({ fileHash: schema.photos.fileHash })
       .from(schema.photos)
       .where(eq(schema.photos.storageSourceId, storageSourceId));
 
-    const existingMap = new Map<string, ExistingPhotoCache>();
-    for (const p of existingPhotos) {
-      existingMap.set(p.filePath, p);
+    const existingHashes = new Set(existingPhotos.map((p) => p.fileHash));
+
+    // 去重：过滤新文件
+    const newEntries = [...fileHashMap.entries()].filter(([hash]) => !existingHashes.has(hash));
+
+    job.log(`新文件: ${newEntries.length}, 已存在: ${scannedCount - newEntries.length}`);
+
+    if (newEntries.length === 0) {
+      job.log("没有新文件，扫描完成");
+      await writeScanLog(storageSourceId, scannedCount, 0, 0, scanStartedAt);
+      await updateLastScanAt(storageSourceId);
+      return;
     }
 
-    job.log(`已缓存 ${existingMap.size} 条已有记录`);
-
-    // 3. 遍历目录获取媒体文件
-    // 先用已有照片数作为 totalFiles 下界估计，避免 listing 阶段显示 0/0
-    await pushProgress("listing", {
-      totalFiles: Math.max(existingMap.size, 1),
-      processed: 0,
-    });
-
-    const adapter = createStorageAdapter(source.type);
-    const files = await adapter.listFiles(source.rootPath, (foundCount) => {
-      void pushProgress("listing", {
-        totalFiles: Math.max(foundCount, existingMap.size),
-        processed: foundCount,
-      });
-    });
-    scannedCount = files.length;
-    job.log(`找到 ${scannedCount} 个媒体文件`);
-    await pushProgress("hashing");
-
-    // 4. 处理每个文件：mtime+size 快速路径 vs 完整 hash
-    const newFiles: Array<{ hash: string; file: (typeof files)[number] }> = [];
-    const updatedFiles: Array<{
-      id: string;
-      hash: string;
-      file: (typeof files)[number];
-    }> = [];
-    // forceRegenerate 时，未变更的文件跳过哈希直接重新生成缩略图
-    const regenerateOnlyFiles: Array<{ id: string; file: (typeof files)[number] }> = [];
-
-    let hashingProcessed = 0;
-    for (const file of files) {
-      const existing = existingMap.get(file.path);
-      const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
-
-      if (existing && existing.fileMtime === fileMtime && existing.fileSize === file.size) {
-        if (job.data.forceRegenerate) {
-          regenerateOnlyFiles.push({ id: existing.id, file });
-        } else {
-          skippedCount++;
-        }
-        hashingProcessed++;
-        continue;
-      }
-
-      try {
-        const buffer = await adapter.getFileBuffer(file.path);
-        const hash = createHash("sha256").update(buffer).digest("hex");
-
-        if (existing) {
-          updatedFiles.push({ id: existing.id, hash, file });
-        } else {
-          newFiles.push({ hash, file });
-        }
-      } catch (err) {
-        errorCount++;
-        job.log(`读取文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      hashingProcessed++;
-
-      // 每 N 个文件推送一次进度
-      if (hashingProcessed % PROGRESS_BATCH_SIZE === 0) {
-        await pushProgress("hashing");
-      }
-    }
-
-    job.log(
-      `跳过 ${skippedCount} (未变更), 新增 ${newFiles.length}, 更新 ${updatedFiles.length}, 重建缩略图 ${regenerateOnlyFiles.length}, 错误 ${errorCount}`,
-    );
-
+    // 4. 收集新文件的元信息 + 构建 photoRecords 数组
     const thumbnailDir = path.join(config.storageRoot, "thumbnails");
     const now = new Date().toISOString();
 
-    await pushProgress("processing");
+    interface NewPhotoRecord {
+      id: string;
+      storageSourceId: string;
+      filePath: string;
+      fileHash: string;
+      width: number;
+      height: number;
+      fileSize: number;
+      thumbnailPath: string | null;
+      takenAt: string | null;
+      createdAt: string;
+    }
+    const photoRecords: NewPhotoRecord[] = [];
 
-    // 5a. 处理新文件
-    let processingCount = 0;
-    const totalProcessing = newFiles.length + updatedFiles.length + regenerateOnlyFiles.length;
-
-    for (const { hash, file } of newFiles) {
+    for (const [hash, file] of newEntries) {
       try {
         const photoId = crypto.randomUUID();
         const metadata = await adapter.getMetadata(file.path);
-        const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
 
-        let thumbnailPath: string | null = null;
-        try {
-          thumbnailPath = await generateThumbnail(file.path, thumbnailDir, photoId);
-        } catch (thumbErr) {
-          const errMsg = thumbErr instanceof Error ? thumbErr.message : String(thumbErr);
-          const filePath = file.path;
-          if (errMsg.includes("heif-convert CLI is not available")) {
-            job.log(
-              `[解码器缺失] 缩略图生成失败 (${file.name}, path: ${filePath}): heif-convert 未安装，跳过 HEIC 缩略图`,
-            );
-          } else if (errMsg.includes("heif-convert timed out")) {
-            job.log(
-              `[超时] 缩略图生成失败 (${file.name}, path: ${filePath}): heif-convert 超时 (30s)`,
-            );
-          } else {
-            job.log(`缩略图生成失败 (${file.name}, path: ${filePath}): ${errMsg}`);
-          }
-        }
-
-        await db.insert(schema.photos).values({
+        photoRecords.push({
           id: photoId,
           storageSourceId,
           filePath: file.path,
@@ -215,139 +113,136 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           width: metadata.width ?? 0,
           height: metadata.height ?? 0,
           fileSize: file.size,
-          fileMtime,
-          thumbnailPath,
+          thumbnailPath: null,
           takenAt: metadata.takenAt?.toISOString() ?? null,
           createdAt: now,
         });
-
-        newCount++;
       } catch (err) {
         errorCount++;
         job.log(
-          `处理新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
+          `获取元信息失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
         );
       }
-
-      processingCount++;
-      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
-        await pushProgress("processing");
-      }
     }
 
-    // 5b. 处理变更文件
-    for (const { id, hash, file } of updatedFiles) {
-      try {
-        const fileMtime = Math.floor(file.modifiedAt.getTime() / 1000);
-
-        let thumbnailPath: string | null | undefined;
-        if (job.data.forceRegenerate) {
-          try {
-            thumbnailPath = await generateThumbnail(file.path, thumbnailDir, id);
-          } catch (thumbErr) {
-            job.log(
-              `缩略图重新生成失败 (${file.name}): ${thumbErr instanceof Error ? thumbErr.message : String(thumbErr)}`,
-            );
-          }
-        }
-
-        const updateValues: Record<string, unknown> = {
-          fileHash: hash,
-          fileSize: file.size,
-          fileMtime,
-        };
-        if (thumbnailPath != null) {
-          updateValues.thumbnailPath = thumbnailPath;
-        }
-
-        await db.update(schema.photos).set(updateValues).where(eq(schema.photos.id, id));
-
-        updatedCount++;
-      } catch (err) {
-        errorCount++;
-        job.log(`更新文件失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      processingCount++;
-      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
-        await pushProgress("processing");
-      }
+    if (photoRecords.length === 0) {
+      job.log("所有新文件元信息获取失败，扫描完成");
+      await writeScanLog(storageSourceId, scannedCount, 0, errorCount, scanStartedAt);
+      await updateLastScanAt(storageSourceId);
+      return;
     }
 
-    // 5c. 强制重建缩略图（未变更文件跳过哈希）
-    for (const { id, file } of regenerateOnlyFiles) {
-      try {
-        const thumbnailPath = await generateThumbnail(file.path, thumbnailDir, id);
-        const metadata = await adapter.getMetadata(file.path);
-        const updateValues: Record<string, unknown> = {};
-        if (thumbnailPath) updateValues.thumbnailPath = thumbnailPath;
-        if (metadata.width != null && metadata.height != null) {
-          updateValues.width = metadata.width;
-          updateValues.height = metadata.height;
-        }
-        if (Object.keys(updateValues).length > 0) {
-          await db.update(schema.photos).set(updateValues).where(eq(schema.photos.id, id));
-        }
-        regeneratedCount++;
-      } catch (err) {
-        errorCount++;
-        job.log(
-          `缩略图重建失败 (${file.name}): ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
-      processingCount++;
-      if (processingCount % PROGRESS_BATCH_SIZE === 0) {
-        await pushProgress("processing");
-      }
-    }
-
-    // 6. 最终进度推送
-    await pushProgress("completed", {
-      totalFiles: scannedCount,
-      processed: skippedCount + newCount + updatedCount + errorCount,
+    // 5. 批量 INSERT 照片记录（事务包裹，单条 SQL 多值）
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.photos).values(photoRecords);
     });
 
-    // 7. UPDATE scan_log（向后兼容：仅当 scanLogId 存在时更新）
-    if (scanLogId) {
-      await db
-        .update(schema.scanLogs)
-        .set({
-          scannedCount,
-          newCount,
-          errorCount,
-          finishedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.scanLogs.id, scanLogId));
-    }
+    job.log(`批量插入 ${photoRecords.length} 张照片记录`);
 
-    // 8. 更新存储源最后扫描时间
-    await db
-      .update(schema.storageSources)
-      .set({ lastScanAt: new Date().toISOString() })
-      .where(eq(schema.storageSources.id, storageSourceId));
+    // 6. 并发生成缩略图（分批 4 并发，失败不阻塞）
+    let thumbnailSuccessCount = 0;
 
-    job.log(
-      `扫描完成: 扫描 ${scannedCount}, 跳过 ${skippedCount}, 新增 ${newCount}, 更新 ${updatedCount}, 重建缩略图 ${regeneratedCount}, 错误 ${errorCount}`,
-    );
-  } catch (err) {
-    // 失败时也更新 scan_log
-    if (scanLogId) {
-      try {
-        await db
-          .update(schema.scanLogs)
-          .set({
-            scannedCount,
-            newCount,
-            errorCount: errorCount + 1,
-            finishedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.scanLogs.id, scanLogId));
-      } catch {
-        // 日志更新失败，忽略
+    for (let i = 0; i < photoRecords.length; i += THUMBNAIL_CONCURRENCY) {
+      const batch = photoRecords.slice(i, i + THUMBNAIL_CONCURRENCY);
+
+      const results = await Promise.all(
+        batch.map(async (record) => {
+          try {
+            const thumbnailPath = await generateThumbnail(record.filePath, thumbnailDir, record.id);
+            return { photoId: record.id, thumbnailPath };
+          } catch (thumbErr) {
+            job.log(
+              `缩略图生成失败 (${record.filePath}): ${thumbErr instanceof Error ? thumbErr.message : String(thumbErr)}`,
+            );
+            return { photoId: record.id, thumbnailPath: null as string | null };
+          }
+        }),
+      );
+
+      // 更新缩略图路径到数据库
+      for (const result of results) {
+        if (result.thumbnailPath) {
+          await db
+            .update(schema.photos)
+            .set({ thumbnailPath: result.thumbnailPath })
+            .where(eq(schema.photos.id, result.photoId));
+          thumbnailSuccessCount++;
+        }
       }
     }
+
+    newCount = photoRecords.length;
+
+    // 7. 查询已有分析记录，跳过已分析的 photo
+    const newPhotoIds = photoRecords.map((p) => p.id);
+
+    const existingAnalyses = await db
+      .select({ photoId: schema.photoAnalyses.photoId })
+      .from(schema.photoAnalyses)
+      .where(inArray(schema.photoAnalyses.photoId, newPhotoIds));
+
+    const analyzedPhotoIds = new Set(existingAnalyses.map((a) => a.photoId));
+
+    const jobsToEnqueue = photoRecords.filter((p) => !analyzedPhotoIds.has(p.id));
+
+    if (jobsToEnqueue.length > 0) {
+      await analyzeQueue.addBulk(
+        jobsToEnqueue.map((p) => ({
+          name: `analyze:${p.id}`,
+          data: { photoId: p.id },
+        })),
+      );
+      job.log(`入队分析任务: ${jobsToEnqueue.length} 个 (跳过已分析 ${analyzedPhotoIds.size} 个)`);
+    } else {
+      job.log("所有新照片已有分析记录，跳过入队");
+    }
+
+    // 8. 写入扫描日志 + 更新最后扫描时间
+    await writeScanLog(storageSourceId, scannedCount, newCount, errorCount, scanStartedAt);
+    await updateLastScanAt(storageSourceId);
+
+    job.log(
+      `扫描完成: 扫描 ${scannedCount}, 新增 ${newCount}, 缩略图成功 ${thumbnailSuccessCount}/${newCount}, 错误 ${errorCount}`,
+    );
+  } catch (err) {
+    // 即使失败也尝试写入日志
+    await writeScanLog(
+      storageSourceId,
+      scannedCount,
+      newCount,
+      errorCount + 1,
+      scanStartedAt,
+    ).catch(() => {
+      // 日志写入失败，忽略
+    });
 
     throw err;
   }
+}
+
+/** 写入扫描日志 */
+async function writeScanLog(
+  storageSourceId: string,
+  scannedCount: number,
+  newCount: number,
+  errorCount: number,
+  startedAt: string,
+): Promise<void> {
+  await db.insert(schema.scanLogs).values({
+    id: crypto.randomUUID(),
+    storageSourceId,
+    scannedCount,
+    newCount,
+    errorCount,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+  });
+}
+
+/** 更新存储源最后扫描时间 */
+async function updateLastScanAt(storageSourceId: string): Promise<void> {
+  await db
+    .update(schema.storageSources)
+    .set({ lastScanAt: new Date().toISOString() })
+    .where(eq(schema.storageSources.id, storageSourceId));
 }
