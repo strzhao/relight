@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 1
 max_iterations: 30
@@ -82,3 +82,4 @@ started_at: "2026-05-04T10:47:18Z"
 - [2026-05-04T10:52:00Z] 设计方案已通过审批，进入实现阶段
 - [2026-05-04T10:55:00Z] 实现完成：3 文件修改，类型检查通过，dcraw 链路验证通过
 - [2026-05-04T10:56:00Z] 进入 QA 阶段
+- [2026-05-04T14:10:00Z] 合并完成：commit 2bbacfa feat(后端): DNG/RAW 格式 AI 分析与格式门快速跳过；知识提取 2 条新条目
