@@ -4,12 +4,47 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 import { createStorageAdapter } from "../storage";
+import { checkPathAccessibility } from "../storage/check-path";
 
 export const storageRouter = new Hono()
   /** 列出所有存储源 */
   .get("/", async (c) => {
     const sources = await db.select().from(schema.storageSources);
     return c.json({ success: true, data: sources });
+  })
+  /** 检查存储源可达性 */
+  .post("/:id/check", async (c) => {
+    const id = c.req.param("id");
+
+    const sources = await db
+      .select()
+      .from(schema.storageSources)
+      .where(eq(schema.storageSources.id, id));
+
+    const source = sources[0];
+    if (!source) {
+      return c.json({ success: false, error: "存储源不存在" }, 404);
+    }
+
+    const result = await checkPathAccessibility(source.rootPath);
+
+    // 更新数据库
+    await db
+      .update(schema.storageSources)
+      .set({
+        status: result.status,
+        lastError: result.lastError,
+      })
+      .where(eq(schema.storageSources.id, id));
+
+    return c.json({
+      success: true,
+      data: {
+        id,
+        status: result.status,
+        lastError: result.lastError,
+      },
+    });
   })
   /** 获取存储源文件树 */
   .get("/:id/files", async (c) => {

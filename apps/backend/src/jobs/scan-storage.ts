@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { generateThumbnail } from "../lib/thumbnail";
 import { createStorageAdapter } from "../storage";
+import { checkPathAccessibility } from "../storage/check-path";
 import { analyzeQueue } from "./queues";
 
 interface ScanJobData {
@@ -113,7 +114,28 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
 
     // 2. 遍历目录获取图片文件
     const adapter = createStorageAdapter(source.type);
-    const files = await adapter.listFiles(source.rootPath);
+
+    let files: Awaited<ReturnType<typeof adapter.listFiles>>;
+    try {
+      files = await adapter.listFiles(source.rootPath);
+    } catch (listErr) {
+      // 更新存储源可达性状态
+      const checkResult = await checkPathAccessibility(source.rootPath);
+      await db
+        .update(schema.storageSources)
+        .set({
+          status: checkResult.status,
+          lastError:
+            checkResult.lastError ?? (listErr instanceof Error ? listErr.message : String(listErr)),
+        })
+        .where(eq(schema.storageSources.id, storageSourceId));
+
+      job.log(
+        `无法访问存储源 (${checkResult.status}): ${checkResult.lastError ?? (listErr instanceof Error ? listErr.message : String(listErr))}`,
+      );
+      throw listErr;
+    }
+
     scannedCount = files.length;
     job.log(`找到 ${scannedCount} 个图片文件`);
 
@@ -308,10 +330,14 @@ async function writeScanLog(
   });
 }
 
-/** 更新存储源最后扫描时间 */
+/** 更新存储源最后扫描时间，并将状态设为 healthy */
 async function updateLastScanAt(storageSourceId: string): Promise<void> {
   await db
     .update(schema.storageSources)
-    .set({ lastScanAt: new Date().toISOString() })
+    .set({
+      lastScanAt: new Date().toISOString(),
+      status: "healthy",
+      lastError: null,
+    })
     .where(eq(schema.storageSources.id, storageSourceId));
 }

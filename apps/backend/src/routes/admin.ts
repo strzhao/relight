@@ -79,6 +79,8 @@ export const adminRouter = new Hono()
           name: schema.storageSources.name,
           type: schema.storageSources.type,
           lastScanAt: schema.storageSources.lastScanAt,
+          status: schema.storageSources.status,
+          lastError: schema.storageSources.lastError,
         })
         .from(schema.storageSources);
 
@@ -112,6 +114,8 @@ export const adminRouter = new Hono()
         photoCount: photoCountMap.get(source.id) ?? 0,
         analyzedCount: analyzedCountMap.get(source.id) ?? 0,
         lastScanAt: source.lastScanAt,
+        status: source.status,
+        lastError: source.lastError,
       }));
 
       // 最近分析（最近 5 条）
@@ -460,6 +464,8 @@ export const adminRouter = new Hono()
         rootPath: string;
         enabled: boolean;
         lastScanAt: string | null;
+        status: string | null;
+        lastError: string | null;
         photoCount: number;
         analyzedCount: number;
       } | null = null;
@@ -489,6 +495,8 @@ export const adminRouter = new Hono()
             rootPath: source.rootPath,
             enabled: source.enabled,
             lastScanAt: source.lastScanAt,
+            status: source.status,
+            lastError: source.lastError,
             photoCount: photoCountResult?.total ?? 0,
             analyzedCount: analyzedCountResult?.total ?? 0,
           };
@@ -801,6 +809,8 @@ export const adminRouter = new Hono()
         rootPath: source.rootPath,
         enabled: source.enabled,
         lastScanAt: source.lastScanAt,
+        status: source.status,
+        lastError: source.lastError,
         photoCount: photoCountResult?.total ?? 0,
         analyzedCount: analyzedCountResult?.total ?? 0,
       },

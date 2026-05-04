@@ -42,6 +42,7 @@ export const API_ROUTES = {
   storage: {
     list: "/api/storage",
     files: (id: string) => `/api/storage/${id}/files`,
+    check: (id: string) => `/api/storage/${id}/check`,
   },
   analyze: {
     trigger: "/api/analyze",

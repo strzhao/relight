@@ -124,6 +124,11 @@ export const api = {
   storage: {
     list: () => fetchApi<ApiResponse<StorageSource[]>>(API_ROUTES.storage.list),
     files: (id: string) => fetchApi<ApiResponse<FileTreeResponse>>(API_ROUTES.storage.files(id)),
+    check: (id: string) =>
+      fetchApi<ApiResponse<{ id: string; status: string; lastError: string | null }>>(
+        API_ROUTES.storage.check(id),
+        { method: "POST" },
+      ),
   },
 
   analyze: {

@@ -14,10 +14,13 @@ import type {
   PhotoAnalysis,
   PhotoTag,
   StorageSource,
+  StorageSourceStatus,
 } from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
 import { ChevronDown, ChevronUp, ImageOff, Loader2, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+const blockedStatuses: StorageSourceStatus[] = ["inaccessible", "unmounted", "permission_denied"];
 
 interface PhotoFullDetail extends Photo {
   tags: (PhotoTag & { tagName?: string; tagCategory?: string })[];
@@ -151,6 +154,9 @@ export function PhotoDetailPanel({ photoId, open, onClose }: PhotoDetailPanelPro
 
   const latestAnalysis = sortedAnalyses[0] ?? null;
 
+  const isSourceBlocked =
+    !!photo?.storageSource?.status && blockedStatuses.includes(photo.storageSource.status);
+
   if (!open) return null;
 
   return (
@@ -172,9 +178,9 @@ export function PhotoDetailPanel({ photoId, open, onClose }: PhotoDetailPanelPro
           <button
             type="button"
             onClick={handleAnalyze}
-            disabled={analyzeLoading || loading}
+            disabled={analyzeLoading || loading || isSourceBlocked}
             className="rounded-sm p-1 opacity-70 hover:opacity-100 hover:bg-accent disabled:opacity-30"
-            title="分析此照片"
+            title={isSourceBlocked ? "存储源路径不可达，无法触发分析" : "分析此照片"}
           >
             {analyzeLoading ? (
               <Loader2 className="size-5 animate-spin" />

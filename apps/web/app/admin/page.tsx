@@ -1,5 +1,6 @@
 import { RefreshButton } from "@/components/admin/refresh-button";
 import { StatsCard } from "@/components/admin/stats-card";
+import { StorageSourceStatusBadge } from "@/components/admin/storage-source-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -88,6 +89,12 @@ export default async function AdminDashboardPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-1 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <StorageSourceStatusBadge
+                        status={source.status ?? "unknown"}
+                        lastError={source.lastError}
+                      />
+                    </div>
                     <p>
                       照片: {source.photoCount} / 已分析: {source.analyzedCount}
                     </p>
