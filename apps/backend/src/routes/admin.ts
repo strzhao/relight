@@ -1,11 +1,44 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { analyzeBatchSchema } from "@relight/shared";
+import { type SQL, and, count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { db, schema } from "../db";
 import { analyzeQueue, dailyQueue, scanQueue } from "../jobs/queues";
 import { config } from "../lib/config";
+
+/** 构建照片筛选条件（供列表查询和批量分析复用） */
+function buildPhotoFilterConditions(params: {
+  storageSourceId?: string;
+  analysisStatus?: string;
+  minScore?: number;
+}): SQL[] {
+  const conditions: SQL[] = [];
+
+  if (params.storageSourceId) {
+    conditions.push(eq(schema.photos.storageSourceId, params.storageSourceId));
+  }
+
+  if (params.analysisStatus === "analyzed") {
+    conditions.push(
+      sql`EXISTS (SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id})`,
+    );
+  } else if (params.analysisStatus === "unanalyzed") {
+    conditions.push(
+      sql`NOT EXISTS (SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id})`,
+    );
+  }
+
+  if (params.minScore != null && !Number.isNaN(params.minScore)) {
+    conditions.push(
+      sql`EXISTS (SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id} AND photo_analyses.aesthetic_score >= ${params.minScore})`,
+    );
+  }
+
+  return conditions;
+}
 
 export const adminRouter = new Hono()
   /**
@@ -339,36 +372,12 @@ export const adminRouter = new Hono()
 
       const offset = (page - 1) * pageSize;
 
-      // 构建 WHERE 条件
-      const conditions: ReturnType<typeof sql>[] = [];
-
-      if (storageSourceId) {
-        conditions.push(eq(schema.photos.storageSourceId, storageSourceId));
-      }
-
-      if (analysisStatus === "analyzed") {
-        conditions.push(
-          sql`EXISTS (
-            SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id}
-          )`,
-        );
-      } else if (analysisStatus === "unanalyzed") {
-        conditions.push(
-          sql`NOT EXISTS (
-            SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id}
-          )`,
-        );
-      }
-
-      if (minScore != null && !Number.isNaN(minScore)) {
-        conditions.push(
-          sql`EXISTS (
-            SELECT 1 FROM photo_analyses
-            WHERE photo_analyses.photo_id = ${schema.photos.id}
-            AND photo_analyses.aesthetic_score >= ${minScore}
-          )`,
-        );
-      }
+      // 构建 WHERE 条件（复用 buildPhotoFilterConditions）
+      const conditions: ReturnType<typeof sql>[] = buildPhotoFilterConditions({
+        storageSourceId,
+        analysisStatus,
+        minScore,
+      });
 
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -523,6 +532,177 @@ export const adminRouter = new Hono()
         500,
       );
     }
+  })
+
+  /**
+   * POST /api/admin/photos/analyze
+   * 批量触发 AI 分析（按筛选条件入队所有匹配照片）
+   */
+  .post("/photos/analyze", async (c) => {
+    let body: Record<string, unknown> = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ success: false, error: "请求体不能为空" }, 400);
+    }
+
+    const parsed = analyzeBatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ success: false, error: parsed.error.message }, 400);
+    }
+
+    const { storageSourceId, minScore, force } = parsed.data;
+
+    // 构建筛选条件
+    const filterConditions = buildPhotoFilterConditions({
+      storageSourceId,
+      minScore,
+    });
+
+    // 默认只分析未分析的照片（除非 force=true）
+    if (!force) {
+      filterConditions.push(
+        sql`NOT EXISTS (SELECT 1 FROM photo_analyses WHERE photo_analyses.photo_id = ${schema.photos.id})`,
+      );
+    }
+
+    const where = filterConditions.length > 0 ? and(...filterConditions) : undefined;
+
+    // 查询所有匹配的 photo IDs
+    const photoRows = await db.select({ id: schema.photos.id }).from(schema.photos).where(where);
+
+    const photoIds = photoRows.map((r) => r.id);
+
+    if (photoIds.length === 0) {
+      return c.json({
+        success: true,
+        data: { batchId: "", totalCount: 0, skippedCount: 0 },
+        message: "没有需要分析的照片",
+      });
+    }
+
+    // 创建 batch 记录
+    const batchId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    await db.insert(schema.analyzeBatches).values({
+      id: batchId,
+      filterJson: JSON.stringify({ storageSourceId, minScore, force }),
+      totalCount: photoIds.length,
+      startedAt: now,
+    });
+
+    // 批量入队 analyze job
+    const jobs = await analyzeQueue.addBulk(
+      photoIds.map((id) => ({
+        name: `analyze:${id}`,
+        data: { photoId: id },
+      })),
+    );
+
+    // 写入 job → batch 映射
+    if (jobs.length > 0) {
+      await db.insert(schema.analyzeBatchJobs).values(
+        jobs.map((job) => ({
+          jobId: job.id as string,
+          batchId,
+        })),
+      );
+    }
+
+    return c.json({
+      success: true,
+      data: { batchId, totalCount: photoIds.length, skippedCount: 0 },
+    });
+  })
+
+  /**
+   * GET /api/admin/photos/analyze/:batchId/events
+   * SSE 流式推送批量分析进度
+   */
+  .get("/photos/analyze/:batchId/events", async (c) => {
+    const batchId = c.req.param("batchId");
+    const STALE_MINUTES = 30;
+
+    return streamSSE(c, async (stream) => {
+      const signal = c.req.raw.signal;
+      let done = false;
+
+      const pushProgress = async () => {
+        if (done) return;
+        const [batch] = await db
+          .select()
+          .from(schema.analyzeBatches)
+          .where(eq(schema.analyzeBatches.id, batchId))
+          .limit(1);
+
+        if (!batch) {
+          await stream.writeSSE({
+            data: JSON.stringify({ error: "批次不存在" }),
+            event: "error",
+          });
+          done = true;
+          return;
+        }
+
+        // stale 检测
+        const staleCutoff = new Date(Date.now() - STALE_MINUTES * 60 * 1000).toISOString();
+        if (!batch.finishedAt && batch.startedAt < staleCutoff) {
+          await stream.writeSSE({
+            data: JSON.stringify({
+              batchId,
+              status: "stale",
+              totalCount: batch.totalCount,
+              completedCount: batch.completedCount,
+              failedCount: batch.failedCount,
+              startedAt: batch.startedAt,
+              finishedAt: batch.finishedAt,
+            }),
+            event: "progress",
+          });
+          done = true;
+          return;
+        }
+
+        const event: Record<string, unknown> = {
+          batchId,
+          status: batch.finishedAt ? "completed" : "running",
+          totalCount: batch.totalCount,
+          completedCount: batch.completedCount,
+          failedCount: batch.failedCount,
+          startedAt: batch.startedAt,
+          finishedAt: batch.finishedAt,
+        };
+
+        await stream.writeSSE({
+          data: JSON.stringify(event),
+          event: "progress",
+        });
+
+        if (batch.finishedAt) {
+          done = true;
+        }
+      };
+
+      // 初始推送
+      await pushProgress();
+
+      // 轮询
+      const interval = setInterval(() => {
+        if (signal.aborted || done) {
+          clearInterval(interval);
+          return;
+        }
+        pushProgress().catch(() => clearInterval(interval));
+      }, 1000);
+
+      signal.addEventListener("abort", () => clearInterval(interval), { once: true });
+
+      while (!signal.aborted && !done) {
+        await stream.sleep(1000);
+      }
+      clearInterval(interval);
+    });
   })
 
   /**

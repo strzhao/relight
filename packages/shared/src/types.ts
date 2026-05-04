@@ -249,9 +249,9 @@ export interface QueueJobSummary {
 }
 
 /** 队列作业详情（含 data 和 stacktrace） */
-export interface QueueJobDetail extends QueueJobSummary {
+export interface QueueJobDetail extends Omit<QueueJobSummary, "progress"> {
   data: unknown;
-  progress: number | object;
+  progress: ScanProgress | number | object | null;
   returnvalue: unknown;
   opts: Record<string, unknown>;
   stacktrace: string[];
@@ -389,4 +389,22 @@ export interface UnifiedPhotosResponse {
     photoCount: number;
     analyzedCount: number;
   };
+}
+
+/** 批量分析触发响应 */
+export interface AnalyzeBatchResponse {
+  batchId: string;
+  totalCount: number;
+  skippedCount: number;
+}
+
+/** 批量分析进度事件 */
+export interface AnalyzeBatchProgressEvent {
+  batchId: string;
+  status: "running" | "completed" | "stale";
+  totalCount: number;
+  completedCount: number;
+  failedCount: number;
+  startedAt: string;
+  finishedAt: string | null;
 }

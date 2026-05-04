@@ -3,6 +3,7 @@
 import { PhotoDetailPanel } from "@/components/admin/photo-detail-panel";
 import { PhotoFilterBar } from "@/components/admin/photo-filter-bar";
 import { PhotoGrid } from "@/components/admin/photo-grid";
+import { ProgressPanel } from "@/components/admin/scan-progress-panel";
 import { StorageSourceHeader } from "@/components/admin/storage-source-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -127,6 +128,14 @@ export function UnifiedPhotosClient({ initialData, initialError }: UnifiedPhotos
           <p className="text-sm text-muted-foreground">共 {data?.total ?? 0} 张照片</p>
         </div>
         <div className="flex items-center gap-2">
+          <ProgressPanel
+            mode="analyze"
+            filterParams={{
+              storageSourceId: searchParams.get("storageSourceId") || undefined,
+              minScore: searchParams.get("minScore") || undefined,
+            }}
+            onAnalyzeComplete={handleRefresh}
+          />
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
             刷新

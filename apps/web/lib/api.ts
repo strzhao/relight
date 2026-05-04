@@ -1,5 +1,6 @@
 import type {
   AdminStats,
+  AnalyzeBatchResponse,
   AnalyzeTriggerResponse,
   ApiResponse,
   DailyPick,
@@ -103,6 +104,15 @@ export const api = {
     health: () => fetchApi<ApiResponse<HealthDetails>>(API_ROUTES.admin.health),
     photos: (params?: URLSearchParams) =>
       fetchApi<PaginatedResponse<PhotoAnalysisItem>>(`${API_ROUTES.admin.photos}?${params ?? ""}`),
+    analyzeBatch: (params: {
+      storageSourceId?: string;
+      minScore?: string;
+      force?: boolean;
+    }) =>
+      fetchApi<ApiResponse<AnalyzeBatchResponse>>(API_ROUTES.admin.photosAnalyze, {
+        method: "POST",
+        body: JSON.stringify(params),
+      }),
   },
 
   queues: {

@@ -28,6 +28,8 @@ export const API_ROUTES = {
     queues: "/api/admin/queues",
     health: "/api/admin/health",
     photos: "/api/admin/photos",
+    photosAnalyze: "/api/admin/photos/analyze",
+    photosAnalyzeEvents: (batchId: string) => `/api/admin/photos/analyze/${batchId}/events`,
     storageSource: (id: string) => `/api/admin/storage-sources/${id}`,
     storageSourcePhotos: (id: string) => `/api/admin/storage-sources/${id}/photos`,
   },
