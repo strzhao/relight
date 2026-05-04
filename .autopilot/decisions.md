@@ -1,16 +1,5 @@
 # 架构决策日志
 
-### [2026-05-03] 缩略图缓存策略：短 TTL + ETag
-<!-- tags: thumbnail, cache, etag, performance -->
-
-**Background**: 缩略图 API 原来 `max-age=86400`（24h），forceRegenerate 重新生成缩略图后浏览器仍使用旧缓存，用户看不到更新。
-
-**Choice**: `max-age` 从 86400 降到 3600（1h），新增基于文件 mtime 的 ETag 头支持条件请求（304 Not Modified）。
-
-**Alternatives rejected**: 
-- URL 版本号（`?v=timestamp`）：需要修改所有调用方，侵入性强
-- `no-cache`：每个请求都回源，浪费带宽
-
 ### [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例
 <!-- tags: tech-stack, backend, orm, conventions, design -->
 
@@ -43,43 +32,16 @@
 
 **Trade-offs**: 纯规则只能验证格式和结构合规性，无法评估语义质量（如叙事是否生动、标签是否贴切）。语义质量仍需人工抽检或后续引入用户反馈闭环。但当前阶段格式合规是必要前提，且零成本、可复现、可 CI 集成。
 
-### [2026-05-03] 队列监控实时推送选用 SSE 而非 WebSocket/轮询
-<!-- tags: sse, websocket, monitoring, realtime, design -->
+### [2026-05-04] EXIF 解析选择轻量自研 TIFF 解析器，非第三方库
+<!-- tags: exif, tiff, sharp, dependencies, design -->
 
-**Background**: admin/queues 页面需要实时展示队列状态。评估了三种方案：WebSocket（双向长连接）、纯轮询（5s interval fetch）、SSE（单向推送）。
+**Background**: getMetadata 需要从照片 EXIF 提取 DateTimeOriginal。Sharp 已返回 `.exif` Buffer，但不解析具体 tag 值。需要选择解析方案。
 
-**Choice**: 选用 SSE (Server-Sent Events)，per-queue 独立 EventSource 连接，3 秒推送一次快照。
-
-**Alternatives rejected**:
-- WebSocket：BullMQ 支持 QueueEvents 的 WebSocket 推送，但需要额外服务端库（如 `@bull-board/ws`）且前端需维护双向连接。监控场景只需后端→前端单向数据流，WebSocket 是过度设计。
-- 纯轮询：侧边栏 5s 轮询 GET /api/queues 已满足列表更新需求。但详情面板的作业列表需要更低延迟，3s SSE 推送可以让用户感知到"实时"而无需每 3 秒发送 HTTP 请求。
-- 混合方案（侧边栏轮询 + SSE 详情面板）：最终选择此方案——侧边栏轻量轮询减少连接数，详情面板 SSE 推送保证实时性。断开时 EventSource 自动重连，无需额外恢复逻辑。
-
-**Trade-offs**: SSE 在多个浏览器 tab 打开时会创建多条连接，当前无连接数限制。后续可添加 `maxConnections` 限制或切换为单条 broadcast SSE 通道。Hono `streamSSE()` 是 HTTP 长连接，某些反向代理可能需要配置禁用缓冲。
-
-### [2026-05-03] AI 分析不再由扫描自动触发，改为外部显式控制
-<!-- tags: ai, analysis, scan, trigger, design -->
-
-**Background**: 当前 AI 视觉模型（qwen3.6-35b）分析效果尚不理想，自动触发会产生大量低质量结果并浪费推理资源。用户需要先优化提示词和模型参数，再批量重跑分析。
-
-**Choice**: 移除 scan-storage worker 中的 `analyzeQueue.add()` 调用，AI 分析改由外部显式触发（后续单独设计触发入口）。`ScanJobData.skipAnalysis` 字段保留但不再生效。
+**Choice**: 编写 ~60 行轻量 TIFF 解析器（`parseExifDateTimeOriginal`），直接解析 Sharp 返回的 EXIF Buffer，零额外依赖。
 
 **Alternatives rejected**:
-- 保留 `skipAnalysis` 标志控制：默认跳过分析需要每次扫描都传参，且 API 设计上"扫描"与"分析"耦合不清晰
-- 环境变量开关：只能在部署级别控制，粒度太粗
+- `exifr`：功能完整但 +500KB，仅需一个日期字段是过度引入
+- `exif-reader`：API 简单但未积极维护，且同样增加依赖
+- 放弃 EXIF 仅用 mtime：丢失真实拍摄时间，AI 分析线索减少
 
-**Trade-offs**: 完全移除自动触发意味着每次新增照片后需手动触发分析。在分析质量稳定之前这是合理的，但后续需要配套设计批量触发/定时触发机制。
-
-### [2026-05-03] 系统 CLI 委托 + sharp 两步转换处理不支持图像格式
-<!-- tags: heic, sharp, heif-convert, image-processing, backend, design, thumbnail -->
-
-**Background**: sharp 预编译二进制不含 HEIC/HEIF 解码器，用户上传的 iPhone 照片（.heic）无法生成缩略图，导致照片管理页面展示失败。
-
-**Choice**: 不在 sharp 层解决 HEIC 解码，采用系统 CLI `heif-convert`（libheif）做预处理 → 输出临时 JPEG → sharp 做缩放/编码。运行时检测 CLI 可用性，结果缓存。
-
-**Alternatives rejected**:
-- sharp 源码构建 + heif：破坏 pnpm 预编译缓存，CI 环境复杂
-- WASM npm 包（heic-convert/heic-decode）：~2MB 包体，大文件性能差，维护不确定
-- sharp 直接解码：作为首选路径保留，HEIC 仅在不支持时走两步转换
-
-**Trade-offs**: 依赖系统预装 libheif（macOS `brew install libheif`），生产环境需在 Dockerfile 中添加 `RUN apt-get install -y libheif`。零新 npm 依赖，快速 C 实现，<30s 超时控制。
+**Trade-offs**: 自定义解析器仅支持 ASCII 字符串 tag（type=2），不支持 GPS、快门速度等复杂类型。当前够用——仅需 DateTimeOriginal；未来需要更多 EXIF 字段时，可渐进替换为 exifr。所有路径外有 try/catch 兜底，解析失败不阻塞扫描。
