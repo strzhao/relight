@@ -114,7 +114,7 @@ export const dailyPicks = sqliteTable("daily_picks", {
   photoId: text("photo_id")
     .notNull()
     .references(() => photos.id),
-  pickDate: text("pick_date").notNull(),
+  pickDate: text("pick_date").notNull().unique(),
   title: text("title").notNull(),
   narrative: text("narrative").notNull(),
   score: real("score").notNull().default(0),

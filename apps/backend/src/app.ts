@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { dailyQueue } from "./jobs/queues";
 import { AppError } from "./lib/errors";
 import {
   adminRouter,
@@ -13,6 +14,18 @@ import {
   storageRouter,
   tagsRouter,
 } from "./routes";
+
+/** 注册每日精选重复任务（每天北京时间 6:00 AM） */
+export async function registerDailyRepeatableJob(): Promise<void> {
+  await dailyQueue.add(
+    "daily-selection-cron",
+    {},
+    {
+      repeat: { pattern: "0 6 * * *", tz: "Asia/Shanghai" },
+      jobId: "daily-selection-cron",
+    },
+  );
+}
 
 export function createApp(): Hono {
   const app = new Hono();

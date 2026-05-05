@@ -40,6 +40,26 @@ export const photoAnalysisResponseSchema = z.object({
 
 export type PhotoAnalysisResponse = z.infer<typeof photoAnalysisResponseSchema>;
 
+// ===== 每日精选 — 阶段 1 评选响应 =====
+
+export const dailySelectResponseSchema = z.object({
+  selectedIndex: z.number().int().min(0),
+  reasoning: z.string().min(1),
+});
+
+export type DailySelectResponse = z.infer<typeof dailySelectResponseSchema>;
+
+// ===== 每日精选 — 阶段 2 怀旧叙事响应 =====
+
+export const dailyNarrateResponseSchema = z.object({
+  title: z.string().min(1).max(8),
+  narrative: z.string().min(10).max(200),
+  score: z.number().min(0).max(10),
+  reasoning: z.string().min(1),
+});
+
+export type DailyNarrateResponse = z.infer<typeof dailyNarrateResponseSchema>;
+
 // ===== 标签类别列表（用于默认值填充） =====
 
 export const VALID_TAG_CATEGORIES = [
@@ -217,4 +237,134 @@ function buildFallbackWithPartial(rawJson: unknown): PhotoAnalysisResponse {
   }
 
   return fallback;
+}
+
+/**
+ * 通用 JSON 提取器：从 AI 响应中提取 JSON 字符串并 parse
+ */
+function extractAndParseJson(rawResponse: string): {
+  parsed: Record<string, unknown> | null;
+  error: string | null;
+} {
+  let jsonStr: string | null = null;
+
+  const blockMatch = rawResponse.match(JSON_BLOCK_RE);
+  if (blockMatch?.[1]) {
+    jsonStr = blockMatch[1].trim();
+  } else {
+    const fallbackMatch = rawResponse.match(JSON_FALLBACK_RE);
+    if (fallbackMatch?.[0]) {
+      jsonStr = fallbackMatch[0].trim();
+    }
+  }
+
+  if (!jsonStr) {
+    return { parsed: null, error: "未能从响应中提取 JSON" };
+  }
+
+  try {
+    const rawJson = JSON.parse(jsonStr);
+    if (typeof rawJson === "object" && rawJson !== null) {
+      return { parsed: rawJson as Record<string, unknown>, error: null };
+    }
+    return { parsed: null, error: "JSON 解析结果不是对象" };
+  } catch (e) {
+    return {
+      parsed: null,
+      error: `JSON 解析失败: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+/**
+ * 解析每日精选阶段 1 评选响应
+ */
+export function parseDailySelectResponse(rawResponse: string): {
+  parsed: DailySelectResponse | null;
+  error: string | null;
+  fallback: DailySelectResponse;
+} {
+  const { parsed: rawJson, error: extractError } = extractAndParseJson(rawResponse);
+
+  if (extractError || !rawJson) {
+    const fallback = { selectedIndex: 0, reasoning: "" };
+    return { parsed: null, error: extractError, fallback };
+  }
+
+  const result = dailySelectResponseSchema.safeParse(rawJson);
+
+  if (result.success) {
+    return { parsed: result.data, error: null, fallback: result.data };
+  }
+
+  // 容错恢复
+  const fallback: DailySelectResponse = {
+    selectedIndex:
+      typeof rawJson.selectedIndex === "number" && rawJson.selectedIndex >= 0
+        ? rawJson.selectedIndex
+        : 0,
+    reasoning:
+      typeof rawJson.reasoning === "string" && rawJson.reasoning.length > 0
+        ? rawJson.reasoning
+        : "",
+  };
+
+  return {
+    parsed: null,
+    error: `Zod 校验失败: ${result.error.message}`,
+    fallback,
+  };
+}
+
+/**
+ * 解析每日精选阶段 2 怀旧叙事响应
+ */
+export function parseDailyNarrateResponse(rawResponse: string): {
+  parsed: DailyNarrateResponse | null;
+  error: string | null;
+  fallback: DailyNarrateResponse;
+} {
+  const { parsed: rawJson, error: extractError } = extractAndParseJson(rawResponse);
+
+  if (extractError || !rawJson) {
+    const fallback: DailyNarrateResponse = {
+      title: "今日拾光",
+      narrative: "",
+      score: 5.0,
+      reasoning: "",
+    };
+    return { parsed: null, error: extractError, fallback };
+  }
+
+  const result = dailyNarrateResponseSchema.safeParse(rawJson);
+
+  if (result.success) {
+    return { parsed: result.data, error: null, fallback: result.data };
+  }
+
+  // 容错恢复
+  const fallback: DailyNarrateResponse = {
+    title:
+      typeof rawJson.title === "string" && rawJson.title.length > 0
+        ? rawJson.title.slice(0, 8)
+        : "今日拾光",
+    narrative:
+      typeof rawJson.narrative === "string" && rawJson.narrative.length > 0
+        ? rawJson.narrative
+        : "",
+    score:
+      typeof rawJson.score === "number" && rawJson.score >= 0 && rawJson.score <= 10
+        ? rawJson.score
+        : 5.0,
+    reasoning:
+      typeof rawJson.reasoning === "string" && rawJson.reasoning.length > 0
+        ? rawJson.reasoning
+        : "",
+  };
+
+  return {
+    parsed: null,
+    error: `Zod 校验失败: ${result.error.message}`,
+    fallback,
+  };
 }

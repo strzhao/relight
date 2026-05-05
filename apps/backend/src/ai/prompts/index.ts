@@ -15,12 +15,14 @@ const cache = new Map<string, Promise<PromptSet>>();
 /**
  * 加载指定版本的 Prompt 文件
  * @param version Prompt 版本号，默认 "v1"（调用方应通过 config.ai.promptVersion 显式传入）
+ * @param name 可选子目录路径，如 "daily/select" 或 "daily/narrate"，用于加载多级目录下的 prompt
  */
-export async function loadPrompts(version = "v1"): Promise<PromptSet> {
-  const cached = cache.get(version);
+export async function loadPrompts(version = "v1", name?: string): Promise<PromptSet> {
+  const cacheKey = name ? `${version}/${name}` : version;
+  const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const dir = path.join(__dirname, version);
+  const dir = name ? path.join(__dirname, version, name) : path.join(__dirname, version);
 
   const promise = (async (): Promise<PromptSet> => {
     const [system, user] = await Promise.all([
@@ -30,7 +32,7 @@ export async function loadPrompts(version = "v1"): Promise<PromptSet> {
     return { system, user };
   })();
 
-  cache.set(version, promise);
+  cache.set(cacheKey, promise);
   return promise;
 }
 

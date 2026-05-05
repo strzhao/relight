@@ -51,12 +51,12 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 ### 后端架构 (apps/backend)
 
-**入口**: `src/index.ts` → 启动 `@hono/node-server`，监听 `config.port` (默认 3000)。
+**入口**: `src/index.ts` → 启动 `@hono/node-server`，监听 `config.port` (默认 3000)，启动时注册每日精选定时任务（每天北京时间 6:00 AM）。
 **应用工厂**: `src/app.ts` 的 `createApp()` 组装所有路由，测试可直接调用无需网络。
 
 **路由** (`src/routes/`): 每个文件导出一个 `new Hono()` 子路由:
 - `photos.ts` — 照片列表 (分页/标签过滤/排序)、详情 (JOIN 标签+分析+存储源)、缩略图
-- `daily.ts` — 每日精选 (目前 stub)
+- `daily.ts` — 每日精选：查询最新精选照片（支持日期参数）、手动触发精选任务
 - `scan.ts` — 触发扫描 (POST 入队)、扫描状态查询
 - `admin.ts` — 管理后台 API: 综合统计、队列状态、健康检查、分页分析列表
 - `tags.ts`, `settings.ts`, `health.ts` — 辅助路由
@@ -66,11 +66,15 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）
+- 精选流程 (`daily-selection.ts`): 两阶段 AI 流水线 — 阶段1 用文本模型从历史上今天的已分析照片中评选最佳（评分+标题+理由）→ 阶段2 用视觉模型为胜出照片生成叙事文案 → 写入 dailyPicks（pickDate 唯一约束，幂等覆盖）
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段
-- `prompts/index.ts` — 从 `src/ai/prompts/v1/` 加载 system.txt + user.txt
-- `response-parser.ts` — 从 AI 响应提取 ```json 代码块 → Zod 校验 → 失败时容错恢复 (partial merge 默认值)
+- `prompts/index.ts` — 从 `src/ai/prompts/` 加载 Prompt 文件，支持多版本 (`v1`, `v2`) 和子目录路径（如 `daily/select`, `daily/narrate`）
+- `prompts/v1/` — 照片分析 Prompt（标签、评分、构图、色彩、情感）
+- `prompts/v2/daily/select/` — 每日精选阶段1 Prompt：文本模型从候选照片中评选最佳
+- `prompts/v2/daily/narrate/` — 每日精选阶段2 Prompt：视觉模型为胜出照片生成叙事文案
+- `response-parser.ts` — 从 AI 响应提取 ```json 代码块 → Zod 校验 → 失败时容错恢复 (partial merge 默认值)；支持多种解析策略（严格模式/宽松模式）、JSON 修复（补全括号、移除尾部逗号）、重复键去重
 - `evaluation/evaluator.ts` — 5 维度 100 分制自动评分（格式合规/标签准确/描述相关/评分合理/覆盖完整），纯规则无 AI 依赖
 
 **存储适配器** (`src/storage/`):
@@ -98,7 +102,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Next.js 15 App Router，Tailwind CSS v4，组件使用 `@/components/ui/` 下的 Radix UI 封装
 - **客户端 API**: `lib/api.ts` — 浏览器端 fetch 包装，`NEXT_PUBLIC_API_URL` 指向后端
 - **服务端 API**: `lib/admin-data.ts` — RSC 中 `serverFetch<T>()`，`cache: "no-store"` 保证数据实时
-- **页面**: 首页 `/` (DailyHero 骨架), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
+- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日精选照片+叙事文案), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
 - **管理后台**: `/admin` 仪表盘 + `/admin/photos` + `/admin/queues` + `/admin/health` 子页面
 
 ### 数据流
@@ -112,9 +116,15 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                    解析 JSON → upsert tags / photoTags / photoAnalyses
                                     ↓
-                        daily-selection job (定时)
+                        daily-selection job (每天早 6:00 定时)
                                     ↓
-                          每日精选 → dailyPicks
+                   阶段1: 文本模型评选 (从历史上今天照片中选最佳)
+                                    ↓
+                   阶段2: 视觉模型叙事 (为胜出照片生成叙事文案)
+                                    ↓
+                          每日精选 → dailyPicks (pickDate 唯一)
+                                    ↓
+                         前端首页 DailyHero 组件展示
 ```
 
 ## 设计体系
