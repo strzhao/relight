@@ -1,5 +1,22 @@
 # 架构决策日志
 
+### [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback
+
+<!-- tags: database, migration, backfill, fallback, sql, design -->
+
+**Background**: photos 表 6140 张照片中 5736 (93.4%) `taken_at` 为 NULL，导致前端"按年/月/日分组"功能塌缩成单一组。`storage/local.ts:181-185` 已有 `EXIF 失败 → fs.stat mtime` fallback，但增量扫描跳过已存在照片，所以 5736 张是 fallback 逻辑生效之前入库的历史遗留数据。
+
+**Choice**: 写一个独立的一次性迁移脚本 `apps/backend/src/cli/backfill-taken-at.ts`，用 SQL `UPDATE photos SET taken_at = datetime(file_mtime,'unixepoch') WHERE taken_at IS NULL AND file_mtime IS NOT NULL` 直接修复历史数据。幂等可重跑。
+
+**Alternatives rejected**:
+- 在前端 groupPhotos 加 fallback `photo.takenAt ?? mtimeToISO(photo.fileMtime)`：需要在 shared types 加 fileMtime 字段，前后端逻辑双改，维护负担重
+- 在后端 SQL 排序加嵌套 COALESCE `COALESCE(takenAt, datetime(file_mtime,'unixepoch'), createdAt)`：函数包裹列致索引失效，6140 行勉强可承受但扩到 50K+ 时显著劣化
+- 在 scan-storage.ts 增量扫描时回写历史 NULL：需要触发全量重扫，时间成本高
+
+**Trade-offs**: 一次性 UPDATE 不可逆——若 mtime 规则有误（如 NAS 复制刷过 mtime），会写入近似值。但 NULL 对用户毫无价值，"错的近似"也比"全无"好；fileHash 字段不变，可在重新解析 EXIF 时再覆盖。
+
+**Evidence**: dev DB 执行 backfill 后 NULL 计数 5734 → 0，二次执行影响 0 行（幂等性）。前端切换"年/月/日"视图分组功能恢复。比双路径 fallback 方案少改 3 个文件 + 不影响排序索引。
+
 ### [2026-05-04] photos 表使用复合 UNIQUE(storage_source_id, file_path) 而非单列 file_path
 
 <!-- tags: database, unique-constraint, drizzle, schema-design -->

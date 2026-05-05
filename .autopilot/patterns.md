@@ -1,3 +1,21 @@
+### [2026-05-05] worktree 中 e2e 测试需切到不同端口启动 dev server，主仓库进程不会同步代码
+
+<!-- tags: worktree, e2e, playwright, nextjs, dev-server, port -->
+
+**Scenario**: 在 git worktree (`/.claude/worktrees/photo`) 修改了 `apps/web/app/photos/page.tsx`，跑 Playwright e2e 测试访问 `localhost:3001`，断言一直失败。代码 grep 确认修复已落地，但 e2e 看到的页面仍是旧版（"上滑加载更多"文字而非"加载失败，点击重试"）。
+
+**Lesson**: dev server 是独立进程，服务的是**启动它时所在目录**的代码，与 git worktree 完全无关。`ps aux | grep next` 看进程的 cwd 路径，若是 `/Users/stringzhao/workspace/relight/apps/web/...`（主仓库）则它在跑主仓库代码；worktree 的代码改动它看不到。
+
+**修复**：
+1. 保留主仓库 dev server（用户可能正在用）
+2. 在 worktree 启动新 dev server 用不同端口：`cd <worktree>/apps/web && pnpm exec next dev --turbopack -p 3010`
+3. e2e 测试用临时 playwright config 覆盖 baseURL：`use: { baseURL: "http://localhost:3010" }`
+4. `pnpm exec playwright test --config=playwright.config.tmp.ts ...`
+
+**Why 这很重要**: 不知道这点会浪费大量时间在调试"测试 trigger 错误"或"实现 bug"上，而真因是测试根本没接触到改动后的代码。检查清单："改动了 worktree 代码 + e2e 失败 + 看上去合理但实测不通过" → 第一时间 `ps aux | grep next` 看进程 cwd。
+
+**Evidence**: 本次 4 个 Playwright 用例切到 :3010 后从全部失败变成 4/4 全过（8.0s）。`turbopack.root` 推断警告可忽略（不影响功能），但若严重影响可在 next.config.ts 显式设置。
+
 ### [2026-05-04] 扫描收录与 AI 分析使用两层扩展名过滤，分离关注点
 
 <!-- tags: backend, scan, extension-filter, two-layer, separation-of-concerns -->
