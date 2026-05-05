@@ -48,6 +48,18 @@ pnpm --filter @relight/web dev             # 启动前端 (next dev --turbopack 
 
 **注意**：`pnpm dev` 启动的是 API + Web，不会启 Worker。要让扫描/分析/精选任务真正跑起来，需要单独跑 `pnpm --filter @relight/backend workers`。
 
+## Worktree 并行开发
+
+用 `claude -w <name>` 创建 worktree 后，string-claude-code-plugin 会自动 install 依赖并触发本工程的 `postinstall` 钩子，自动生成 worktree 专属配置：
+
+- 端口：`BACKEND_PORT = computePort(branch)`（4001-4999），`WEB_PORT = BACKEND_PORT + 500`（4501-5499）
+- BullMQ prefix：`bull-<branch>`，与主仓库（`bull-main`）和其他 worktree 完全隔离
+- 数据：`STORAGE_ROOT` / `DATABASE_PATH` 指向主仓库绝对路径（worktree 立刻可见真实数据）
+
+worktree 里 `pnpm dev` 直接启动 backend + web；workers 用 `pnpm --filter @relight/backend workers`。
+
+手动修复已有 worktree 配置：在 worktree 根目录跑 `pnpm worktree:setup`。
+
 ## 架构概览
 
 ### 三层 Monorepo

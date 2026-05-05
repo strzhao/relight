@@ -15,7 +15,9 @@
     "test:size": "size-limit",
     "db:push": "pnpm --filter @relight/backend db:push",
     "db:studio": "pnpm --filter @relight/backend db:studio",
-    "prepare": "husky"
+    "prepare": "husky",
+    "postinstall": "node scripts/sync-worktree-env.mjs",
+    "worktree:setup": "node scripts/sync-worktree-env.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

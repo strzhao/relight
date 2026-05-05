@@ -12,14 +12,17 @@ const defaultJobOptions = {
 export const scanQueue = new Queue("scan-storage", {
   connection,
   defaultJobOptions,
+  prefix: config.bullmqPrefix,
 });
 
 export const analyzeQueue = new Queue("analyze-photo", {
   connection,
   defaultJobOptions,
+  prefix: config.bullmqPrefix,
 });
 
 export const dailyQueue = new Queue("daily-selection", {
   connection,
   defaultJobOptions,
+  prefix: config.bullmqPrefix,
 });

@@ -10,6 +10,7 @@ import { config } from "../lib/config";
 /** 共享 QueueEvents 实例，避免每个 SSE 连接创建新 Redis 连接 */
 const analyzeQueueEvents = new QueueEvents("analyze-photo", {
   connection: { url: config.redisUrl },
+  prefix: config.bullmqPrefix,
 });
 
 export const analyzeRouter = new Hono()

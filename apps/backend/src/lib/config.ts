@@ -5,6 +5,7 @@ export const config = {
   databasePath: process.env.DATABASE_PATH ?? "./data/relight.db",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   storageRoot: process.env.STORAGE_ROOT ?? "./photos",
+  bullmqPrefix: process.env.BULLMQ_PREFIX ?? "bull",
   ai: {
     baseUrl: process.env.AI_BASE_URL ?? "http://127.0.0.1:8001/v1",
     apiKey: process.env.AI_API_KEY ?? "qwen-local-key",

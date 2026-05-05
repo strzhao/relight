@@ -11,19 +11,22 @@ const connection = { url: config.redisUrl };
 // 创建三个 Worker 实例
 const scanWorker = new Worker("scan-storage", scanStorageWorker, {
   connection,
+  prefix: config.bullmqPrefix,
 });
 
 const analyzeWorker = new Worker("analyze-photo", analyzePhotoWorker, {
   connection,
   concurrency: 2,
+  prefix: config.bullmqPrefix,
 });
 
 const dailyWorker = new Worker("daily-selection", dailySelectionWorker, {
   connection,
+  prefix: config.bullmqPrefix,
 });
 
 // QueueEvents 监听器 — 追踪批量分析进度
-const analyzeEvents = new QueueEvents("analyze-photo", { connection });
+const analyzeEvents = new QueueEvents("analyze-photo", { connection, prefix: config.bullmqPrefix });
 
 async function finalizeBatchIfDone(batchId: string) {
   const [batch] = await db
