@@ -77,14 +77,18 @@ export const PhotoCard = memo(function PhotoCard({
       {shouldLoad && !hasError ? (
         <img
           src={`${API_BASE}/api/photos/${photo.id}/thumbnail`}
-          alt=""
+          alt={photo.filePath.split("/").pop() ?? photo.id}
           loading={priority ? "eager" : "lazy"}
           className={cn("size-full object-cover")}
           onError={handleError}
         />
       ) : hasError ? (
-        <div className="flex size-full items-center justify-center text-muted-foreground">
-          <ImageOff className="size-8" />
+        <div
+          className="flex flex-col items-center justify-center gap-1 size-full text-muted-foreground"
+          aria-label="缩略图加载失败"
+        >
+          <ImageOff className="size-6" />
+          <span className="text-xs">加载失败</span>
         </div>
       ) : null}
     </div>
