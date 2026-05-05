@@ -2,14 +2,14 @@
  * 验收测试：AI 图片分析性能优化
  *
  * 覆盖设计文档 4 项改动：
- * - P0-1: Worker 并发度 concurrency: 2
- * - P0-2: 统一图片缩放到 2048px (sharp resize + JPEG quality 85)
+ * - P0-1: Worker 并发度 concurrency: 4
+ * - P0-2: 统一图片缩放到 1024px (sharp resize + JPEG quality 75)
  * - P1-1: AI API 超时 timeout: 120000 + maxRetries: 0
  * - P1-2: 标签批量写入 onConflictDoUpdate + onConflictDoNothing
  *
  * 测试策略（黑盒验收）：
  * - P0-1: mock bullmq Worker，动态导入 workers/index，检查 Worker 构造参数
- * - P0-2: mock sharp，通过 analyzePhotoWorker 验证非 HEIC 图片被 resize 到 ≤2048px
+ * - P0-2: mock sharp，通过 analyzePhotoWorker 验证非 HEIC 图片被 resize 到 ≤1024px
  * - P1-1: mock openai 包，动态导入 ai/client，检查 OpenAI 构造函数选项
  * - P1-2: mock drizzle-orm insert/values 路径，验证使用 onConflictDoUpdate / onConflictDoNothing
  *
@@ -418,7 +418,7 @@ function resetMocks() {
 // P0-1: Worker 并发度 — concurrency: 2
 // =============================================================================
 
-describe("P0-1: Worker 并发度 (concurrency: 2)", () => {
+describe("P0-1: Worker 并发度 (concurrency: 4)", () => {
   // 收集 Worker 构造参数
   let workerConstructors: Array<{
     name: string;
@@ -468,7 +468,7 @@ describe("P0-1: Worker 并发度 (concurrency: 2)", () => {
     }));
   });
 
-  it("analyze-photo 队列的 Worker 应配置 concurrency: 2", async () => {
+  it("analyze-photo 队列的 Worker 应配置 concurrency: 4", async () => {
     // 动态导入 workers 模块 — 这会触发 Worker 构造
     try {
       await import("../workers/index");
@@ -481,13 +481,13 @@ describe("P0-1: Worker 并发度 (concurrency: 2)", () => {
     expect(analyzeWorker).toBeDefined();
 
     if (analyzeWorker) {
-      // 核心断言：concurrency 应为 2，匹配 llama-server --parallel 2
+      // 核心断言：concurrency 应为 4，匹配 llama-server --parallel 4
       expect(analyzeWorker.opts).toHaveProperty("concurrency");
-      expect(analyzeWorker.opts.concurrency).toBe(2);
+      expect(analyzeWorker.opts.concurrency).toBe(4);
     }
   });
 
-  it("analyze-photo Worker 应匹配 llama-server 的 --parallel 2 设置", async () => {
+  it("analyze-photo Worker 应匹配 llama-server 的 --parallel 4 设置", async () => {
     try {
       await import("../workers/index");
     } catch {
@@ -496,8 +496,8 @@ describe("P0-1: Worker 并发度 (concurrency: 2)", () => {
 
     const analyzeWorker = workerConstructors.find((w) => w.name === "analyze-photo");
     if (analyzeWorker && analyzeWorker.opts.concurrency !== undefined) {
-      // concurrency 值应等于 2，与 llama-server --parallel 2 匹配
-      expect(analyzeWorker.opts.concurrency).toBe(2);
+      // concurrency 值应等于 4，与 llama-server --parallel 4 匹配
+      expect(analyzeWorker.opts.concurrency).toBe(4);
       expect(typeof analyzeWorker.opts.concurrency).toBe("number");
     }
   });
@@ -539,10 +539,10 @@ describe("P0-1: Worker 并发度 (concurrency: 2)", () => {
 });
 
 // =============================================================================
-// P0-2: 统一图片缩放 (sharp resize ≤2048px + JPEG quality 85)
+// P0-2: 统一图片缩放 (sharp resize ≤1024px + JPEG quality 75)
 // =============================================================================
 
-describe("P0-2: 统一图片缩放 (sharp resize ≤2048px + JPEG quality 85)", () => {
+describe("P0-2: 统一图片缩放 (sharp resize ≤1024px + JPEG quality 75)", () => {
   beforeEach(() => {
     resetMocks();
     mockGetMimeType.mockReturnValue("image/jpeg");
@@ -563,7 +563,7 @@ describe("P0-2: 统一图片缩放 (sharp resize ≤2048px + JPEG quality 85)", 
     expect(mockResizeFn).toHaveBeenCalled();
   });
 
-  it("sharp resize 的目标尺寸应不超过 2048px", async () => {
+  it("sharp resize 的目标尺寸应不超过 1024px", async () => {
     setupPhotoExists();
     setupSourceExists();
 
@@ -580,17 +580,17 @@ describe("P0-2: 统一图片缩放 (sharp resize ≤2048px + JPEG quality 85)", 
     // sharp.resize(width, height, options?)
     const args = resizeCall.args;
 
-    // 宽度参数存在时，不应超过 2048
+    // 宽度参数存在时，不应超过 1024
     if (typeof args[0] === "number") {
-      expect(args[0]).toBeLessThanOrEqual(2048);
+      expect(args[0]).toBeLessThanOrEqual(1024);
     }
 
-    // 高度参数存在时，不应超过 2048
+    // 高度参数存在时，不应超过 1024
     if (typeof args[1] === "number") {
-      expect(args[1]).toBeLessThanOrEqual(2048);
+      expect(args[1]).toBeLessThanOrEqual(1024);
     }
 
-    // 如果 resize 的 width/height 都是 2048，说明使用 fit: 'inside' 约束
+    // 如果 resize 的 width/height 都是 1024，说明使用 fit: 'inside' 约束
     // 这是理想的实现方式
   });
 
@@ -605,7 +605,7 @@ describe("P0-2: 统一图片缩放 (sharp resize ≤2048px + JPEG quality 85)", 
     expect(jpegCalls.length).toBeGreaterThan(0);
   });
 
-  it("JPEG 输出质量应为 85", async () => {
+  it("JPEG 输出质量应为 75", async () => {
     setupPhotoExists();
     setupSourceExists();
 
@@ -618,10 +618,10 @@ describe("P0-2: 统一图片缩放 (sharp resize ≤2048px + JPEG quality 85)", 
     const jpegCall = jpegCalls[0]!;
     const jpegArgs = jpegCall.args[0] as Record<string, unknown> | undefined;
 
-    // JPEG quality 应为 85（设计文档指定）
+    // JPEG quality 应为 75（决策 2: 速度优先，从 85 降至 75 减少 base64 payload）
     if (jpegArgs) {
       expect(jpegArgs).toHaveProperty("quality");
-      expect(jpegArgs.quality).toBe(85);
+      expect(jpegArgs.quality).toBe(75);
     }
   });
 
