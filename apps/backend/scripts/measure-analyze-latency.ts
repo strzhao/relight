@@ -54,7 +54,9 @@ async function main(): Promise<void> {
   console.log("=".repeat(50));
   console.log(`端到端总耗时: ${(totalMs / 1000).toFixed(2)}s`);
   console.log(`期望 < 25s: ${totalMs < 25000 ? "✅ PASS" : "❌ FAIL"}`);
-  console.log(`字段完整性: tags≥3=${fields.tags >= 3 ? "✅" : "❌"}(${fields.tags}), score=${fields.aestheticScore !== null ? "✅" : "❌"}, composition=${fields.composition ? "✅" : "❌"}, colorAnalysis=${fields.colorAnalysis ? "✅" : "❌"}`);
+  console.log(
+    `字段完整性: tags≥3=${fields.tags >= 3 ? "✅" : "❌"}(${fields.tags}), score=${fields.aestheticScore !== null ? "✅" : "❌"}, composition=${fields.composition ? "✅" : "❌"}, colorAnalysis=${fields.colorAnalysis ? "✅" : "❌"}`,
+  );
 }
 
 main().catch((e) => {
