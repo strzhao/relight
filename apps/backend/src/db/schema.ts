@@ -1,5 +1,13 @@
 import { relations } from "drizzle-orm";
-import { integer, primaryKey, real, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  unique,
+} from "drizzle-orm/sqlite-core";
 
 /** 存储源 */
 export const storageSources = sqliteTable("storage_sources", {
@@ -39,6 +47,7 @@ export const photos = sqliteTable(
   },
   (t) => ({
     unq_storage_file: unique().on(t.storageSourceId, t.filePath),
+    idx_photos_created_at: index("idx_photos_created_at").on(t.createdAt),
   }),
 );
 
@@ -72,39 +81,48 @@ export const photoTags = sqliteTable(
 );
 
 /** AI 分析记录 */
-export const photoAnalyses = sqliteTable("photo_analyses", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  photoId: text("photo_id")
-    .notNull()
-    .references(() => photos.id, { onDelete: "cascade" }),
-  aiModel: text("ai_model").notNull(),
-  narrative: text("narrative"),
-  aestheticScore: real("aesthetic_score"),
-  tags: text("tags", { mode: "json" }).$type<
-    { name: string; category: string; confidence: number }[]
-  >(),
-  composition: text("composition", { mode: "json" }).$type<{
-    type: string;
-    score: number;
-    description: string;
-  }>(),
-  colorAnalysis: text("color_analysis", { mode: "json" }).$type<{
-    palette: string[];
-    dominant: string;
-    mood: string;
-  }>(),
-  emotionalAnalysis: text("emotional_analysis", { mode: "json" }).$type<{
-    primary: string;
-    secondary: string;
-    intensity: number;
-  }>(),
-  usageSuggestions: text("usage_suggestions"),
-  promptVersion: text("prompt_version"),
-  rawResponse: text("raw_response").notNull(),
-  processedAt: text("processed_at").notNull(),
-});
+export const photoAnalyses = sqliteTable(
+  "photo_analyses",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    photoId: text("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    aiModel: text("ai_model").notNull(),
+    narrative: text("narrative"),
+    aestheticScore: real("aesthetic_score"),
+    tags: text("tags", { mode: "json" }).$type<
+      { name: string; category: string; confidence: number }[]
+    >(),
+    composition: text("composition", { mode: "json" }).$type<{
+      type: string;
+      score: number;
+      description: string;
+    }>(),
+    colorAnalysis: text("color_analysis", { mode: "json" }).$type<{
+      palette: string[];
+      dominant: string;
+      mood: string;
+    }>(),
+    emotionalAnalysis: text("emotional_analysis", { mode: "json" }).$type<{
+      primary: string;
+      secondary: string;
+      intensity: number;
+    }>(),
+    usageSuggestions: text("usage_suggestions"),
+    promptVersion: text("prompt_version"),
+    rawResponse: text("raw_response").notNull(),
+    processedAt: text("processed_at").notNull(),
+  },
+  (t) => ({
+    // 覆盖 admin/photos 列表的相关子查询：WHERE photo_id=? ORDER BY processed_at DESC LIMIT 1
+    idx_photo_analyses_photo_id_processed_at: index(
+      "idx_photo_analyses_photo_id_processed_at",
+    ).on(t.photoId, t.processedAt),
+  }),
+);
 
 /** 每日精选 */
 export const dailyPicks = sqliteTable("daily_picks", {
