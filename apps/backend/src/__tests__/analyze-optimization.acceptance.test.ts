@@ -96,9 +96,11 @@ vi.mock("sharp", () => ({
 // ---- Mock heic 相关 (heic 文件识别) ----
 
 const mockIsHeicFile = vi.hoisted(() => vi.fn().mockReturnValue(false));
+const mockIsHeicBuffer = vi.hoisted(() => vi.fn().mockReturnValue(false));
 
 vi.mock("../lib/heic", () => ({
   isHeicFile: mockIsHeicFile,
+  isHeicBuffer: mockIsHeicBuffer,
   heicFileToJpeg: vi.fn(),
   convertHeicToJpeg: vi.fn(),
 }));

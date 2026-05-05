@@ -5,7 +5,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 import { analyzeQueue } from "../jobs/queues";
-import { convertHeicToJpeg, isHeicFile } from "../lib/heic";
+import { convertHeicToJpeg, isHeicBuffer } from "../lib/heic";
 import { createStorageAdapter } from "../storage";
 
 export const photosRouter = new Hono()
@@ -231,8 +231,8 @@ export const photosRouter = new Hono()
       let contentType = adapter.getMimeType(fullPath);
       const etagBase = `${photo.filePath}`;
 
-      // HEIC 转码为 JPEG
-      if (isHeicFile(fullPath)) {
+      // HEIC 转码为 JPEG（按 magic byte 判断，兼容扩展名错配）
+      if (isHeicBuffer(buffer)) {
         buffer = await convertHeicToJpeg(buffer);
         contentType = "image/jpeg";
       }

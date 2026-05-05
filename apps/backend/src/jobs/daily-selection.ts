@@ -145,21 +145,18 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
     // 读取胜者照片文件
     const adapter = createStorageAdapter(winner.sourceType);
     const fullPath = path.join(winner.sourceRootPath, winner.photo.filePath);
-    const ext = path.extname(winner.photo.filePath).toLowerCase();
-    let buffer: Buffer;
+    let buffer = await adapter.getFileBuffer(fullPath);
     const mimeType = "image/jpeg";
 
-    // HEIC 文件需先解码为 JPEG（sharp 的预编译 libvips 不含 HEIC 支持）
-    if (ext === ".heic" || ext === ".heif") {
-      const { heicFileToJpeg } = await import("../lib/heic");
-      buffer = await heicFileToJpeg(fullPath, {
+    // 按 magic byte 判断 HEIC（兼容扩展名错配，如 iOS 备份的 .JPEG 实为 HEIC）
+    const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+    if (isHeicBuffer(buffer)) {
+      buffer = await convertHeicToJpeg(buffer, {
         maxWidth: 2048,
         maxHeight: 2048,
         quality: 85,
       });
     } else {
-      buffer = await adapter.getFileBuffer(fullPath);
-      // 缩放以减小 AI payload
       buffer = await sharp(buffer)
         .resize(2048, 2048, { fit: "inside" })
         .jpeg({ quality: 85 })

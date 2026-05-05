@@ -104,7 +104,6 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
   if (RAW_EXTENSIONS.has(ext)) {
     job.log("DNG/RAW 文件，使用 dcraw 提取 JPEG 预览");
     buffer = await extractRawPreview(photo.filePath);
-    // resize 与 HEIC 一致的尺寸上限
     const sharp = await import("sharp");
     buffer = await sharp
       .default(buffer)
@@ -112,22 +111,23 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
       .jpeg({ quality: 75 })
       .toBuffer();
     mimeType = "image/jpeg";
-  } else if (ext.endsWith(".heic") || ext.endsWith(".heif")) {
-    job.log("检测到 HEIC 文件，转换为 JPEG 后发送 AI 分析");
-    const { heicFileToJpeg } = await import("../lib/heic");
-    buffer = await heicFileToJpeg(photo.filePath, {
-      maxWidth: 1024,
-      maxHeight: 1024,
-      quality: 75,
-    });
-    mimeType = "image/jpeg";
   } else {
-    job.log("缩放图片到 1024px 以减少 AI payload");
     buffer = await adapter.getFileBuffer(photo.filePath);
-    buffer = await sharp(buffer)
-      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 75 })
-      .toBuffer();
+    const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+    if (isHeicBuffer(buffer)) {
+      job.log("检测到 HEIC 内容（按 magic byte），转换为 JPEG 后发送 AI 分析");
+      buffer = await convertHeicToJpeg(buffer, {
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 75,
+      });
+    } else {
+      job.log("缩放图片到 1024px 以减少 AI payload");
+      buffer = await sharp(buffer)
+        .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 75 })
+        .toBuffer();
+    }
     mimeType = "image/jpeg";
   }
 

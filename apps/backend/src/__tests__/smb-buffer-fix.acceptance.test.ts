@@ -43,7 +43,9 @@ vi.mock("node:child_process", () => ({
 // Mock heic.ts — HEIC 文件走独立分支
 vi.mock("../lib/heic", () => ({
   isHeicFile: (p: string) => [".heic", ".heif"].includes(path.extname(p).toLowerCase()),
+  isHeicBuffer: vi.fn(() => false),
   heicFileToJpeg: vi.fn().mockResolvedValue(Buffer.from("mock-heic-jpeg")),
+  convertHeicToJpeg: vi.fn().mockResolvedValue(Buffer.from("mock-heic-jpeg")),
 }));
 
 // ---- 辅助函数 ----

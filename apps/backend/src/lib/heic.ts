@@ -9,6 +9,16 @@ export function isHeicFile(filePath: string): boolean {
   return HEIC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
+// ISO base media format: bytes 4..8 = "ftyp", 8..12 = brand.
+// iOS 备份偶尔把 HEIC 内容存成 .JPEG 扩展名，仅看后缀会漏判。
+const HEIC_BRANDS = new Set(["heic", "heix", "heif", "mif1", "msf1", "hevc", "hevx"]);
+
+export function isHeicBuffer(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  if (buf.toString("ascii", 4, 8) !== "ftyp") return false;
+  return HEIC_BRANDS.has(buf.toString("ascii", 8, 12).toLowerCase());
+}
+
 interface ConvertOptions {
   maxWidth?: number;
   maxHeight?: number;
