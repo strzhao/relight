@@ -16,6 +16,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **共享包**: `@relight/shared` (types, Zod schemas, API 路由常量)
 - **工具链**: TypeScript 5.8, Biome (format + lint), Vitest, Playwright (e2e)
 
+## 环境要求
+
+- Node.js ≥ 20，pnpm ≥ 10
+- Redis（BullMQ 必需）
+- 关键环境变量（见 `.env.example`）：`STORAGE_ROOT`（照片根目录）、`REDIS_URL`、`DATABASE_PATH`、`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_VISION_MODEL`。AI 默认指向本地 `http://127.0.0.1:8001/v1`（qwen 兼容服务）
+
 ## 常用命令
 
 ```bash
@@ -27,15 +33,20 @@ pnpm typecheck        # TypeScript 类型检查
 pnpm test             # 运行全部 Vitest 测试
 pnpm test:watch       # Vitest watch 模式
 pnpm test:e2e         # Playwright e2e 测试
+pnpm db:push          # 推送 Drizzle schema (根级快捷，等价于 --filter backend)
+pnpm db:studio        # 打开 Drizzle Studio
 
 # 后端专属
-pnpm --filter @relight/backend dev         # 启动后端 (tsx watch src/index.ts)
-pnpm --filter @relight/backend db:push     # Drizzle 推送 schema 到 SQLite
-pnpm --filter @relight/backend db:studio   # Drizzle Studio 管理界面
+pnpm --filter @relight/backend dev         # 启动 API (tsx watch src/index.ts)
+pnpm --filter @relight/backend workers     # 启动 Worker 进程（独立于 API，处理 BullMQ 队列）
+pnpm --filter @relight/backend build       # tsup 打包
+pnpm --filter @relight/backend start       # 跑生产构建产物
 
 # 前端专属
 pnpm --filter @relight/web dev             # 启动前端 (next dev --turbopack -p 3001)
 ```
+
+**注意**：`pnpm dev` 启动的是 API + Web，不会启 Worker。要让扫描/分析/精选任务真正跑起来，需要单独跑 `pnpm --filter @relight/backend workers`。
 
 ## 架构概览
 
