@@ -209,7 +209,7 @@ export const photosRouter = new Hono()
       });
     }
 
-    const fullPath = path.join(photo.rootPath, photo.filePath);
+    const fullPath = path.resolve(photo.rootPath, photo.filePath);
 
     // 检查文件是否存在
     try {
