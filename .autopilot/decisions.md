@@ -152,3 +152,21 @@
 **Trade-offs**: 阶段 1 准确性依赖已有 AI 分析质量。复用已有结论远优于重新发图。候选上限 20 张控制 prompt 长度。
 
 **Evidence**: prompt 文件 `v2/daily/select/` + `v2/daily/narrate/`，worker 实现 `jobs/daily-selection.ts:99-178`。
+
+### [2026-05-05] worktree 环境采用 sync 脚本 + postinstall 钩子，端口算法与插件字节级一致
+
+<!-- tags: worktree, parallel-development, postinstall, port-allocation, bullmq-prefix, design -->
+
+**Background**: `claude code -w` 创建 worktree 后服务起不来——端口（backend 3000 / web 3001）硬编码撞主仓库、主仓库无 `.env` 让 string-claude-code-plugin 的自动 symlink 找不到东西可链、BullMQ 全用默认 Redis DB 0 导致 worktree workers 抢主仓库任务。
+
+**Choice**: 在 relight 工程内实现 `scripts/sync-worktree-env.mjs`，用与插件 `worktree.mjs:computePort()` **字节级一致** 的哈希算法（`h = (h * 31 + char) >>> 0; 4001 + h % 999`）独立计算端口，**不依赖** 插件的 `local-config.json`。BACKEND_PORT = devPort（4001-4999），WEB_PORT = devPort + 500（4501-5499）。BullMQ 用 `bull-<branch>` prefix 隔离。通过根 `package.json` 的 `postinstall` 钩子触发，`worktree:setup` 提供手动入口修复已有 worktree。
+
+**Alternatives rejected**:
+- 修改 string-claude-code-plugin 让它写更多端口字段：plugin 是通用工具，不应嵌入 relight 专属逻辑
+- 依赖 plugin 写的 `local-config.json` 提取端口：plugin 在 `pnpm install`（触发 postinstall）**之后** 才写该文件，时序错位会导致 sync 脚本读不到
+- Redis DB 编号隔离（0-15）：上限太低，不便扩展，也不如 prefix 可读
+- 共享 Redis 队列：worktree workers 会抢主仓库的真实任务，破坏"真实验证"语义
+
+**Trade-offs**: 端口算法重复实现是技术债（如果插件改算法需同步），但插件算法 30 年内不太可能动；prefix 用分支名可读但需归一化（`/` → `-`）。
+
+**Evidence**: 实测 6/6 真实场景通过——主仓库 :3000 + worktree :4363/:4014 三端口共存；Redis 三个独立 prefix `bull` / `bull-main` / `bull-worktree-...`，主仓库 36927 条任务 keys 不被 worktree workers 触碰。Commit f8dc0df。
