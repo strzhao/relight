@@ -1,5 +1,31 @@
 # 架构决策日志
 
+### [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt（而非单帧图片处理或多帧独立分析）
+
+<!-- tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal -->
+
+**Background**: storage adapter 已收录视频格式（.mp4/.mov 等），但 analyze-photo 视频走"格式门 → skipped"路径，DB 中 414 个视频文件仅有占位记录，丧失视频本身的运动感、剪辑节奏、对白等独特价值。
+
+**Choice**: 视频走完整管道：
+1. ffmpeg `select='gt(scene,0.3)'` 抽 N=6 关键帧（不足时时间均匀 fallback）
+2. 6 帧 768×768 拼成 3×2 雪碧图（首版无文字角标，位置隐式时序）
+3. ffmpeg 抽音轨 16kHz mono → 调本地 Whisper CLI 转录
+4. 雪碧图 base64 + transcript 注入 v2/video prompt → 一次 vision 调用
+5. 输出含通用字段（aestheticScore/tags/composition/...）+ 视频专属字段（videoPacing/motionScore/videoNarrative）
+
+**Alternatives rejected**:
+- **单帧 MVP（中点一帧 + 复用图片 prompt）**: 完全失去时序信息，视频的运动/节奏/剪辑感全部丢失
+- **多帧独立分析 + 文本聚合**: token 成本 3-5 倍，且视频独立 vision 调用没有跨帧上下文，反而难感知时序
+- **多帧 + 音频转录 + 双模型双轨聚合**: 保留作为最终方案，但 Whisper 部署形态需用户决策——选择复用 `martin/scripts/transcribe.py`（mlx 引擎）
+
+**Trade-offs**:
+- 单视频分析时长 5-10 倍于图片（whisper 转录 + ffmpeg 抽帧 + vision），但本地推理零成本可接受
+- 雪碧图 ≤1MB（768×768×6 帧 quality=85 JPEG），对 qwen-vl 输入合理
+- N=6 是兼顾 token 成本和时序覆盖的平衡点；scene-cut 不足时 fallback 时间均匀，对静态视频鲁棒
+- 失败降级用占位（aiModel="video-failed:{kind}"），与既有"格式门 return 而非 throw"决策一致
+
+**Evidence**: 端到端验证（5s testsrc + 440Hz 正弦波 fixture）：6 帧抽取 + 70KB 雪碧图 + Whisper 返回 segments；损坏视频（1KB 头）被 ffprobe 拒绝并降级为 video-failed:probe；缩略图自动生成 .jpg（修了之前会变 .mp4 的 bug）。design-reviewer 10/10 全过；code-quality-reviewer 4 个 Important 全部修复。
+
 ### [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback
 
 <!-- tags: database, migration, backfill, fallback, sql, design -->

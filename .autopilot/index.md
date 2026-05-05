@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt | tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal | → decisions.md
 - [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例 | tags: tech-stack, backend, orm, conventions, design | → decisions.md
 - [2026-05-02] AI 分析质量验收采用纯规则自动化评分，非 AI 评估 AI | tags: ai, evaluation, testing, design | → decisions.md
 - [2026-05-04] photos 表使用复合 UNIQUE(storage_source_id, file_path) 而非单列 file_path | tags: database, unique-constraint, drizzle, schema-design | → decisions.md
@@ -14,6 +15,8 @@
 - [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback | tags: database, migration, backfill, fallback, sql, design | → decisions.md
 
 ## Patterns
+- [2026-05-06] Whisper CLI 必须从 outputDir/<stem>.json 文件读，绝不解析 stdout | tags: whisper, cli, child-process, json, stdout, ai, transcribe, bug | → patterns.md
+- [2026-05-06] worktree symlink + lint-staged stash 失败 → skip-worktree 隐藏虚假 deletion | tags: worktree, lint-staged, husky, git, symlink, stash | → patterns.md
 - [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies | tags: pnpm, native-modules, build | → patterns.md
 - [2026-05-01] Vitest workspace 模式需在根级别安装 vitest | tags: vitest, monorepo, testing | → patterns.md
 - [2026-05-01] Biome 1.9.4 使用 organizeImports 顶层键，非 assist | tags: biome, linting, config | → patterns.md

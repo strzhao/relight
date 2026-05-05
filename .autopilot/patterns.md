@@ -1,3 +1,49 @@
+### [2026-05-06] Whisper.cpp / mlx-whisper / faster-whisper 三引擎 CLI 输出位置 — 必须从 outputDir/<stem>.json 读，绝不解析 stdout
+
+<!-- tags: whisper, cli, child-process, json, stdout, ai, transcribe, bug -->
+
+**Scenario**: 集成本地 `martin/scripts/transcribe.py`（同时支持 mlx/openai-whisper/faster-whisper 三引擎）做视频音频转录。脚本调用形式 `python3 transcribe.py audio.wav --output-format json --output-dir <tmp>`。直觉认为 stdout 输出 JSON 直接 `JSON.parse(stdout)` 即可。
+
+**Lesson**: 这类 CLI 的设计是**结果写文件，stdout 只是人类可读进度日志**。stdout 内容形如：
+```
+引擎: mlx | 模型: large-v3-turbo | 语言: zh
+输入: /tmp/audio.wav
+[mlx-whisper] 加载模型 'large-v3-turbo'...
+输出: /tmp/output/audio.json
+耗时: 5.2s | 文本长度: 234 字
+```
+解析这个会失败。**真正的 JSON 在 `<outputDir>/<stem-without-ext>.json`** — 等 `child_process.spawn` 的 close 事件 + `code === 0` 后再 `fs.readFile()` 读取并 `JSON.parse`。
+
+**Why 这很重要**: plan-reviewer 把这点列为 BLOCKER 是对的——这是会让实现"看起来工作"（spawn 不报错）但实际拿到错误结果（解析进度日志失败）的隐蔽 bug。三引擎共享 `--output-dir <stem>.json` 输出契约，是 CLI 设计的标准模式而非 transcribe.py 特例。
+
+**Code shape**:
+```ts
+const proc = spawn(python, [script, audioPath, '--output-format', 'json', '--output-dir', tmpDir]);
+proc.stdout.on('data', () => {});  // 丢弃，只是日志
+proc.on('close', async (code) => {
+  if (code !== 0) reject(...);
+  const stem = path.basename(audioPath, path.extname(audioPath));
+  const json = await fs.readFile(path.join(tmpDir, `${stem}.json`), 'utf-8');
+  resolve(JSON.parse(json));
+});
+```
+
+### [2026-05-06] worktree symlink + lint-staged stash 失败 → skip-worktree 隐藏虚假 deletion
+
+<!-- tags: worktree, lint-staged, husky, git, symlink, stash -->
+
+**Scenario**: worktree 中 `.autopilot` 是 symlink 指向主仓库的真实目录。git 视角下 worktree 内的 `.autopilot/foo` 文件本来 tracked 但工作树访问要走 symlink，git status 把它们标为 ` D`（unstaged deletion）。lint-staged 在 pre-commit 时跑 `git stash --keep-index` 备份 worktree 改动，stash 试图处理这些 D 时报错：`error: '.autopilot/decisions.md' is beyond a symbolic link` → 整个 commit 失败。
+
+**Lesson**: 解决办法是在 worktree 中 `git update-index --skip-worktree` 这些路径，让 git 假装它们没变：
+```bash
+git diff --diff-filter=D -z --name-only | xargs -0 git update-index --skip-worktree
+```
+之后 lint-staged stash 就能跳过这些路径，commit 顺利通过。`skip-worktree` 是 worktree 局部设置，不污染主仓库。
+
+**Why 这很重要**: 这个问题在 worktree 协作场景反复出现（symlink 共享知识库是常见模式）。直觉解法是 `--no-verify` 跳过 hook，但这违反"不绕过质量检查"的纪律。skip-worktree 是真正的根因解法：**告诉 git 这些路径在 worktree 里不应该被 worktree-level diff 看到**。
+
+**Pre-installed worktree setup 应该自动做这个**：worktree-setup 脚本在 symlink `.autopilot` 之后立即跑一次 skip-worktree，避免后续 commit 都遇到这个坑。
+
 ### [2026-05-05] worktree 中 e2e 测试需切到不同端口启动 dev server，主仓库进程不会同步代码
 
 <!-- tags: worktree, e2e, playwright, nextjs, dev-server, port -->
