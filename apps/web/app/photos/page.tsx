@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { usePhotosInfinite } from "@/hooks/use-photos-infinite";
 import { type GroupedPhotos, groupPhotos, useVirtualGrid } from "@/hooks/use-virtual-grid";
 import type { Photo } from "@relight/shared";
-import { Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 function calcGridParams(containerWidth: number) {
@@ -27,6 +27,7 @@ function getInitialContentWidth() {
 }
 
 export default function PhotosPage() {
+  const [mounted, setMounted] = useState(false);
   const [dateViewMode, setDateViewMode] = useState<DateViewMode>("year");
   const [columnCount, setColumnCount] = useState(
     () => calcGridParams(getInitialContentWidth()).cols,
@@ -46,6 +47,10 @@ export default function PhotosPage() {
     const { cols, cellW } = calcGridParams(container.clientWidth - padX);
     setColumnCount(cols);
     setCellSize(cellW);
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   useLayoutEffect(() => {
@@ -112,19 +117,27 @@ export default function PhotosPage() {
     cellSize,
   });
 
-  // 骨架屏 id 列表（稳定引用，避免 array index key）
-  const skeletonIds = useMemo(() => Array.from({ length: 20 }, (_, i) => `sk-${i}`), []);
+  // 骨架屏 id 列表（依赖 columnCount，与实际列数一致）
+  const skeletonIds = useMemo(
+    () => Array.from({ length: columnCount * 4 }, (_, i) => `sk-${i}`),
+    [columnCount],
+  );
 
   // ====== 状态：加载中 (无缓存数据) ======
   if (isLoading && photos.length === 0) {
     return (
       <main className="mx-auto max-w-5xl px-4 py-8">
         <h1 className="mb-8 text-2xl font-bold">照片库</h1>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
-          {skeletonIds.map((id) => (
-            <Skeleton key={id} className="aspect-square rounded-md" />
-          ))}
-        </div>
+        {mounted && (
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: `repeat(${columnCount}, 1fr)` }}
+          >
+            {skeletonIds.map((id) => (
+              <Skeleton key={id} className="aspect-square rounded-md" />
+            ))}
+          </div>
+        )}
       </main>
     );
   }
@@ -247,10 +260,18 @@ export default function PhotosPage() {
                 transform: `translateY(${virtualizer.getTotalSize()}px)`,
               }}
             >
-              {isFetchingMore && <Loader2 className="size-5 animate-spin text-muted-foreground" />}
-              {!isFetchingMore && (
-                <span className="text-xs text-muted-foreground">上滑加载更多</span>
-              )}
+              {error && photos.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  className="flex items-center gap-2 text-sm text-destructive hover:underline"
+                >
+                  <AlertCircle className="size-4" />
+                  加载失败，点击重试
+                </button>
+              ) : isFetchingMore ? (
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              ) : null}
             </div>
           )}
         </div>

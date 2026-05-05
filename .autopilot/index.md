@@ -11,6 +11,7 @@
 - [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数 | tags: backend, bullmq, worker, concurrency, llama-cpp, performance | → decisions.md
 - [2026-05-05] 每日精选采用两阶段 AI 流水线 — 文本评选 + 视觉叙事，最小化图片 token 成本 | tags: ai, daily-selection, cost-optimization, two-stage-pipeline, architecture | → decisions.md
 - [2026-05-05] worktree 环境采用 sync 脚本 + postinstall 钩子，端口算法与插件字节级一致 | tags: worktree, parallel-development, postinstall, port-allocation, bullmq-prefix, design | → decisions.md
+- [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback | tags: database, migration, backfill, fallback, sql, design | → decisions.md
 
 ## Patterns
 - [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies | tags: pnpm, native-modules, build | → patterns.md
@@ -33,3 +34,4 @@
 - [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload | tags: ai, vision, sharp, image-resize, performance, base64 | → patterns.md
 - [2026-05-05] Next.js dev server 不读 .env.local 的 PORT，必须靠包装脚本预注入 | tags: nextjs, dev-server, env-loading, port-binding, dotenv | → patterns.md
 - [2026-05-05] pnpm workspace 子进程加载子包依赖时 cwd 必须在子包目录 | tags: pnpm, workspace, dotenv, child-process, node-modules-resolution | → patterns.md
+- [2026-05-05] worktree 中 e2e 测试需切到不同端口启动 dev server，主仓库进程不会同步代码 | tags: worktree, e2e, playwright, nextjs, dev-server, port | → patterns.md

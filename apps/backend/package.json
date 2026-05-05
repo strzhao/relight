@@ -12,7 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:migrate": "drizzle-kit migrate",
-    "workers": "tsx src/workers/index.ts"
+    "workers": "tsx src/workers/index.ts",
+    "backfill:taken-at": "tsx src/cli/backfill-taken-at.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.1",
