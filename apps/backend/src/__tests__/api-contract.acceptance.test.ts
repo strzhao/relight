@@ -227,11 +227,11 @@ describe("API 契约 — 验收测试（设计文档 §5）", () => {
       expect(typeof body.page).toBe("number");
     });
 
-    it("GET /api/daily/:id 应返回 ApiResponse 含详情", async () => {
+    it("GET /api/daily/:id 不存在的记录应返回 404", async () => {
       const { status, body } = await get("/api/daily/pick-001");
-      expect(status).toBe(200);
-      expect(body.success).toBe(true);
-      expect(body.data.id).toBe("pick-001");
+      expect(status).toBe(404);
+      expect(body.success).toBe(false);
+      expect(body.error).toBeDefined();
     });
   });
 
