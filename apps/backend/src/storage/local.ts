@@ -4,7 +4,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
-import type { FileInfo, IStorageAdapter } from "./interface";
+import { probeVideo } from "../lib/video/ffmpeg";
+import type { FileInfo, FileMetadata, IStorageAdapter } from "./interface";
+
+/** 视频扩展名（与扫描白名单中的视频部分一致） */
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]);
 
 /** 扫描时收录的所有文件格式（含暂不支持 AI 分析的视频格式，入库备用） */
 const SCAN_EXTENSIONS = new Set([
@@ -156,14 +160,44 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
   }
 
   /**
-   * 获取图片元信息。
-   * 使用 sharp 读取文件头部获取宽高和 EXIF 数据，
-   * 不会将整个图片加载到内存（sharp 只读取必要的文件片段）。
-   * 拍摄时间优先从 EXIF DateTimeOriginal 提取，fallback 到 fs.stat mtime。
+   * 获取文件元信息。
+   * 视频走 ffprobe 路径（提取 width/height/duration/codec/fps + creation_time → takenAt）。
+   * 图片走 sharp 路径（提取 width/height + EXIF DateTimeOriginal → takenAt）。
+   * 都失败时 fallback 到 fs.stat mtime。
    */
-  async getMetadata(
-    filePath: string,
-  ): Promise<{ width?: number; height?: number; takenAt?: Date }> {
+  async getMetadata(filePath: string): Promise<FileMetadata> {
+    const ext = path.extname(filePath).toLowerCase();
+
+    // 视频路径：用 ffprobe
+    if (VIDEO_EXTENSIONS.has(ext)) {
+      try {
+        const probe = await probeVideo(filePath);
+        let takenAt = probe.takenAt;
+        if (!takenAt) {
+          const stat = await fs.stat(filePath);
+          takenAt = stat.mtime;
+        }
+        return {
+          width: probe.width,
+          height: probe.height,
+          takenAt,
+          mediaType: "video",
+          durationSec: probe.durationSec,
+          videoCodec: probe.videoCodec,
+          videoFps: probe.videoFps,
+        };
+      } catch {
+        // ffprobe 失败（损坏视频或缺 ffmpeg）→ 仍标记 mediaType: 'video' 但其他字段为 undefined
+        try {
+          const stat = await fs.stat(filePath);
+          return { takenAt: stat.mtime, mediaType: "video" };
+        } catch {
+          return { mediaType: "video" };
+        }
+      }
+    }
+
+    // 图片路径：现有 sharp 逻辑
     try {
       const metadata = await sharp(filePath).metadata();
       const width = metadata.width;

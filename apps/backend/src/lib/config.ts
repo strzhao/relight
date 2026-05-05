@@ -13,4 +13,19 @@ export const config = {
     visionModel: process.env.AI_VISION_MODEL ?? "qwen3.6-35b",
     promptVersion: process.env.AI_PROMPT_VERSION || "v2",
   },
+  video: {
+    enabled: process.env.VIDEO_ENABLED !== "false",
+    frameCount: Number.parseInt(process.env.VIDEO_FRAME_COUNT ?? "6", 10),
+    ffmpegPath: process.env.FFMPEG_PATH ?? "ffmpeg",
+    ffprobePath: process.env.FFPROBE_PATH ?? "ffprobe",
+  },
+  whisper: {
+    enabled: process.env.WHISPER_ENABLED !== "false",
+    python: process.env.WHISPER_PYTHON ?? "/Users/stringzhao/workspace/martin/.venv/bin/python3",
+    script:
+      process.env.WHISPER_SCRIPT ?? "/Users/stringzhao/workspace/martin/scripts/transcribe.py",
+    engine: process.env.WHISPER_ENGINE ?? "mlx",
+    model: process.env.WHISPER_MODEL ?? "large-v3-turbo",
+    language: process.env.WHISPER_LANGUAGE ?? "auto",
+  },
 } as const;

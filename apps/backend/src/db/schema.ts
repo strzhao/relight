@@ -36,6 +36,13 @@ export const photos = sqliteTable(
     takenAt: text("taken_at"),
     fileMtime: integer("file_mtime"),
     createdAt: text("created_at").notNull(),
+    // 视频支持（nullable，图片保持 NULL 或 'image' 默认）
+    mediaType: text("media_type", { enum: ["image", "video"] })
+      .notNull()
+      .default("image"),
+    durationSec: real("duration_sec"),
+    videoCodec: text("video_codec"),
+    videoFps: real("video_fps"),
   },
   (t) => ({
     unq_storage_file: unique().on(t.storageSourceId, t.filePath),
@@ -104,6 +111,13 @@ export const photoAnalyses = sqliteTable("photo_analyses", {
   promptVersion: text("prompt_version"),
   rawResponse: text("raw_response").notNull(),
   processedAt: text("processed_at").notNull(),
+  // 视频专属字段（nullable，图片分析时为 NULL）
+  transcript: text("transcript"),
+  transcriptSegments: text("transcript_segments", { mode: "json" }).$type<
+    { start: number; end: number; text: string }[]
+  >(),
+  videoPacing: text("video_pacing"),
+  motionScore: real("motion_score"),
 });
 
 /** 每日精选 */

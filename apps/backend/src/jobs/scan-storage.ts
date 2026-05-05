@@ -200,6 +200,10 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       thumbnailPath: string | null;
       takenAt: string | null;
       createdAt: string;
+      mediaType: "image" | "video";
+      durationSec: number | null;
+      videoCodec: string | null;
+      videoFps: number | null;
     }
     const photoRecords: NewPhotoRecord[] = [];
 
@@ -219,6 +223,10 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           thumbnailPath: null,
           takenAt: metadata.takenAt?.toISOString() ?? null,
           createdAt: now,
+          mediaType: metadata.mediaType ?? "image",
+          durationSec: metadata.durationSec ?? null,
+          videoCodec: metadata.videoCodec ?? null,
+          videoFps: metadata.videoFps ?? null,
         });
       } catch (err) {
         errorCount++;
