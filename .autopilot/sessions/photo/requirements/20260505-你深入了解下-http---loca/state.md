@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 4
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/photo/.autopilot/sessions/photo/requirements/20260505-你深入了解下-http---loca"
 session_id: c1d7a3c5-0d1e-4903-8cce-4d65af64248a
 started_at: "2026-05-05T06:21:33Z"
@@ -237,3 +237,7 @@ export function backfillTakenAt(db: Database.Database): { changedCount: number }
 - [2026-05-05T07:30:00Z] Wave 1.5: 设计 N=7 场景，执行 E=7，全过（含 e2e 4/4，需切到 worktree :3010 dev server 跑）
 - [2026-05-05T07:30:00Z] Wave 2: design-reviewer PASS + code-quality-reviewer PASS（2 Important 维护建议，不阻断）
 - [2026-05-05T07:30:00Z] 整体 PASS，设置 gate: review-accept
+- [2026-05-05T07:50:00Z] 用户 /autopilot approve 通过，进入 merge 阶段
+- [2026-05-05T07:50:00Z] commit-agent 完成功能 commit 64d53cd: feat(照片) /photos 4 项修复 + 5734 行 takenAt 回填，10 files +1434 -17
+- [2026-05-05T07:50:00Z] 知识提取 commit a454196: docs(knowledge) 历史数据 SQL backfill 决策 + worktree e2e dev server 端口隔离教训
+- [2026-05-05T07:50:00Z] phase: done，autopilot 流程结束
