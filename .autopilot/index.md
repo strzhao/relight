@@ -26,5 +26,7 @@
 - [2026-05-04] SSE 进度追踪使用 DB 轮询 + QueueEvents 双向更新模式 | tags: sse, bullmq, queue-events, progress, db-polling, pattern | → patterns.md
 - [2026-05-04] Next.js rewrites 不转发 SSE 流，EventSource 必须直连后端 | tags: nextjs, sse, eventsource, proxy, rewrite, cors | → patterns.md
 - [2026-05-05] HEIC 检测必须在 sharp resize 之前执行——sharp 预编译 libvips 不含 HEIC 解码 | tags: heic, sharp, image-processing, code-order, bug | → patterns.md
+- [2026-05-05] qwen3 在 llama.cpp 上禁用思考模式必须用 chat_template_kwargs，thinking 字段是 vLLM 方言 | tags: qwen3, llama-cpp, thinking-mode, openai-api, ai, performance, bug | → patterns.md
+- [2026-05-05] sharp resize 必须显式 withoutEnlargement: true，否则小图被放大反优化 | tags: sharp, image-resize, withoutEnlargement, ai-payload, code-quality, bug | → patterns.md
 - [2026-05-04] 扫描收录与 AI 分析使用两层扩展名过滤，分离关注点 | tags: backend, scan, extension-filter, two-layer, separation-of-concerns | → patterns.md
 - [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload | tags: ai, vision, sharp, image-resize, performance, base64 | → patterns.md
