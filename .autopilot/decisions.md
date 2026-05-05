@@ -128,22 +128,6 @@
 
 **Evidence**: 1123 个视频文件（709 DNG + 414 视频）此前因格式问题反复重试失败。格式门上线后写入 `skipped` 记录，后续扫描不再重复入队。
 
-### [2026-05-04] 色彩空间选型：OKLCH 替代 hex/sRGB 作为设计系统基础
-
-<!-- tags: design-system, oklch, color-space, tailwind, css -->
-
-**Background**: 应用需要统一的色彩设计体系。用户提供了基于 OKLCH 的个人色彩空间设计，需要映射到 shadcn/ui 的 CSS 变量体系。传统 hex/sRGB 在暗色模式下需手动调整色值，HSL 色相不均匀（蓝/绿同 Lightness 感知亮度差异大）。
-
-**Choice**: 全量使用 OKLCH (L=感知亮度, C=饱和度, H=色相角) 作为设计 Token 的色彩空间，Tailwind v4 原生支持。
-
-**Alternatives rejected**:
-- hex/sRGB: 不可感知均匀，暗色模式需逐色手动计算，维护成本高
-- HSL: 色相感知不均匀，Lightness 值相同的蓝色和绿色肉眼亮度差异大
-
-**Trade-offs**: OKLCH 在 iOS Safari <15.4 不支持，但目标用户设备较新可接受。Tailwind v4 原生支持 OKLCH 语法，无需额外配置。
-
-**Evidence**: 18 个文件 66 处硬编码色迁移至 OKLCH 语义 Token，亮色/暗色模式均通过 WCAG AA 对比度验证。
-
 ### [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数
 
 <!-- tags: backend, bullmq, worker, concurrency, llama-cpp, performance -->
@@ -155,3 +139,16 @@
 **Alternatives rejected**: 更高并发（4-8）被拒绝，因为 llama-server 只有 2 个 slot，更高的 Worker 并发会导致任务排队在推理服务端，不会增加吞吐量。
 
 **Trade-offs**: concurrency=2 从 1 开始保守，后续如 llama-server --parallel 调高可同步增加。
+
+### [2026-05-05] 每日精选采用两阶段 AI 流水线 — 文本评选 + 视觉叙事，最小化图片 token 成本
+<!-- tags: ai, daily-selection, cost-optimization, two-stage-pipeline, architecture -->
+
+**Background**: 每日精选需要 AI 从多张候选照片中选出最佳并生成标题文案。直接将所有照片发送给视觉模型会消耗大量 token（每张照片 base64 可达 300KB+）。
+
+**Choice**: 两阶段流水线：阶段 1 用 `aiClient.chat()` 文本模型比较候选照片已有 AI 分析结论（aestheticScore + emotionalAnalysis + tags），选出胜者（零图片 token）；阶段 2 仅对胜者用 `aiClient.analyzePhoto()` 视觉模型生成怀旧标题和精简文案（只发 1 张图片）。
+
+**Alternatives rejected**: 纯视觉评选（20 张 x 300KB token 成本高、跨图比较不准确）；纯规则评分（缺少 AI 对情感共鸣判断）；本地预筛选（增加规则复杂度，收益不大）。
+
+**Trade-offs**: 阶段 1 准确性依赖已有 AI 分析质量。复用已有结论远优于重新发图。候选上限 20 张控制 prompt 长度。
+
+**Evidence**: prompt 文件 `v2/daily/select/` + `v2/daily/narrate/`，worker 实现 `jobs/daily-selection.ts:99-178`。
