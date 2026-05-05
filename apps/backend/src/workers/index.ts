@@ -16,7 +16,7 @@ const scanWorker = new Worker("scan-storage", scanStorageWorker, {
 
 const analyzeWorker = new Worker("analyze-photo", analyzePhotoWorker, {
   connection,
-  concurrency: 2,
+  concurrency: 4,
   prefix: config.bullmqPrefix,
 });
 

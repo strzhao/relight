@@ -108,25 +108,25 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
     const sharp = await import("sharp");
     buffer = await sharp
       .default(buffer)
-      .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 85 })
+      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 75 })
       .toBuffer();
     mimeType = "image/jpeg";
   } else if (ext.endsWith(".heic") || ext.endsWith(".heif")) {
     job.log("检测到 HEIC 文件，转换为 JPEG 后发送 AI 分析");
     const { heicFileToJpeg } = await import("../lib/heic");
     buffer = await heicFileToJpeg(photo.filePath, {
-      maxWidth: 2048,
-      maxHeight: 2048,
-      quality: 85,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      quality: 75,
     });
     mimeType = "image/jpeg";
   } else {
-    job.log("缩放图片到 2048px 以减少 AI payload");
+    job.log("缩放图片到 1024px 以减少 AI payload");
     buffer = await adapter.getFileBuffer(photo.filePath);
     buffer = await sharp(buffer)
-      .resize(2048, 2048, { fit: "inside" })
-      .jpeg({ quality: 85 })
+      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 75 })
       .toBuffer();
     mimeType = "image/jpeg";
   }

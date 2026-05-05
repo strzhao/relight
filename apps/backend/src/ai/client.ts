@@ -49,10 +49,10 @@ export class RelightAIClient {
     const baseParams = {
       model: config.ai.visionModel,
       messages,
-      max_tokens: 4096,
+      max_tokens: 1024,
       temperature: 0.3,
       top_p: 0.9,
-      thinking: { type: "disabled" } as const,
+      chat_template_kwargs: { enable_thinking: false } as const,
     };
 
     // 首次尝试带 response_format 和 seed
@@ -87,8 +87,8 @@ export class RelightAIClient {
       model: config.ai.model,
       messages,
       max_tokens: 4096,
-      // @ts-expect-error thinking is a qwen-specific extension
-      thinking: { type: "disabled" },
+      // @ts-expect-error qwen3 chat template extension
+      chat_template_kwargs: { enable_thinking: false } as Record<string, unknown>,
     });
 
     const msg = response.choices[0]?.message;
