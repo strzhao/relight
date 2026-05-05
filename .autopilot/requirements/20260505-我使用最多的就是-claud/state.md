@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 4
 max_iterations: 30
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 qa_scope: ""
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260505-我使用最多的就是-claud"
 session_id: bbb587ae-1846-4fcf-9681-3650939dc942
@@ -238,3 +238,7 @@ N/A（基础设施完整，QA 失败属本任务范围内的实现 gap 而非工
 - [2026-05-05T07:30:00Z] phase: auto-fix → qa（selective），retry_count: 0 → 1
 - [2026-05-05T07:50:00Z] QA 轮次 2 selective rerun：Tier 0 16/16 ✓，Tier 1 lint（PR 9 文件）✓，Tier 1.5 6/6 全过；BLOCKER 修复（包装脚本读 .env.local）+ 分支归一化 + execFileSync + cwd 修复全部验证通过
 - [2026-05-05T07:50:00Z] gate: review-accept（等待用户审批合并）
+- [2026-05-05T08:10:00Z] 用户 /autopilot approve，进入 merge 阶段
+- [2026-05-05T08:15:00Z] commit-agent 完成：commit f8dc0df 「feat(worktree): worktree 环境自动生成，三服务零干预并行启动」，版本 0.3.1 → 0.4.0（apps/backend、apps/web、packages/shared 三个 package.json 同步）
+- [2026-05-05T08:20:00Z] 知识提取：1 条 decisions（worktree 端口算法与插件一致）+ 2 条 patterns（Next.js dev .env.local PORT 不生效、pnpm workspace 子进程 cwd），index.md 同步索引；commit 8c3c6fc
+- [2026-05-05T08:20:00Z] phase: merge → done
