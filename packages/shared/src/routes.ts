@@ -5,6 +5,8 @@ export const API_ROUTES = {
     detail: (id: string) => `/api/photos/${id}`,
     thumbnail: (id: string) => `/api/photos/${id}/thumbnail`,
     original: (id: string) => `/api/photos/${id}/original`,
+    raw: (id: string) => `/api/photos/${id}/raw`,
+    subtitles: (id: string) => `/api/photos/${id}/subtitles.vtt`,
     analyze: "/api/photos/analyze",
   },
   daily: {

@@ -1,8 +1,9 @@
 "use client";
 
+import { formatDuration } from "@/lib/format-duration";
 import { cn } from "@/lib/utils";
 import type { Photo } from "@relight/shared";
-import { ImageOff } from "lucide-react";
+import { ImageOff, Play } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -75,13 +76,21 @@ export const PhotoCard = memo(function PhotoCard({
       }
     >
       {shouldLoad && !hasError ? (
-        <img
-          src={`${API_BASE}/api/photos/${photo.id}/thumbnail`}
-          alt={photo.filePath.split("/").pop() ?? photo.id}
-          loading={priority ? "eager" : "lazy"}
-          className={cn("size-full object-cover")}
-          onError={handleError}
-        />
+        <div className="relative h-full w-full">
+          <img
+            src={`${API_BASE}/api/photos/${photo.id}/thumbnail`}
+            alt={photo.filePath.split("/").pop() ?? photo.id}
+            loading={priority ? "eager" : "lazy"}
+            className={cn("size-full object-cover")}
+            onError={handleError}
+          />
+          {(photo.mediaType ?? "image") === "video" && (
+            <span className="absolute right-2 top-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">
+              <Play className="size-3" />
+              {formatDuration(photo.durationSec ?? 0)}
+            </span>
+          )}
+        </div>
       ) : hasError ? (
         <div
           className="flex flex-col items-center justify-center gap-1 size-full text-muted-foreground"

@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { ApiResponse, DailyPick } from "@relight/shared";
+import type { DailyPick } from "@relight/shared";
+import { Play } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type State =
@@ -104,6 +105,14 @@ export function DailyHero() {
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             照片不可用
+          </div>
+        )}
+        {/* 视频 overlay：大尺寸圆形 ▶ 按钮（不 inline 播放，避免首页加载视频） */}
+        {pick.photo && (pick.photo.mediaType ?? "image") === "video" && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="flex size-20 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm">
+              <Play className="size-10 fill-white text-white" />
+            </div>
           </div>
         )}
         {/* 评分标签 */}
