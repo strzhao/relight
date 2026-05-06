@@ -20,6 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Node.js ≥ 20，pnpm ≥ 10
 - Redis（BullMQ 必需）
+- ffmpeg ≥ 4.0（macOS: `brew install ffmpeg`）— 视频缩略图、关键帧抽取必需；缺失时视频走"占位降级"路径
+- Whisper（可选）— 视频字幕转录，默认指向 `/Users/stringzhao/workspace/martin/`，可通过 `WHISPER_PYTHON` / `WHISPER_SCRIPT` env 覆盖；未启用时视频分析跳过转录
 - 关键环境变量（见 `.env.example`）：`STORAGE_ROOT`（照片根目录）、`REDIS_URL`、`DATABASE_PATH`、`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_VISION_MODEL`。AI 默认指向本地 `http://127.0.0.1:8001/v1`（qwen 兼容服务）
 
 ## 常用命令
@@ -41,6 +43,7 @@ pnpm --filter @relight/backend dev         # 启动 API (tsx watch src/index.ts)
 pnpm --filter @relight/backend workers     # 启动 Worker 进程（独立于 API，处理 BullMQ 队列）
 pnpm --filter @relight/backend build       # tsup 打包
 pnpm --filter @relight/backend start       # 跑生产构建产物
+pnpm --filter @relight/backend tsx src/cli/backfill-media-type.ts  # 历史视频数据回填 mediaType / durationSec
 
 # 前端专属
 pnpm --filter @relight/web dev             # 启动前端 (next dev --turbopack -p 3001)
@@ -135,7 +138,8 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                            入队 analyze-photo job
                                     ↓
-                        读文件 → base64 → AI 视觉模型
+        图片: 读文件 → base64 → AI 视觉模型
+        视频: ffmpeg 抽帧（sprite）+ Whisper 转录（可选）→ 视频专属 prompt → AI 视觉模型
                                     ↓
                    解析 JSON → upsert tags / photoTags / photoAnalyses
                                     ↓

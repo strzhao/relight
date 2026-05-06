@@ -1,0 +1,4 @@
+转录摘要: {transcript_excerpt}
+视频节奏: {video_pacing}
+
+请基于以上信息和画面为这段视频写一段怀旧叙事，输出 JSON。

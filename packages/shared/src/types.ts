@@ -9,7 +9,10 @@ export interface Tag {
   createdAt: string;
 }
 
-/** 照片 */
+/** 媒体类型 */
+export type MediaType = "image" | "video";
+
+/** 照片（兼容图片和视频） */
 export interface Photo {
   id: string;
   storageSourceId: string;
@@ -21,6 +24,11 @@ export interface Photo {
   thumbnailPath: string | null;
   takenAt: string | null;
   createdAt: string;
+  // 视频支持：DB 层面 NOT NULL DEFAULT 'image'，TS 层面可选以保持向后兼容（缺省视为 'image'）
+  mediaType?: MediaType;
+  durationSec?: number | null;
+  videoCodec?: string | null;
+  videoFps?: number | null;
   tags?: PhotoTag[];
   analyses?: PhotoAnalysis[];
 }
@@ -77,6 +85,11 @@ export interface PhotoAnalysis {
   promptVersion?: string | null;
   rawResponse: string;
   processedAt: string;
+  // 视频专属字段（图片分析时为 NULL）
+  transcript?: string | null;
+  transcriptSegments?: { start: number; end: number; text: string }[] | null;
+  videoPacing?: string | null;
+  motionScore?: number | null;
 }
 
 /** 每日精选 */
@@ -374,6 +387,8 @@ export interface UnifiedPhotoItem {
   thumbnailPath: string | null;
   takenAt: string | null;
   createdAt: string;
+  mediaType?: MediaType;
+  durationSec?: number | null;
   latestAnalysis: {
     id: string;
     aiModel: string;

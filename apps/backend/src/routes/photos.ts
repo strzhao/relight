@@ -1,5 +1,7 @@
+import { createReadStream, statSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { analyzePhotosSchema, photoQuerySchema } from "@relight/shared";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -7,6 +9,18 @@ import { db, schema } from "../db";
 import { analyzeQueue } from "../jobs/queues";
 import { convertHeicToJpeg, isHeicBuffer } from "../lib/heic";
 import { createStorageAdapter } from "../storage";
+
+/** 把秒数（含小数）格式化为 WebVTT 时间戳 HH:MM:SS.mmm */
+function secondsToVtt(s: number): string {
+  const safe = Math.max(0, s);
+  const totalSeconds = Math.floor(safe);
+  const ms = Math.round((safe - totalSeconds) * 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const sec = totalSeconds % 60;
+  const pad = (n: number, w = 2) => n.toString().padStart(w, "0");
+  return `${pad(h)}:${pad(m)}:${pad(sec)}.${pad(ms, 3)}`;
+}
 
 export const photosRouter = new Hono()
   /** 照片列表（分页 + 过滤 + 排序） */
@@ -252,6 +266,112 @@ export const photosRouter = new Hono()
         "Cache-Control": "public, max-age=300",
       });
     }
+  })
+
+  /** 原始流（支持 Range，视频播放用） */
+  .get("/:id/raw", async (c) => {
+    const id = c.req.param("id");
+
+    const photos = await db
+      .select({
+        filePath: schema.photos.filePath,
+        rootPath: schema.storageSources.rootPath,
+        storageType: schema.storageSources.type,
+      })
+      .from(schema.photos)
+      .innerJoin(schema.storageSources, eq(schema.photos.storageSourceId, schema.storageSources.id))
+      .where(eq(schema.photos.id, id));
+
+    const photo = photos[0];
+    if (!photo) {
+      return c.json({ success: false, error: "照片不存在" }, 404);
+    }
+
+    const fullPath = path.resolve(photo.rootPath, photo.filePath);
+
+    let total: number;
+    try {
+      total = statSync(fullPath).size;
+    } catch {
+      return c.json({ success: false, error: "文件不存在" }, 404);
+    }
+
+    const adapter = createStorageAdapter(photo.storageType);
+    const contentType = adapter.getMimeType(photo.filePath);
+
+    const rangeHeader = c.req.header("Range") ?? c.req.header("range");
+
+    if (rangeHeader) {
+      // 解析 "bytes=START-END"
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+      if (match) {
+        const startStr = match[1] ?? "";
+        const endStr = match[2] ?? "";
+        const start = startStr === "" ? 0 : Number.parseInt(startStr, 10);
+        const end = endStr === "" ? total - 1 : Number.parseInt(endStr, 10);
+        if (
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          start >= 0 &&
+          end >= start &&
+          end < total
+        ) {
+          const chunkSize = end - start + 1;
+          const stream = createReadStream(fullPath, { start, end });
+          const webStream = Readable.toWeb(stream) as ReadableStream;
+          c.header("Content-Type", contentType);
+          c.header("Accept-Ranges", "bytes");
+          c.header("Content-Range", `bytes ${start}-${end}/${total}`);
+          c.header("Content-Length", String(chunkSize));
+          c.status(206);
+          return c.body(webStream);
+        }
+      }
+    }
+
+    // 无 Range（或不合法）→ 200 全文件流
+    const stream = createReadStream(fullPath);
+    const webStream = Readable.toWeb(stream) as ReadableStream;
+    c.header("Content-Type", contentType);
+    c.header("Accept-Ranges", "bytes");
+    c.header("Content-Length", String(total));
+    return c.body(webStream);
+  })
+
+  /** 字幕（WebVTT），从 photoAnalyses.transcriptSegments 转换 */
+  .get("/:id/subtitles.vtt", async (c) => {
+    const id = c.req.param("id");
+
+    const photos = await db
+      .select({ id: schema.photos.id })
+      .from(schema.photos)
+      .where(eq(schema.photos.id, id));
+
+    if (!photos[0]) {
+      return c.json({ success: false, error: "照片不存在" }, 404);
+    }
+
+    const analyses = await db
+      .select({ transcriptSegments: schema.photoAnalyses.transcriptSegments })
+      .from(schema.photoAnalyses)
+      .where(eq(schema.photoAnalyses.photoId, id));
+
+    const segments = analyses[0]?.transcriptSegments ?? null;
+
+    if (!segments || segments.length === 0) {
+      return c.body("WEBVTT\n\n", 200, {
+        "Content-Type": "text/vtt; charset=utf-8",
+      });
+    }
+
+    const cues = segments
+      .map((seg) => `${secondsToVtt(seg.start)} --> ${secondsToVtt(seg.end)}\n${seg.text}`)
+      .join("\n\n");
+    const body = `WEBVTT\n\n${cues}\n`;
+
+    return c.body(body, 200, {
+      "Content-Type": "text/vtt; charset=utf-8",
+    });
   })
 
   /** 批量触发 AI 分析 */

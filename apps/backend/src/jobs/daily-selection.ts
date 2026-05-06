@@ -81,8 +81,12 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       const emotionalSummary = a.emotionalAnalysis
         ? `${(a.emotionalAnalysis as Record<string, unknown>).primary || "未知"} / ${(a.emotionalAnalysis as Record<string, unknown>).secondary || "未知"}`
         : "未知";
+      const mt =
+        (c.photo.mediaType ?? "image") === "video"
+          ? `[视频 ${Math.round(c.photo.durationSec ?? 0)} 秒]`
+          : "[图片]";
       return [
-        `[${i}] 美学评分: ${a.aestheticScore ?? "N/A"}`,
+        `[${i}] ${mt} 美学评分: ${a.aestheticScore ?? "N/A"}`,
         `    情感: ${emotionalSummary}`,
         `    标签: ${Array.isArray(a.tags) ? (a.tags as { name: string }[]).map((t) => t.name).join("、") : "无"}`,
         `    描述: ${a.narrative ?? "无描述"}`,
@@ -133,7 +137,19 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   // 3. 阶段 2: 视觉模型怀旧叙事（带 fallback）
   job.log("阶段 2: 视觉模型生成怀旧叙事...");
 
-  const narratePrompts = await loadPrompts("v2", "daily/narrate");
+  const isVideo = (winner.photo.mediaType ?? "image") === "video";
+  const promptPath = isVideo ? "daily/narrate-video" : "daily/narrate";
+  const narratePrompts = await loadPrompts("v2", promptPath);
+
+  // 视频路径：替换 user prompt 中的占位符（transcript_excerpt / video_pacing）
+  let userText = narratePrompts.user;
+  if (isVideo) {
+    const transcriptExcerpt = (winner.analysis.transcript ?? "").slice(0, 200) || "（无转录）";
+    const videoPacing = winner.analysis.videoPacing ?? "未知";
+    userText = userText
+      .replace("{transcript_excerpt}", transcriptExcerpt)
+      .replace("{video_pacing}", videoPacing);
+  }
 
   let narrateResult: {
     title: string;
@@ -142,25 +158,39 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   };
 
   try {
-    // 读取胜者照片文件
+    // 读取胜者媒体文件
     const adapter = createStorageAdapter(winner.sourceType);
     const fullPath = path.join(winner.sourceRootPath, winner.photo.filePath);
-    let buffer = await adapter.getFileBuffer(fullPath);
+    let buffer: Buffer;
     const mimeType = "image/jpeg";
 
-    // 按 magic byte 判断 HEIC（兼容扩展名错配，如 iOS 备份的 .JPEG 实为 HEIC）
-    const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
-    if (isHeicBuffer(buffer)) {
-      buffer = await convertHeicToJpeg(buffer, {
-        maxWidth: 2048,
-        maxHeight: 2048,
-        quality: 85,
-      });
-    } else {
-      buffer = await sharp(buffer)
-        .resize(2048, 2048, { fit: "inside" })
+    if (isVideo) {
+      // 视频：读取 cover 缩略图（避免读取整个视频文件 OOM + sharp 不支持视频解码）
+      if (!winner.photo.thumbnailPath) {
+        throw new Error("视频无 cover 缩略图");
+      }
+      const fs = await import("node:fs/promises");
+      const coverBuffer = await fs.readFile(winner.photo.thumbnailPath);
+      buffer = await sharp(coverBuffer)
+        .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 85 })
         .toBuffer();
+    } else {
+      buffer = await adapter.getFileBuffer(fullPath);
+      // 按 magic byte 判断 HEIC（兼容扩展名错配，如 iOS 备份的 .JPEG 实为 HEIC）
+      const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+      if (isHeicBuffer(buffer)) {
+        buffer = await convertHeicToJpeg(buffer, {
+          maxWidth: 2048,
+          maxHeight: 2048,
+          quality: 85,
+        });
+      } else {
+        buffer = await sharp(buffer)
+          .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+      }
     }
 
     const base64 = buffer.toString("base64");
@@ -170,7 +200,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       base64,
       mimeType,
       narratePrompts.system,
-      narratePrompts.user,
+      userText,
     );
 
     job.log(`叙事响应长度: ${narrateRawResponse.length} chars`);
