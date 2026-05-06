@@ -40,6 +40,7 @@ export const API_ROUTES = {
     list: "/api/queues",
     events: (name: string) => `/api/queues/${name}/events`,
     job: (name: string, jobId: string) => `/api/queues/${name}/jobs/${jobId}`,
+    retryFailed: (name: string) => `/api/queues/${name}/retry-failed`,
   },
   storage: {
     list: "/api/storage",

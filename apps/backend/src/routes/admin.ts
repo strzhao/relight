@@ -5,6 +5,7 @@ import { analyzeBatchSchema } from "@relight/shared";
 import { type SQL, and, count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import Redis from "ioredis";
 import { db, schema } from "../db";
 import { analyzeQueue, dailyQueue, scanQueue } from "../jobs/queues";
 import { config } from "../lib/config";
@@ -279,13 +280,57 @@ export const adminRouter = new Hono()
       }
     }
 
+    // 5. Worker 进程检查（从 Redis 读 meta key）
+    try {
+      const workerRedis = new Redis(config.redisUrl, {
+        maxRetriesPerRequest: 1,
+        connectTimeout: 3000,
+        commandTimeout: 3000,
+        lazyConnect: true,
+      });
+      await workerRedis.connect();
+      try {
+        const workerMetaKey = `${config.bullmqPrefix}:worker:meta`;
+        const metaRaw = await workerRedis.get(workerMetaKey);
+        if (metaRaw) {
+          const meta = JSON.parse(metaRaw) as {
+            commit: string;
+            commitTime: string;
+            startedAt: string;
+            pid: number;
+            hostname: string;
+          };
+          const uptimeSec = Math.floor((Date.now() - new Date(meta.startedAt).getTime()) / 1000);
+          components.push({
+            component: "worker",
+            status: "healthy",
+            message: `commit ${meta.commit} (${meta.commitTime.slice(0, 10)}), pid ${meta.pid}, uptime ${uptimeSec}s`,
+          });
+        } else {
+          components.push({
+            component: "worker",
+            status: "degraded",
+            message: "未检测到 worker 进程",
+          });
+        }
+      } finally {
+        await workerRedis.quit();
+      }
+    } catch {
+      components.push({
+        component: "worker",
+        status: "degraded",
+        message: "无法连接 Redis 检查 worker 状态",
+      });
+    }
+
     const overall = components.some((c) => c.status === "unhealthy")
       ? "unhealthy"
       : components.some((c) => c.status === "degraded")
         ? "degraded"
         : "healthy";
 
-    // 5. System 信息（Node.js 内置 API）
+    // 6. System 信息（Node.js 内置 API）
     const memUsage = process.memoryUsage();
     const system = {
       cpu: {
@@ -309,7 +354,7 @@ export const adminRouter = new Hono()
       },
     };
 
-    // 6. Disk 信息（嵌套 try-catch）
+    // 7. Disk 信息（嵌套 try-catch）
     let disk: {
       dbFile: { path: string; sizeBytes: number };
       freeSpaceBytes: number | null;

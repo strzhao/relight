@@ -119,6 +119,11 @@ export const api = {
     list: () => fetchApi<ApiResponse<QueueInfo[]>>(API_ROUTES.queues.list),
     job: (name: string, jobId: string) =>
       fetchApi<ApiResponse<QueueJobDetail>>(API_ROUTES.queues.job(name, jobId)),
+    retryFailed: (name: string) =>
+      fetchApi<ApiResponse<{ retried: number; failed: number; total: number }>>(
+        API_ROUTES.queues.retryFailed(name),
+        { method: "POST" },
+      ),
   },
 
   storage: {

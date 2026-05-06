@@ -13,6 +13,7 @@ import { config } from "../lib/config";
 import { detectVideoCapability } from "../lib/video/ffmpeg";
 import { analyzeVideoForAI } from "../lib/video/index";
 import { createStorageAdapter } from "../storage";
+import { formatErrorPlaceholder, isDeterministicFormatError } from "./format-errors";
 
 /** AI 视觉模型支持的图片格式（含需转换后支持的格式） */
 const AI_SUPPORTED_EXTENSIONS = new Set([
@@ -113,34 +114,72 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
   let buffer: Buffer;
   let mimeType: string;
 
-  if (RAW_EXTENSIONS.has(ext)) {
-    job.log("DNG/RAW 文件，使用 dcraw 提取 JPEG 预览");
-    buffer = await extractRawPreview(photo.filePath);
-    const sharp = await import("sharp");
-    buffer = await sharp
-      .default(buffer)
-      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 75 })
-      .toBuffer();
-    mimeType = "image/jpeg";
-  } else {
-    buffer = await adapter.getFileBuffer(photo.filePath);
-    const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
-    if (isHeicBuffer(buffer)) {
-      job.log("检测到 HEIC 内容（按 magic byte），转换为 JPEG 后发送 AI 分析");
-      buffer = await convertHeicToJpeg(buffer, {
-        maxWidth: 1024,
-        maxHeight: 1024,
-        quality: 75,
-      });
-    } else {
-      job.log("缩放图片到 1024px 以减少 AI payload");
-      buffer = await sharp(buffer)
+  try {
+    if (RAW_EXTENSIONS.has(ext)) {
+      job.log("DNG/RAW 文件，使用 dcraw 提取 JPEG 预览");
+      buffer = await extractRawPreview(photo.filePath);
+      const sharp = await import("sharp");
+      buffer = await sharp
+        .default(buffer)
         .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 75 })
         .toBuffer();
+      mimeType = "image/jpeg";
+    } else {
+      buffer = await adapter.getFileBuffer(photo.filePath);
+      const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+      if (isHeicBuffer(buffer)) {
+        job.log("检测到 HEIC 内容（按 magic byte），转换为 JPEG 后发送 AI 分析");
+        buffer = await convertHeicToJpeg(buffer, {
+          maxWidth: 1024,
+          maxHeight: 1024,
+          quality: 75,
+        });
+      } else {
+        job.log("缩放图片到 1024px 以减少 AI payload");
+        buffer = await sharp(buffer)
+          .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 75 })
+          .toBuffer();
+      }
+      mimeType = "image/jpeg";
     }
-    mimeType = "image/jpeg";
+  } catch (err) {
+    if (isDeterministicFormatError(err)) {
+      // 确定性格式错误：写占位记录，不触发重试
+      const placeholder = formatErrorPlaceholder(err as Error);
+      job.log(`格式错误，写入占位记录: ${(err as Error).message}`);
+
+      const existingAnalysis = await db
+        .select({ id: schema.photoAnalyses.id })
+        .from(schema.photoAnalyses)
+        .where(eq(schema.photoAnalyses.photoId, photoId));
+
+      const now = new Date().toISOString();
+      if (existingAnalysis.length === 0) {
+        await db.insert(schema.photoAnalyses).values({
+          id: crypto.randomUUID(),
+          photoId,
+          aiModel: placeholder.aiModel,
+          narrative: placeholder.narrative,
+          rawResponse: placeholder.rawResponse,
+          processedAt: now,
+        });
+      } else {
+        await db
+          .update(schema.photoAnalyses)
+          .set({
+            aiModel: placeholder.aiModel,
+            narrative: placeholder.narrative,
+            rawResponse: placeholder.rawResponse,
+            processedAt: now,
+          })
+          .where(eq(schema.photoAnalyses.photoId, photoId));
+      }
+      return;
+    }
+    // 非格式错误（如 EBUSY、ECONNREFUSED）：抛出，让 BullMQ 重试
+    throw err;
   }
 
   const base64 = buffer.toString("base64");

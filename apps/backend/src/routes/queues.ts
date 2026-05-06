@@ -283,6 +283,43 @@ export const queuesRouter = new Hono()
     });
   })
 
+  /** POST /api/queues/:name/retry-failed — 重试所有失败作业 */
+  .post("/:name/retry-failed", async (c) => {
+    const name = c.req.param("name");
+    const cfg = getConfig(name);
+
+    if (!cfg) {
+      return c.json({ success: false, error: `未知队列: ${name}` }, 404);
+    }
+
+    try {
+      // 获取所有 failed 任务列表，计算 total
+      const failed =
+        typeof cfg.queue.getJobs === "function"
+          ? await cfg.queue.getJobs(["failed"] as Parameters<typeof cfg.queue.getJobs>[0], 0, 10000)
+          : [];
+      let ok = 0;
+      let err = 0;
+      for (const job of failed) {
+        try {
+          await job.retry();
+          ok++;
+        } catch {
+          err++;
+        }
+      }
+      return c.json({
+        success: true,
+        data: { retried: ok, failed: err, total: failed.length },
+      });
+    } catch (error) {
+      return c.json(
+        { success: false, error: error instanceof Error ? error.message : "未知错误" },
+        500,
+      );
+    }
+  })
+
   /** GET /api/queues/:name/jobs/:jobId — 单个作业详情 */
   .get("/:name/jobs/:jobId", async (c) => {
     const name = c.req.param("name");

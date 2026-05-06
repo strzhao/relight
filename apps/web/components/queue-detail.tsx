@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueueSSE } from "@/hooks/use-queue-sse";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { QueueJobSummary, QueueSnapshot, ScanProgress } from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
@@ -14,6 +15,21 @@ import { Skeleton } from "./ui/skeleton";
 export function QueueDetail() {
   const { name } = useParams<{ name: string }>();
   const { snapshot, error, reconnect } = useQueueSSE(name ?? "");
+
+  const handleRetryFailed = useCallback(async () => {
+    if (!name || !snapshot) return;
+    const failedCount = snapshot.counts.failed;
+    if (failedCount === 0) return;
+    if (!window.confirm(`确认重试 ${failedCount} 个失败任务？`)) return;
+    try {
+      const res = await api.queues.retryFailed(name);
+      if (res.success) {
+        window.alert(`已重试 ${res.data.retried} 个任务`);
+      }
+    } catch (err) {
+      window.alert(`重试失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [name, snapshot]);
 
   if (!snapshot && !error) {
     return <QueueDetailSkeleton />;
@@ -34,15 +50,26 @@ export function QueueDetail() {
           />
           <span className="text-xs text-muted-foreground">{error ? "连接失败" : "实时连接"}</span>
         </div>
-        {error && (
-          <button
-            type="button"
-            onClick={reconnect}
-            className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground"
-          >
-            重连
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {snapshot && snapshot.counts.failed > 0 && (
+            <button
+              type="button"
+              onClick={handleRetryFailed}
+              className="rounded-md bg-destructive px-3 py-1 text-xs text-destructive-foreground"
+            >
+              重试全部失败 ({snapshot.counts.failed})
+            </button>
+          )}
+          {error && (
+            <button
+              type="button"
+              onClick={reconnect}
+              className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground"
+            >
+              重连
+            </button>
+          )}
+        </div>
       </div>
 
       {snapshot && (

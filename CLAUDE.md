@@ -51,6 +51,22 @@ pnpm --filter @relight/web dev             # 启动前端 (next dev --turbopack 
 
 **注意**：`pnpm dev` 启动的是 API + Web，不会启 Worker。要让扫描/分析/精选任务真正跑起来，需要单独跑 `pnpm --filter @relight/backend workers`。
 
+## Worker 进程管理
+
+Worker 进程负责处理 BullMQ 队列（扫描/分析/精选），独立于 API 服务运行。日常通过 PM2 管理：
+
+```bash
+pnpm workers:start    # 启动 worker（由 PM2 守护，崩溃自动重启）
+pnpm workers:stop     # 停止 worker
+pnpm workers:reload   # 零停机热重载（代码改动后使用）
+pnpm workers:logs     # 查看最近 100 行日志
+pnpm workers:status   # 查看进程状态
+```
+
+配置文件：`ecosystem.config.cjs`（仓库根），使用 `--import tsx` 直接运行 TypeScript 源码，无需构建。
+
+前台调试（不推荐生产）：`pnpm --filter @relight/backend workers`
+
 ## Worktree 并行开发
 
 用 `claude -w <name>` 创建 worktree 后，string-claude-code-plugin 会自动 install 依赖并触发本工程的 `postinstall` 钩子，自动生成 worktree 专属配置：

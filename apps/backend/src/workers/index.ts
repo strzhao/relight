@@ -1,12 +1,45 @@
+import * as os from "node:os";
 import { QueueEvents, Worker } from "bullmq";
 import { eq, sql } from "drizzle-orm";
+import Redis from "ioredis";
 import { db, schema } from "../db";
 import { analyzePhotoWorker } from "../jobs/analyze-photo";
 import { dailySelectionWorker } from "../jobs/daily-selection";
 import { scanStorageWorker } from "../jobs/scan-storage";
+import { buildInfo } from "../lib/build-info";
 import { config } from "../lib/config";
 
 const connection = { url: config.redisUrl };
+
+// === Worker 元数据心跳 ===
+const workerMetaKey = `${config.bullmqPrefix}:worker:meta`;
+const workerStartedAt = new Date().toISOString();
+
+/** ioredis 实例，仅用于写入 worker meta key */
+const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null });
+
+async function writeWorkerMeta(): Promise<void> {
+  const meta = JSON.stringify({
+    commit: buildInfo.commit,
+    commitTime: buildInfo.commitTime,
+    startedAt: workerStartedAt,
+    pid: process.pid,
+    hostname: os.hostname(),
+  });
+  await redis.set(workerMetaKey, meta, "EX", 120);
+}
+
+// 启动心跳（每 60s 续期，TTL 120s）
+const heartbeatTimer = setInterval(() => {
+  writeWorkerMeta().catch((err) => {
+    console.error("[workers] 心跳写入失败:", err);
+  });
+}, 60_000);
+
+// 初始 meta 写入（fire-and-forget — Redis 不可用时不阻塞模块加载）
+writeWorkerMeta().catch((err) => {
+  console.error("[workers] 初始 meta 写入失败:", err);
+});
 
 // 创建三个 Worker 实例
 const scanWorker = new Worker("scan-storage", scanStorageWorker, {
@@ -85,7 +118,10 @@ analyzeEvents.on("failed", async ({ jobId }) => {
 // 优雅关闭
 async function shutdown(signal: string): Promise<void> {
   console.log(`[workers] 收到 ${signal} 信号，正在关闭 Worker...`);
+  clearInterval(heartbeatTimer);
   try {
+    await redis.del(workerMetaKey);
+    await redis.quit();
     await Promise.all([
       scanWorker.close(false),
       analyzeWorker.close(false),
@@ -125,5 +161,7 @@ dailyWorker.on("failed", (job, err) => {
   console.error(`[daily-selection] 任务失败: ${job?.id}`, err.message);
 });
 
-console.log("[workers] BullMQ Worker 进程已启动");
+console.log(
+  `[workers] BullMQ Worker 进程已启动 commit=${buildInfo.commit} commitTime=${buildInfo.commitTime} pid=${process.pid}`,
+);
 console.log(`[workers] Redis: ${config.redisUrl}`);
