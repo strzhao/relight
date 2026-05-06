@@ -1,0 +1,63 @@
+project:
+  name: mac-wallpaper-app
+  goal: "新开发一个 mac 照片壁纸 APP，照片壁纸用的就是今日精选里的内容，注意图片和视频可能都会有"
+  created_at: "2026-05-07"
+  design_file: design.md
+
+tasks:
+  - id: 001-mac-xcode-scaffold
+    title: "Xcode 工程脚手架 + monorepo 集成"
+    complexity: S
+    depends_on: []
+    status: pending
+    brief: tasks/001-mac-xcode-scaffold.md
+
+  - id: 002-relight-api-client
+    title: "Swift RelightClient（拉 daily + 下载 original + 本地缓存）"
+    complexity: M
+    depends_on:
+      - 001-mac-xcode-scaffold
+    status: pending
+    brief: tasks/002-relight-api-client.md
+
+  - id: 003-image-wallpaper-engine
+    title: "图片壁纸引擎（多显示器 setDesktopImageURL）"
+    complexity: M
+    depends_on:
+      - 002-relight-api-client
+    status: pending
+    brief: tasks/003-image-wallpaper-engine.md
+
+  - id: 004-video-to-dynamic-heic
+    title: "视频→动态 .heic 引擎（AVAssetImageGenerator + ImageIO + XMP）"
+    complexity: L
+    depends_on:
+      - 002-relight-api-client
+    status: pending
+    brief: tasks/004-video-to-dynamic-heic.md
+
+  - id: 005-menubar-and-settings-ui
+    title: "NSStatusItem 菜单栏 + SwiftUI 设置面板"
+    complexity: M
+    depends_on:
+      - 001-mac-xcode-scaffold
+    status: pending
+    brief: tasks/005-menubar-and-settings-ui.md
+
+  - id: 006-coordinator-and-autostart
+    title: "调度协调器 + Timer + SMAppService 自启动"
+    complexity: S
+    depends_on:
+      - 003-image-wallpaper-engine
+      - 004-video-to-dynamic-heic
+      - 005-menubar-and-settings-ui
+    status: pending
+    brief: tasks/006-coordinator-and-autostart.md
+
+  - id: 007-package-readme
+    title: "xcodebuild archive 脚本 + README 使用说明"
+    complexity: S
+    depends_on:
+      - 006-coordinator-and-autostart
+    status: pending
+    brief: tasks/007-package-readme.md
