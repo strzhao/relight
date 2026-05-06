@@ -4,8 +4,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { DailyPick, Photo } from "@relight/shared";
-import { Play } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Volume2, VolumeX } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 type State =
   | { status: "loading" }
@@ -118,26 +118,24 @@ function HeroContent({ pick }: { pick: DailyPick }) {
   const isPortrait = photo ? photo.height > photo.width * 1.05 : false;
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-y-6 px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:justify-center lg:gap-x-14 lg:px-10 lg:py-7">
-      {/* Photo — sized to its intrinsic aspect ratio; flex-shrink lets very wide photos still fit */}
-      <figure className="relative flex min-h-0 items-center justify-center lg:shrink">
+    <section className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-6 px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-14 lg:px-10 lg:py-7">
+      {/* Photo / Video — fits within the available flex cell preserving aspect ratio (no overflow) */}
+      <figure className="relative flex min-h-0 min-w-0 items-center justify-center lg:flex-1">
         {photo ? (
-          <img
-            src={api.thumbnailUrl(pick.photoId)}
-            alt={pick.title}
-            className="h-full max-h-full w-auto max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
-            style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
-          />
+          isVideo ? (
+            <HeroVideo photo={photo} title={pick.title} />
+          ) : (
+            <img
+              // 走原图避免缩略图（800px）被放大到视口高度后发糊
+              src={api.originalUrl(pick.photoId)}
+              alt={pick.title}
+              className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
+              style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
+            />
+          )
         ) : (
           <div className="flex aspect-[4/3] w-full items-center justify-center bg-muted text-muted-foreground">
             照片不可用
-          </div>
-        )}
-        {isVideo && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="flex size-24 items-center justify-center rounded-full bg-foreground/30 text-background backdrop-blur-md">
-              <Play className="size-11 translate-x-0.5 fill-current" />
-            </div>
           </div>
         )}
       </figure>
@@ -195,6 +193,56 @@ function HeroContent({ pick }: { pick: DailyPick }) {
         {photo && <MetadataLedger photo={photo} />}
       </div>
     </section>
+  );
+}
+
+function HeroVideo({ photo, title }: { photo: Photo; title: string }) {
+  const [muted, setMuted] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Some iPhone .MOV files are HEVC-encoded and won't decode in Chrome.
+  // Fall back to the still thumbnail so the layout stays intact.
+  if (failed) {
+    return (
+      <img
+        src={api.thumbnailUrl(photo.id)}
+        alt={title}
+        className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
+        style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
+      />
+    );
+  }
+
+  // Wrapper sizes itself as the largest box that fits in the figure while preserving aspect ratio.
+  // This isolates the mute button positioning from the figure's letterboxing area.
+  return (
+    <div
+      className="relative max-h-full max-w-full"
+      style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
+    >
+      <video
+        ref={videoRef}
+        src={api.rawUrl(photo.id)}
+        poster={api.thumbnailUrl(photo.id)}
+        autoPlay
+        loop
+        muted={muted}
+        playsInline
+        preload="metadata"
+        onError={() => setFailed(true)}
+        aria-label={title}
+        className="block h-full w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
+      />
+      <button
+        type="button"
+        onClick={() => setMuted((m) => !m)}
+        aria-label={muted ? "取消静音" : "静音"}
+        className="absolute right-3 bottom-3 flex size-10 items-center justify-center rounded-full bg-foreground/35 text-background backdrop-blur-md transition-all duration-200 hover:bg-foreground/55"
+      >
+        {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+      </button>
+    </div>
   );
 }
 

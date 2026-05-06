@@ -68,6 +68,12 @@ export const api = {
   /** Build the full thumbnail URL for a photo */
   thumbnailUrl: (id: string) => `${BASE_URL}${API_ROUTES.photos.thumbnail(id)}`,
 
+  /** Build the full-resolution original URL for a photo (HEIC is server-side decoded to JPEG) */
+  originalUrl: (id: string) => `${BASE_URL}${API_ROUTES.photos.original(id)}`,
+
+  /** Build the raw streaming URL — supports HTTP Range, used for native <video> playback */
+  rawUrl: (id: string) => `${BASE_URL}${API_ROUTES.photos.raw(id)}`,
+
   daily: {
     today: () => fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.today),
     list: (params?: URLSearchParams) =>
