@@ -1,7 +1,7 @@
 ---
 active: true
-phase: "qa"
-gate: "review-accept"
+phase: "done"
+gate: ""
 iteration: 2
 max_iterations: 30
 max_retries: 3
@@ -11,7 +11,7 @@ plan_mode: ""
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260506-4-都一起优化，确实都"
 session_id: 695bf179-40cb-438b-81ad-406f2e38bf4a
 started_at: "2026-05-05T16:27:36Z"
@@ -301,3 +301,6 @@ curl -X POST /api/analyze -d '{"photoIds":["$PID"]}'
 - [2026-05-07T00:13:00Z] qa 轮次 1.5：场景 3（格式错误占位）失败 — sharp `Input buffer contains unsupported image format` 未在匹配清单
 - [2026-05-07T00:14:00Z] auto-fix 增量：format-errors.ts 增补 4 个 sharp 错误模式（含 VipsJpeg），红队 24 case + 单测 9 case 全过
 - [2026-05-07T00:18:00Z] qa 轮次 2：Tier 0/1 全过（baseline diff 0），4 个真实场景全过；Wave 2 简化评审通过；2 个蓝队设计偏差评审接受；进入 review-accept 门
+- [2026-05-07T00:30:00Z] 用户 approve；merge 阶段：commit-agent 提交 6da89f6 (feat) + b66b5fa (chore version 0.4.0→0.5.0)，pre-commit hook 通过
+- [2026-05-07T00:32:00Z] 知识沉淀：写入 1 条 decisions（worker 透明化原则）+ 2 条 patterns（顶层 await 测试陷阱、PM2 reload + retry-failed 协作模式）+ index.md 同步；commit 单独提交
+- [2026-05-07T00:33:00Z] phase: done — 全流程闭环完成
