@@ -213,3 +213,23 @@
 **Trade-offs**: 端口算法重复实现是技术债（如果插件改算法需同步），但插件算法 30 年内不太可能动；prefix 用分支名可读但需归一化（`/` → `-`）。
 
 **Evidence**: 实测 6/6 真实场景通过——主仓库 :3000 + worktree :4363/:4014 三端口共存；Redis 三个独立 prefix `bull` / `bull-main` / `bull-worktree-...`，主仓库 36927 条任务 keys 不被 worktree workers 触碰。Commit f8dc0df。
+
+### [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层
+
+<!-- tags: worker, supervisor, observability, deployment, ops, design -->
+
+**Background**: 一次 HEIC 修复事故暴露：常驻 worker（PID 52072）跑了 10 小时旧代码 — 修复 commit (76d244c) 早已合入但 worker 进程没重启加载新代码，导致用户手动 retry 仍失败。运维侧没有任何机制能 1 秒看出"代码版本是不是最新的"。这是分布式系统的"幽灵旧代码"问题。
+
+**Choice**: worker 启动时通过 ioredis 写入 `${prefix}:worker:meta` key（TTL 120s + 60s 心跳续期），value 包含 `{ commit, commitTime, startedAt, pid, hostname }`。`/api/admin/health` 路由新增 `worker` 组件读取该 key，前端可一眼看到"worker 跑的是 commit abc123 (2026-05-06)，uptime 5m"。配合 PM2 supervisor 实现"代码改动 → `pnpm workers:reload` → health 立即反映新 commit"的闭环。
+
+**Alternatives rejected**:
+- worker 起 HTTP /health 端口暴露：multi-process 部署端口冲突；不需要给外部访问，只给 API 进程读
+- worker 写 SQLite 表：需要 schema 迁移；Redis 已有现成连接
+- BullMQ 自带 Queue.getWorkers()：返回 BullMQ 内部 worker 元数据但**不**包含 git commit
+- 不设 TTL，shutdown() 主动 DEL：SIGKILL 场景（PM2 kill_timeout 后强杀）下 shutdown() 不执行 → key 永久残留 → 显示"幽灵 healthy"
+
+**Trade-offs**: TTL+心跳引入 60s 检测延迟（worker 真挂了 60-120s 后 key 才过期）。可接受，因为：
+1. PM2 SIGTERM 触发的 graceful shutdown 会立即 DEL key，常规重启 0 延迟
+2. 真崩溃场景下，多 60s 检测延迟比"幽灵 healthy"风险小得多
+
+**Evidence**: 设计 + 实施记录在 `.autopilot/requirements/20260506-4-都一起优化，确实都/state.md`，commit 6da89f6。配套：失败 job 也加了批量 retry 按钮（POST /api/queues/:name/retry-failed + UI），这是 worker 透明化之外另一个防"运维链路黑盒"的工具。两个能力组合：观察"worker 跑的什么代码" + "失败任务一键重试"。

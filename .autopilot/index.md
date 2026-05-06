@@ -13,6 +13,7 @@
 - [2026-05-05] 每日精选采用两阶段 AI 流水线 — 文本评选 + 视觉叙事，最小化图片 token 成本 | tags: ai, daily-selection, cost-optimization, two-stage-pipeline, architecture | → decisions.md
 - [2026-05-05] worktree 环境采用 sync 脚本 + postinstall 钩子，端口算法与插件字节级一致 | tags: worktree, parallel-development, postinstall, port-allocation, bullmq-prefix, design | → decisions.md
 - [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback | tags: database, migration, backfill, fallback, sql, design | → decisions.md
+- [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
 - [2026-05-06] DB file_path 可能是绝对路径时用 path.resolve 而非 path.join | tags: path, file-system, nas, smb, storage, route, bug | → patterns.md
@@ -41,3 +42,5 @@
 - [2026-05-05] Next.js dev server 不读 .env.local 的 PORT，必须靠包装脚本预注入 | tags: nextjs, dev-server, env-loading, port-binding, dotenv | → patterns.md
 - [2026-05-05] pnpm workspace 子进程加载子包依赖时 cwd 必须在子包目录 | tags: pnpm, workspace, dotenv, child-process, node-modules-resolution | → patterns.md
 - [2026-05-05] worktree 中 e2e 测试需切到不同端口启动 dev server，主仓库进程不会同步代码 | tags: worktree, e2e, playwright, nextjs, dev-server, port | → patterns.md
+- [2026-05-07] ESM 模块顶层 await 阻塞 vitest `await import()` → 测试 5s 超时 | tags: vitest, esm, top-level-await, dynamic-import, redis, ioredis, worker, bug | → patterns.md
+- [2026-05-07] PM2 reload 中断 in-flight job 是预期行为，配 retry-failed 工具是正确处理 | tags: pm2, supervisor, bullmq, worker, kill-timeout, reload, sigkill | → patterns.md
