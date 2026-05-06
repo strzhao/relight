@@ -10,6 +10,13 @@
 		A00000000000000000000020 /* RelightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018; settings = {}; };
 		A00000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000019; settings = {}; };
 		A00000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001A; settings = {}; };
+		A0000000000000000000004B /* Photo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000044; settings = {}; };
+		A0000000000000000000004C /* DailyPick.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000045; settings = {}; };
+		A0000000000000000000004D /* ApiResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000046; settings = {}; };
+		A0000000000000000000004E /* RelightError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000047; settings = {}; };
+		A0000000000000000000004F /* RelightClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000048; settings = {}; };
+		A00000000000000000000050 /* WallpaperCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000049; settings = {}; };
+		A00000000000000000000051 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004A; settings = {}; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,6 +25,13 @@
 		A0000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A0000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0000000000000000000001C /* Relight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Relight.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000044 /* Photo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Photo.swift; sourceTree = "<group>"; };
+		A00000000000000000000045 /* DailyPick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyPick.swift; sourceTree = "<group>"; };
+		A00000000000000000000046 /* ApiResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApiResponse.swift; sourceTree = "<group>"; };
+		A00000000000000000000047 /* RelightError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelightError.swift; sourceTree = "<group>"; };
+		A00000000000000000000048 /* RelightClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelightClient.swift; sourceTree = "<group>"; };
+		A00000000000000000000049 /* WallpaperCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCache.swift; sourceTree = "<group>"; };
+		A0000000000000000000004A /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,8 +68,47 @@
 				A00000000000000000000019 /* ContentView.swift */,
 				A0000000000000000000001A /* Assets.xcassets */,
 				A0000000000000000000001B /* Info.plist */,
+				A00000000000000000000040 /* Models */,
+				A00000000000000000000041 /* Networking */,
+				A00000000000000000000042 /* Storage */,
+				A00000000000000000000043 /* Settings */,
 			);
 			path = Relight;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000040 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000044 /* Photo.swift */,
+				A00000000000000000000045 /* DailyPick.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000041 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000046 /* ApiResponse.swift */,
+				A00000000000000000000047 /* RelightError.swift */,
+				A00000000000000000000048 /* RelightClient.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000042 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000049 /* WallpaperCache.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000043 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000004A /* AppSettings.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -124,6 +177,13 @@
 			files = (
 				A00000000000000000000020 /* RelightApp.swift in Sources */,
 				A00000000000000000000021 /* ContentView.swift in Sources */,
+				A0000000000000000000004B /* Photo.swift in Sources */,
+				A0000000000000000000004C /* DailyPick.swift in Sources */,
+				A0000000000000000000004D /* ApiResponse.swift in Sources */,
+				A0000000000000000000004E /* RelightError.swift in Sources */,
+				A0000000000000000000004F /* RelightClient.swift in Sources */,
+				A00000000000000000000050 /* WallpaperCache.swift in Sources */,
+				A00000000000000000000051 /* AppSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
