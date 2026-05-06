@@ -15,6 +15,9 @@
 - [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback | tags: database, migration, backfill, fallback, sql, design | → decisions.md
 
 ## Patterns
+- [2026-05-06] DB file_path 可能是绝对路径时用 path.resolve 而非 path.join | tags: path, file-system, nas, smb, storage, route, bug | → patterns.md
+- [2026-05-06] BullMQ Job mock 必须含 log/updateProgress 等接口方法 | tags: bullmq, vitest, mock, job, testing, integration | → patterns.md
+- [2026-05-06] 视频 daily-selection 阶段 2 必须读 cover JPEG 而非整视频文件 | tags: video, daily-selection, sharp, oom, cover-frame, ai-vision, performance, design | → patterns.md
 - [2026-05-06] Whisper CLI 必须从 outputDir/<stem>.json 文件读，绝不解析 stdout | tags: whisper, cli, child-process, json, stdout, ai, transcribe, bug | → patterns.md
 - [2026-05-06] worktree symlink + lint-staged stash 失败 → skip-worktree 隐藏虚假 deletion | tags: worktree, lint-staged, husky, git, symlink, stash | → patterns.md
 - [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies | tags: pnpm, native-modules, build | → patterns.md

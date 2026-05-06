@@ -1,3 +1,66 @@
+### [2026-05-06] DB 中 file_path 可能是绝对路径时用 path.resolve 而非 path.join
+
+<!-- tags: path, file-system, nas, smb, storage, route, bug -->
+
+**Scenario**: relight 后端 `/api/photos/:id/raw` 路由首次实现用 `path.join(rootPath, filePath)` 拼接路径，单元测试通过（fixture 用相对路径）。Tier 1.5 真实场景 curl 一个 NAS 上的照片返回 404 "文件不存在"。生产 DB 里 `file_path` 字段实际存的是绝对路径（如 `/Users/.../nas-photos/.../IMG.HEIC`），与 `rootPath`（`/Users/.../nas-photos`）拼接后产生 `/Users/.../nas-photos/Users/.../nas-photos/.../IMG.HEIC` —— 双前缀。
+
+**Lesson**: 当 DB 中 `file_path` 可能存绝对路径（NAS/SMB/外部源历史数据），必须用 `path.resolve(rootPath, filePath)`，它在 filePath 是绝对路径时直接采用 filePath 忽略 rootPath。`path.join` 只做字符串拼接，不区分绝对/相对，会产生坏路径。
+
+**对照已有代码**: `routes/photos.ts:226` 的 `/original` 路由原本就用 `path.resolve`，新增 `/raw` 路由复制粘贴时改成了 `path.join` 是退化；`daily-selection.ts:163` 也用 `path.join`，目前正常工作只是因为视频 winner 直接读 `thumbnailPath`（thumbnailPath 总是绝对路径，path.join 用不上）。所有新增涉及 DB 路径拼接的代码默认用 `path.resolve`。
+
+**Why 这很重要**: 单元测试发现不了——fixture 通常用相对路径或 in-memory 路径，`path.join` 和 `path.resolve` 行为相同。只有 Tier 1.5 真实场景（curl 真实生产 photoId）才会暴露。这是"测试通过但生产挂"的典型场景，强化"必须跑真实场景"的纪律。
+
+### [2026-05-06] BullMQ Job mock 必须含 log/updateProgress 等接口方法
+
+<!-- tags: bullmq, vitest, mock, job, testing, integration -->
+
+**Scenario**: 红队 acceptance test 直接调 `dailySelectionWorker({ data: {}, id: "test" })`，Worker 内部调 `job.log("...")` 报 `TypeError: job.log is not a function`，三个测试全部失败。
+
+**Lesson**: BullMQ Job 接口包含 `log`、`updateProgress`、`updateData`、`getState` 等方法，生产代码常用 `job.log()` 输出步骤日志。直接传 `{ data, id }` 字面量当 Job 是不完整的 mock。建议项目内统一一个 helper：
+
+```ts
+function createMockJob(data: Record<string, unknown> = {}, id = "test") {
+  return {
+    data,
+    id,
+    name: "test-job",
+    log: vi.fn(),
+    updateProgress: vi.fn(),
+  } as any;
+}
+```
+
+放在 `__tests__/` 共享或测试文件顶部。relight 项目已有先例 `apps/backend/src/__tests__/daily-worker.acceptance.test.ts:227` 采用这个模式。
+
+**Why 这很重要**: BullMQ 文档把 `job.log` 定义为可选辅助 API，项目代码却广泛使用——mock 不完整是新写测试的常见绊脚石。Job interface 实际包含 30+ 方法，但实测只需 mock 真正被调用的那几个。
+
+### [2026-05-06] 视频 daily-selection 阶段 2 必须读 cover JPEG 而非整视频文件
+
+<!-- tags: video, daily-selection, sharp, oom, cover-frame, ai-vision, performance, design -->
+
+**Scenario**: 每日精选阶段 2 视觉模型给 winner 写叙事文案，原本对所有 winner 走 `adapter.getFileBuffer(fullPath) → sharp(buffer).resize(2048).jpeg().toBuffer()`。当 winner 是视频时这条路径双重崩溃：(1) 读取整个视频文件到 Buffer（GB 级 → OOM 风险）；(2) `sharp` 不支持视频解码（预编译 libvips 不含 ffmpeg）→ 抛 invalid format 异常。
+
+**Lesson**: 视频在分析阶段已经生成了 cover 缩略图（`photos.thumbnailPath` 存绝对路径），daily-selection 阶段 2 直接读 cover JPEG：
+
+```ts
+if ((winner.photo.mediaType ?? "image") === "video") {
+  if (!winner.photo.thumbnailPath) {
+    throw new Error("视频无 cover 缩略图");  // 触发已有模板 fallback
+  }
+  const fs = await import("node:fs/promises");
+  const coverBuffer = await fs.readFile(winner.photo.thumbnailPath);
+  buffer = await sharp(coverBuffer).resize(2048, 2048, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+} else if (ext === ".heic" || ext === ".heif") {
+  // heic 解码路径
+} else {
+  // sharp 普通路径
+}
+```
+
+cover JPEG 是 800px max（thumbnail 生成时压缩过），远小于视频原文件，sharp 处理无虞。
+
+**Why 这很重要**: 阶段 2 的目的是"视觉模型理解 winner 的画面"，对视频来说 cover frame 已包含画面信息，没必要也不应该读取整个视频。与"视频在分析阶段用 sprite 多帧"的设计一致：只在视频专属分析（analyze-photo job）里抽取多关键帧；daily-selection 阶段 2 复用 cover 即可。"thumbnailPath null 时 throw" 是有意设计——触发已有模板 fallback，避免 BullMQ 重试风暴（与 decisions.md 的"格式门用 return 而非 throw"对应——这里 throw 给 catch，不是抛出 worker）。
+
 ### [2026-05-06] Whisper.cpp / mlx-whisper / faster-whisper 三引擎 CLI 输出位置 — 必须从 outputDir/<stem>.json 读，绝不解析 stdout
 
 <!-- tags: whisper, cli, child-process, json, stdout, ai, transcribe, bug -->
