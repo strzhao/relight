@@ -1,0 +1,10 @@
+{
+  "name": "@relight/mac",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "build": "xcodebuild -project Relight.xcodeproj -scheme Relight -configuration Release build CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO",
+    "lint": "echo 'no swift lint configured yet'",
+    "format": "echo 'no swift format configured yet'"
+  }
+}
