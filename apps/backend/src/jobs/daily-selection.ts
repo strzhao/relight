@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { Job } from "bullmq";
 import { desc, eq, sql } from "drizzle-orm";
 import sharp from "sharp";
@@ -51,7 +50,6 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       photo: schema.photos,
       analysis: schema.photoAnalyses,
       sourceType: schema.storageSources.type,
-      sourceRootPath: schema.storageSources.rootPath,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, eq(schema.photos.id, schema.photoAnalyses.photoId))
@@ -158,9 +156,8 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   };
 
   try {
-    // 读取胜者媒体文件
+    // 读取胜者媒体文件（photo.filePath 已是绝对路径，与 analyze-photo 保持一致）
     const adapter = createStorageAdapter(winner.sourceType);
-    const fullPath = path.join(winner.sourceRootPath, winner.photo.filePath);
     let buffer: Buffer;
     const mimeType = "image/jpeg";
 
@@ -176,7 +173,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
         .jpeg({ quality: 85 })
         .toBuffer();
     } else {
-      buffer = await adapter.getFileBuffer(fullPath);
+      buffer = await adapter.getFileBuffer(winner.photo.filePath);
       // 按 magic byte 判断 HEIC（兼容扩展名错配，如 iOS 备份的 .JPEG 实为 HEIC）
       const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
       if (isHeicBuffer(buffer)) {
