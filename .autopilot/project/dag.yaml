@@ -9,8 +9,10 @@ tasks:
     title: "Xcode 工程脚手架 + monorepo 集成"
     complexity: S
     depends_on: []
-    status: pending
+    status: done
     brief: tasks/001-mac-xcode-scaffold.md
+    handoff: tasks/001-mac-xcode-scaffold.handoff.md
+    commit: 060a793
 
   - id: 002-relight-api-client
     title: "Swift RelightClient（拉 daily + 下载 original + 本地缓存）"
