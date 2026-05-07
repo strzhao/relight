@@ -7,28 +7,60 @@ struct RelightApp: App {
     @StateObject private var settings = AppSettings.shared
     @StateObject private var commandBus = MenuBarCommandBus()
 
+    // 单例式持有 coordinator/autostart，避免 actor 在 init 内被 capture self 问题
+    fileprivate static var sharedCoordinator: WallpaperCoordinator?
+    fileprivate static var sharedAutostart: AutostartManager?
+
     init() {
         #if DEBUG
         let args = CommandLine.arguments
         if let mode = args.first(where: { $0.hasPrefix("--self-test=") })?
-            .split(separator: "=", maxSplits: 1)
-            .last
-            .map(String.init) {
-            Task.detached {
-                await SelfTest.run(mode: mode)
-            }
+            .split(separator: "=", maxSplits: 1).last.map(String.init) {
+            Task.detached { await SelfTest.run(mode: mode) }
+            return  // self-test 模式下不构建调度器
         }
         #endif
+
+        // 构建依赖图（仅生产路径执行）
+        let cache = WallpaperCache.shared
+        try? cache.ensureDirectories()
+        let coordinator = WallpaperCoordinator(
+            client: RelightClient(),
+            imageEngine: ImageWallpaperEngine(),
+            videoEngine: VideoWallpaperEngine(cache: cache),
+            settings: AppSettings.shared
+        )
+        let autostart = AutostartManager()
+        Self.sharedCoordinator = coordinator
+        Self.sharedAutostart = autostart
+
+        // 启动 bootstrap + scheduler
+        Task.detached {
+            await coordinator.bootstrapOnLaunch()
+            await coordinator.startScheduler()
+        }
+
+        // 启动时同步 autostart 状态（首次注册可能弹系统授权）
+        autostart.sync(enabled: AppSettings.shared.autoStart)
     }
 
     var body: some Scene {
         MenuBarExtra("拾光", systemImage: "photo.stack") {
             MenuBarContent()
                 .environmentObject(commandBus)
+                .task {
+                    // 每次 task 重新 wire（即使被多次调用也是设置同一 closure）
+                    commandBus.onRefreshNow = {
+                        await Self.sharedCoordinator?.refreshNow()
+                    }
+                }
         }
         Settings {
             SettingsView()
                 .environmentObject(settings)
+                .onChange(of: settings.autoStart) { newValue in
+                    Self.sharedAutostart?.sync(enabled: newValue)
+                }
         }
     }
 }
@@ -188,6 +220,24 @@ enum SelfTest {
                 let bus = MenuBarCommandBus()
                 print("[menubar-smoke] commandBus.onRefreshNow=\(bus.onRefreshNow == nil ? "nil" : "wired")")
                 exit(0)
+
+            case "coordinator-bootstrap":
+                let cache = WallpaperCache.shared
+                try? cache.ensureDirectories()
+                let coordinator = WallpaperCoordinator(
+                    client: RelightClient(),
+                    imageEngine: ImageWallpaperEngine(),
+                    videoEngine: VideoWallpaperEngine(cache: cache),
+                    settings: AppSettings.shared
+                )
+                // 清空 lastAppliedPickDate 强制 bootstrap 触发
+                await MainActor.run { AppSettings.shared.lastAppliedPickDate = nil }
+                await coordinator.bootstrapOnLaunch()
+                let today = BeijingTime.todayString()
+                let applied = await MainActor.run { AppSettings.shared.lastAppliedPickDate }
+                print("[coordinator-bootstrap] today=\(today) applied=\(applied ?? "nil")")
+                try await Task.sleep(for: .milliseconds(100))
+                exit(applied == today ? 0 : 1)
 
             default:
                 print("[self-test] unknown mode: \(mode)")

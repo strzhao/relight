@@ -27,6 +27,9 @@
 		A00000000000000000000066 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061; settings = {}; };
 		A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062; settings = {}; };
 		A00000000000000000000068 /* AboutTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063; settings = {}; };
+		A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006A; settings = {}; };
+		A0000000000000000000006E /* AutostartManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B; settings = {}; };
+		A0000000000000000000006F /* BeijingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C; settings = {}; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +55,9 @@
 		A00000000000000000000061 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000062 /* GeneralSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsTab.swift; sourceTree = "<group>"; };
 		A00000000000000000000063 /* AboutTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutTab.swift; sourceTree = "<group>"; };
+		A0000000000000000000006A /* WallpaperCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCoordinator.swift; sourceTree = "<group>"; };
+		A0000000000000000000006B /* AutostartManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutostartManager.swift; sourceTree = "<group>"; };
+		A0000000000000000000006C /* BeijingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeijingTime.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +100,7 @@
 				A00000000000000000000043 /* Settings */,
 				A00000000000000000000052 /* WallpaperEngine */,
 				A0000000000000000000005D /* UI */,
+				A00000000000000000000069 /* Coordinator */,
 			);
 			path = Relight;
 			sourceTree = "<group>";
@@ -163,6 +170,16 @@
 				A00000000000000000000063 /* AboutTab.swift */,
 			);
 			path = SettingsTabs;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000069 /* Coordinator */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000006A /* WallpaperCoordinator.swift */,
+				A0000000000000000000006B /* AutostartManager.swift */,
+				A0000000000000000000006C /* BeijingTime.swift */,
+			);
+			path = Coordinator;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -248,6 +265,9 @@
 				A00000000000000000000066 /* SettingsView.swift in Sources */,
 				A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */,
 				A00000000000000000000068 /* AboutTab.swift in Sources */,
+				A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */,
+				A0000000000000000000006E /* AutostartManager.swift in Sources */,
+				A0000000000000000000006F /* BeijingTime.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
