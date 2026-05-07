@@ -19,32 +19,40 @@ tasks:
     complexity: M
     depends_on:
       - 001-mac-xcode-scaffold
-    status: pending
+    status: done
     brief: tasks/002-relight-api-client.md
+    handoff: tasks/002-relight-api-client.handoff.md
+    commit: 6454638
 
   - id: 003-image-wallpaper-engine
     title: "图片壁纸引擎（多显示器 setDesktopImageURL）"
     complexity: M
     depends_on:
       - 002-relight-api-client
-    status: pending
+    status: done
     brief: tasks/003-image-wallpaper-engine.md
+    handoff: tasks/003-image-wallpaper-engine.handoff.md
+    commit: beb684f
 
   - id: 004-video-to-dynamic-heic
     title: "视频→动态 .heic 引擎（AVAssetImageGenerator + ImageIO + XMP）"
     complexity: L
     depends_on:
       - 002-relight-api-client
-    status: pending
+    status: done
     brief: tasks/004-video-to-dynamic-heic.md
+    handoff: tasks/004-video-to-dynamic-heic.handoff.md
+    commit: 56307bb
 
   - id: 005-menubar-and-settings-ui
     title: "NSStatusItem 菜单栏 + SwiftUI 设置面板"
     complexity: M
     depends_on:
       - 001-mac-xcode-scaffold
-    status: pending
+    status: done
     brief: tasks/005-menubar-and-settings-ui.md
+    handoff: tasks/005-menubar-and-settings-ui.handoff.md
+    commit: fabf6ad
 
   - id: 006-coordinator-and-autostart
     title: "调度协调器 + Timer + SMAppService 自启动"
@@ -53,13 +61,17 @@ tasks:
       - 003-image-wallpaper-engine
       - 004-video-to-dynamic-heic
       - 005-menubar-and-settings-ui
-    status: pending
+    status: done
     brief: tasks/006-coordinator-and-autostart.md
+    handoff: tasks/006-coordinator-and-autostart.handoff.md
+    commit: 270ae5c+3eee09b
 
   - id: 007-package-readme
     title: "xcodebuild archive 脚本 + README 使用说明"
     complexity: S
     depends_on:
       - 006-coordinator-and-autostart
-    status: pending
+    status: done
     brief: tasks/007-package-readme.md
+    handoff: tasks/007-package-readme.handoff.md
+    commit: e2fab4b

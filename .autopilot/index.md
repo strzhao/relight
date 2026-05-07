@@ -44,3 +44,5 @@
 - [2026-05-05] worktree 中 e2e 测试需切到不同端口启动 dev server，主仓库进程不会同步代码 | tags: worktree, e2e, playwright, nextjs, dev-server, port | → patterns.md
 - [2026-05-07] ESM 模块顶层 await 阻塞 vitest `await import()` → 测试 5s 超时 | tags: vitest, esm, top-level-await, dynamic-import, redis, ioredis, worker, bug | → patterns.md
 - [2026-05-07] PM2 reload 中断 in-flight job 是预期行为，配 retry-failed 工具是正确处理 | tags: pm2, supervisor, bullmq, worker, kill-timeout, reload, sigkill | → patterns.md
+- [2026-05-07] xcodebuild ad-hoc 签名打包不能加 CODE_SIGNING_ALLOWED=NO | tags: xcodebuild, mac, code-signing, ad-hoc, hardened-runtime, gatekeeper, archive, bug | → patterns.md
+- [2026-05-07] Release+Hardened Runtime+LSUIElement APP 的 stdout 在 terminal 调用时会被吞 | tags: macos, swiftui, hardened-runtime, lsuielement, stdout, release-build, debug-vs-release, code-signing | → patterns.md

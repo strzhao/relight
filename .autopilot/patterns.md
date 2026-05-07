@@ -420,3 +420,36 @@ writeWorkerMeta().catch((err) => console.error("初始 meta 写入失败:", err)
 **避免设计偏差**：不要追求"reload 不丢 job"作为硬指标，应该追求"reload + retry-failed = eventual completion"。
 
 **Evidence**: `ecosystem.config.cjs` kill_timeout: 10000；`apps/backend/src/routes/queues.ts:287` POST /retry-failed 端点 — 设计文档场景 4 的 QA 验证记录在 `.autopilot/requirements/20260506-4-都一起优化，确实都/state.md`。
+
+### [2026-05-07] xcodebuild ad-hoc 签名打包不能加 CODE_SIGNING_ALLOWED=NO
+
+<!-- tags: xcodebuild, mac, code-signing, ad-hoc, hardened-runtime, gatekeeper, archive, bug -->
+
+**Scenario**: 写 `apps/mac/build.sh` 一键 archive 脚本时，第一版按 archive 比 build 更"严格"的直觉，加了 `CODE_SIGNING_ALLOWED=NO`（同时保留 `CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO`）。plan-reviewer 指出：这个组合会让 Xcode 直接跳过任何签名步骤（包括最低 ad-hoc 签名），产物 `_CodeSignature/` 目录可能为空，到 macOS 14/15 上被 Gatekeeper 直接拒启动。
+
+**Lesson**: ad-hoc 签名打包（`Sign to Run Locally`）的最小有效组合是 `CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO`，**不要**追加 `CODE_SIGNING_ALLOWED=NO`：
+
+- `CODE_SIGN_IDENTITY=-` 表示用 ad-hoc 占位身份签名
+- `CODE_SIGNING_REQUIRED=NO` 表示不强制有效身份（允许 ad-hoc）
+- `CODE_SIGNING_ALLOWED=NO` 完全禁用签名工具链 — 与 ad-hoc 互斥
+
+不同 xcodebuild 子命令（build / archive）需要的签名标志组合相同，不需要为 archive 加额外约束。修复后 build.sh 实测 6.17s 完成 ARCHIVE SUCCEEDED，产物 `Signature=adhoc`，`codesign --verify` 通过。
+
+**Evidence**: `apps/mac/build.sh` (commit e2fab4b)；plan-reviewer 反馈见 `.autopilot/sessions/mac/requirements/20260507-007-package-readme/state.md` 「Plan Review」区段。
+
+### [2026-05-07] Release+Hardened Runtime+LSUIElement APP 的 stdout 在 terminal 调用时会被吞
+
+<!-- tags: macos, swiftui, hardened-runtime, lsuielement, stdout, release-build, debug-vs-release, code-signing -->
+
+**Scenario**: Mac 壁纸 APP 在 Debug 构建中跑 `Relight.app/Contents/MacOS/Relight --self-test=codable` 能正常打印 + 退出 0；但 Release archive 后跑同一个 SelfTest 二进制：stdout 空 + 进程不退出（必须手动 kill）。codesign 显示 Release 构建启用了 Hardened Runtime（`flags=0x10002(adhoc,runtime)`）。
+
+**Lesson**: 当 macOS APP 同时满足以下三个条件，从 terminal 直接调 `.app/Contents/MacOS/<binary>` 时 stdout 行为不可靠：
+1. Hardened Runtime 启用（archive/Release 默认）
+2. `LSUIElement = true`（菜单栏 APP，无 Dock 图标）
+3. 命令行启动绕过 LaunchServices
+
+GUI APP 二进制被 macOS 视为 NSApplication 主进程，不会自动绑定到调用方 terminal 的 stdout/stderr，命令行调用时输出可能消失或被重定向到 OSLog。**调试和 SelfTest 类回归测试必须使用 Debug 构建**（无 Hardened Runtime + 输出走 terminal），Release 产物只做 bundle 完整性 / `codesign --verify` / 用户实际 `open .app` 验证。
+
+**避免设计偏差**：CI/QA 自动化验证不要基于 Release 产物跑命令行 SelfTest；要么走 Debug build，要么改用 OSLog 流读取（`log stream --predicate 'subsystem == "..."'`）。
+
+**Evidence**: `apps/mac/build.sh` 产出 Release `.app`；codesign -dvv 输出 `flags=0x10002(adhoc,runtime)`；任务 006 `coordinator.acceptance.test.sh` 全跑通是因为它用的是 Debug build (`xcodebuild ... -configuration Debug`)。
