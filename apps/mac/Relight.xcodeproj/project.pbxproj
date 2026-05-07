@@ -22,6 +22,11 @@
 		A00000000000000000000058 /* VideoFrameExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000057; settings = {}; };
 		A0000000000000000000005A /* DynamicHeicBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000059; settings = {}; };
 		A0000000000000000000005C /* VideoWallpaperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005B; settings = {}; };
+		A00000000000000000000064 /* MenuBarCommandBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005F; settings = {}; };
+		A00000000000000000000065 /* MenuBarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060; settings = {}; };
+		A00000000000000000000066 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061; settings = {}; };
+		A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062; settings = {}; };
+		A00000000000000000000068 /* AboutTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063; settings = {}; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +47,11 @@
 		A00000000000000000000057 /* VideoFrameExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoFrameExtractor.swift; sourceTree = "<group>"; };
 		A00000000000000000000059 /* DynamicHeicBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicHeicBuilder.swift; sourceTree = "<group>"; };
 		A0000000000000000000005B /* VideoWallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoWallpaperEngine.swift; sourceTree = "<group>"; };
+		A0000000000000000000005F /* MenuBarCommandBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarCommandBus.swift; sourceTree = "<group>"; };
+		A00000000000000000000060 /* MenuBarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContent.swift; sourceTree = "<group>"; };
+		A00000000000000000000061 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000062 /* GeneralSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsTab.swift; sourceTree = "<group>"; };
+		A00000000000000000000063 /* AboutTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutTab.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +93,7 @@
 				A00000000000000000000042 /* Storage */,
 				A00000000000000000000043 /* Settings */,
 				A00000000000000000000052 /* WallpaperEngine */,
+				A0000000000000000000005D /* UI */,
 			);
 			path = Relight;
 			sourceTree = "<group>";
@@ -132,6 +143,26 @@
 				A0000000000000000000005B /* VideoWallpaperEngine.swift */,
 			);
 			path = WallpaperEngine;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000005D /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000005F /* MenuBarCommandBus.swift */,
+				A00000000000000000000060 /* MenuBarContent.swift */,
+				A00000000000000000000061 /* SettingsView.swift */,
+				A0000000000000000000005E /* SettingsTabs */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000005E /* SettingsTabs */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000062 /* GeneralSettingsTab.swift */,
+				A00000000000000000000063 /* AboutTab.swift */,
+			);
+			path = SettingsTabs;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -212,6 +243,11 @@
 				A00000000000000000000058 /* VideoFrameExtractor.swift in Sources */,
 				A0000000000000000000005A /* DynamicHeicBuilder.swift in Sources */,
 				A0000000000000000000005C /* VideoWallpaperEngine.swift in Sources */,
+				A00000000000000000000064 /* MenuBarCommandBus.swift in Sources */,
+				A00000000000000000000065 /* MenuBarContent.swift in Sources */,
+				A00000000000000000000066 /* SettingsView.swift in Sources */,
+				A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */,
+				A00000000000000000000068 /* AboutTab.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

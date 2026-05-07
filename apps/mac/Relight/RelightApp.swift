@@ -4,6 +4,9 @@ import ImageIO
 
 @main
 struct RelightApp: App {
+    @StateObject private var settings = AppSettings.shared
+    @StateObject private var commandBus = MenuBarCommandBus()
+
     init() {
         #if DEBUG
         let args = CommandLine.arguments
@@ -17,9 +20,15 @@ struct RelightApp: App {
         }
         #endif
     }
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra("拾光", systemImage: "photo.stack") {
+            MenuBarContent()
+                .environmentObject(commandBus)
+        }
+        Settings {
+            SettingsView()
+                .environmentObject(settings)
         }
     }
 }
@@ -166,6 +175,18 @@ enum SelfTest {
                 print("[self-test] video-wallpaper applied: \(result.path)")
                 logger.info("video-wallpaper applied: \(result.path)")
                 try await Task.sleep(for: .milliseconds(100))
+                exit(0)
+
+            case "menubar-smoke":
+                let lsUIElement = (Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool) ?? false
+                print("[menubar-smoke] LSUIElement=\(lsUIElement)")
+                let settings = AppSettings.shared
+                print("[menubar-smoke] apiURL=\(settings.apiURL)")
+                print("[menubar-smoke] autoStart=\(settings.autoStart)")
+                print("[menubar-smoke] lastAppliedPickDate=\(settings.lastAppliedPickDate ?? "nil")")
+                // 验证 MenuBarCommandBus 类型可实例化
+                let bus = MenuBarCommandBus()
+                print("[menubar-smoke] commandBus.onRefreshNow=\(bus.onRefreshNow == nil ? "nil" : "wired")")
                 exit(0)
 
             default:
