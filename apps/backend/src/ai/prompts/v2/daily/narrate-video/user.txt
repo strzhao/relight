@@ -1,4 +1,10 @@
-转录摘要: {transcript_excerpt}
-视频节奏: {video_pacing}
+这段视频拍摄于 {date}（{years_ago}年前的今天）。
 
-请基于以上信息和画面为这段视频写一段怀旧叙事，输出 JSON。
+已知元数据（供参考）：
+- 自动检测标签: {tags}
+- 情感基调: {emotions}
+- 画面描述: {narrative}
+- 转录摘要: {transcript_excerpt}
+- 视频节奏: {video_pacing}
+
+请结合视频画面内容和这些信息，写一个怀旧标题和简短文案。

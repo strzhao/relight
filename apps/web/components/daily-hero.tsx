@@ -105,10 +105,19 @@ export function DailyHero() {
     };
   }, []);
 
-  if (state.status === "loading") return <HeroFrame variant="loading" />;
-  if (state.status === "empty") return <HeroFrame variant="empty" />;
-  if (state.status === "error") return <HeroFrame variant="error" message={state.message} />;
-  return <HeroContent pick={state.pick} />;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {state.status === "loading" ? (
+        <HeroFrame variant="loading" />
+      ) : state.status === "empty" ? (
+        <HeroFrame variant="empty" />
+      ) : state.status === "error" ? (
+        <HeroFrame variant="error" message={state.message} />
+      ) : (
+        <HeroContent pick={state.pick} />
+      )}
+    </div>
+  );
 }
 
 function HeroContent({ pick }: { pick: DailyPick }) {
@@ -118,15 +127,14 @@ function HeroContent({ pick }: { pick: DailyPick }) {
   const isPortrait = photo ? photo.height > photo.width * 1.05 : false;
 
   return (
-    <section className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-6 px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-14 lg:px-10 lg:py-7">
-      {/* Photo / Video — fits within the available flex cell preserving aspect ratio (no overflow) */}
-      <figure className="relative flex min-h-0 min-w-0 items-center justify-center lg:flex-1">
+    <section className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-6 overflow-hidden px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-14 lg:px-10 lg:py-10">
+      {/* Photo / Video */}
+      <figure className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center">
         {photo ? (
           isVideo ? (
             <HeroVideo photo={photo} title={pick.title} />
           ) : (
             <img
-              // 走原图避免缩略图（800px）被放大到视口高度后发糊
               src={api.originalUrl(pick.photoId)}
               alt={pick.title}
               className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
@@ -140,20 +148,20 @@ function HeroContent({ pick }: { pick: DailyPick }) {
         )}
       </figure>
 
-      {/* Editorial column — fixed width on desktop so the whole spread can center as a unit */}
+      {/* Editorial column */}
       <div
         className={cn(
-          "flex min-h-0 w-full flex-col overflow-hidden lg:w-[480px] lg:shrink-0",
-          isPortrait ? "lg:py-1" : "lg:py-2",
+          "flex min-h-0 w-full flex-col lg:w-[460px] lg:shrink-0",
+          isPortrait ? "lg:py-1" : "lg:py-4",
         )}
       >
-        {/* Masthead I — Date · Folio */}
-        <div className="flex items-end justify-between gap-4 border-foreground/15 border-b pb-4">
-          <div className="flex items-baseline gap-3">
-            <span className="font-display text-[6.5rem] leading-[0.82] font-light italic tabular-nums">
+        {/* Masthead — Date & Nav */}
+        <div className="flex flex-wrap items-start justify-between gap-4 border-foreground/15 border-b pb-8">
+          <div className="flex items-baseline gap-2.5">
+            <span className="font-display text-[clamp(4rem,10vw,7rem)] leading-[0.8] font-light italic tabular-nums">
               {day}
             </span>
-            <div className="flex flex-col gap-0.5 pb-2 text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
+            <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
               <span className="font-display text-base tracking-wide normal-case italic">
                 {month}
               </span>
@@ -162,35 +170,35 @@ function HeroContent({ pick }: { pick: DailyPick }) {
               </span>
             </div>
           </div>
-          <FolioNav />
+          <div className="flex shrink-0">
+            <FolioNav />
+          </div>
         </div>
 
-        {/* Masthead II — Score · 今日精选 (twin to the date masthead so the column has two anchors) */}
-        <div className="flex items-end justify-between gap-4 pt-5">
-          <ScoreMark score={pick.score} />
-          <span className="pb-2 text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
-            今日精选
-          </span>
-        </div>
-
-        {/* Title — display weight, fills the editorial column */}
+        {/* Title */}
         <h2
-          className="font-serif-sc mt-5 text-[clamp(2.5rem,4.4vw,4rem)] leading-[1.05] font-medium tracking-[-0.018em]"
+          className="font-serif-sc mt-10 text-[clamp(2.5rem,4.4vw,4.2rem)] leading-[1.05] font-medium tracking-[-0.015em]"
           style={{ textWrap: "balance" }}
         >
           {pick.title}
         </h2>
 
-        {/* Narrative — readable editorial body */}
+        {/* Narrative */}
         <p
-          className="font-serif-sc mt-5 line-clamp-[7] max-w-[34ch] text-[1.0625rem] leading-[1.78] text-foreground/75"
+          className="font-serif-sc mt-8 max-w-[32ch] text-[1.125rem] leading-[1.8] text-foreground/80"
           style={{ textWrap: "pretty" }}
         >
           {pick.narrative}
         </p>
 
-        {/* Metadata ledger — anchored to the column's foot, balancing the masthead at the head */}
-        {photo && <MetadataLedger photo={photo} />}
+        {/* Footer — Folio & Signature Anchor */}
+        <div className="mt-auto flex items-center justify-end gap-4 pt-16 pb-2 text-[10px] tracking-[0.3em] text-muted-foreground/35 uppercase tabular-nums">
+          <div className="flex items-center gap-3">
+            <span className="font-display italic">Vol. {year}</span>
+            <span className="h-px w-10 bg-foreground/10" />
+            <span className="font-sans font-light tracking-[0.4em]">Relight Chronicle</span>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -246,23 +254,6 @@ function HeroVideo({ photo, title }: { photo: Photo; title: string }) {
   );
 }
 
-function ScoreMark({ score }: { score: number }) {
-  const [whole, frac] = score.toFixed(1).split(".");
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="font-display text-[6.5rem] leading-[0.82] font-light italic tabular-nums">
-        {whole}
-      </span>
-      <div className="flex flex-col gap-0.5 pb-2 text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
-        <span className="font-display text-base tracking-wide normal-case italic tabular-nums">
-          .{frac}
-        </span>
-        <span className="tabular-nums">Aesthetic</span>
-      </div>
-    </div>
-  );
-}
-
 function FolioNav() {
   const items: { href: string; label: string; mark: string }[] = [
     { href: "/photos", label: "Photos", mark: "I" },
@@ -270,17 +261,16 @@ function FolioNav() {
     { href: "/admin", label: "Admin", mark: "III" },
   ];
   return (
-    <nav className="flex flex-col items-end gap-1 pb-1 text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
-      <span className="text-[9px] tracking-[0.28em] text-muted-foreground/70">— Folio —</span>
-      <ul className="flex items-baseline gap-2.5 tabular-nums">
+    <nav className="flex items-baseline pb-1">
+      <ul className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-2 text-[11px] tracking-[0.2em] text-muted-foreground uppercase tabular-nums md:gap-x-5">
         {items.map((item) => (
-          <li key={item.href} className="flex items-baseline gap-1">
-            <span className="font-display text-[10px] text-muted-foreground/55 italic">
+          <li key={item.href} className="group flex items-baseline gap-1.5">
+            <span className="font-display text-[10px] text-muted-foreground/40 italic transition-colors group-hover:text-primary">
               {item.mark}
             </span>
             <a
               href={item.href}
-              className="text-foreground/80 transition-colors duration-200 hover:text-foreground"
+              className="text-foreground/70 transition-colors duration-200 hover:text-foreground"
             >
               {item.label}
             </a>
@@ -288,44 +278,6 @@ function FolioNav() {
         ))}
       </ul>
     </nav>
-  );
-}
-
-function MetadataLedger({ photo }: { photo: Photo }) {
-  const taken = formatTakenAt(photo.takenAt);
-  const isVideo = (photo.mediaType ?? "image") === "video";
-
-  const cells: { label: string; value: string }[] = [
-    { label: "Captured", value: taken ?? "未知时刻" },
-    { label: "Dimensions", value: `${photo.width} × ${photo.height}` },
-    { label: "Pixels", value: formatMegapixels(photo.width, photo.height) },
-    { label: "Aspect", value: reduceRatio(photo.width, photo.height) },
-    { label: "Size", value: formatFileSize(photo.fileSize) },
-    { label: "Hash", value: photo.fileHash.slice(0, 8) },
-  ];
-
-  if (isVideo) {
-    cells.push({
-      label: "Runtime",
-      value: photo.durationSec ? formatDuration(photo.durationSec) : "—",
-    });
-    cells.push({ label: "Codec", value: photo.videoCodec ?? "—" });
-    cells.push({ label: "FPS", value: photo.videoFps ? photo.videoFps.toFixed(0) : "—" });
-  }
-
-  return (
-    <dl className="mt-auto grid grid-cols-3 gap-x-5 gap-y-4 border-foreground/15 border-t pt-5 text-foreground/85">
-      {cells.map((cell) => (
-        <div key={cell.label} className="flex flex-col gap-1">
-          <dt className="text-[10.5px] tracking-[0.22em] text-muted-foreground uppercase">
-            {cell.label}
-          </dt>
-          <dd className="font-display text-[1.125rem] leading-tight font-medium tabular-nums">
-            {cell.value}
-          </dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
@@ -337,9 +289,9 @@ function HeroFrame({
   message?: string;
 }) {
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-y-6 px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:justify-center lg:gap-x-14 lg:px-10 lg:py-7">
+    <section className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-6 px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-14 lg:px-10 lg:py-10">
       <figure
-        className="relative flex min-h-0 items-center justify-center lg:shrink"
+        className="relative flex min-h-0 items-center justify-center lg:flex-1"
         style={{ aspectRatio: "3 / 2" }}
       >
         {variant === "loading" ? (
@@ -363,17 +315,15 @@ function HeroFrame({
           </div>
         )}
       </figure>
-      <div className="flex min-h-0 w-full flex-col gap-4 py-4 lg:w-[480px] lg:shrink-0">
-        <Skeleton className="h-24 w-48" />
-        <Skeleton className="h-24 w-48" />
-        <Skeleton className="h-12 w-3/4" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-5/6" />
-        <Skeleton className="h-4 w-4/6" />
-        <div className="mt-auto grid grid-cols-3 gap-3">
-          <Skeleton className="h-12" />
-          <Skeleton className="h-12" />
-          <Skeleton className="h-12" />
+      <div className="flex min-h-0 w-full flex-col lg:w-[480px] lg:shrink-0 lg:py-4">
+        <div className="border-foreground/15 border-b pb-8">
+          <Skeleton className="h-24 w-64" />
+        </div>
+        <Skeleton className="mt-10 h-16 w-3/4" />
+        <div className="mt-8 space-y-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-4/6" />
         </div>
       </div>
     </section>

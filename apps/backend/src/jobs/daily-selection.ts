@@ -139,8 +139,28 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   const promptPath = isVideo ? "daily/narrate-video" : "daily/narrate";
   const narratePrompts = await loadPrompts("v2", promptPath);
 
-  // 视频路径：替换 user prompt 中的占位符（transcript_excerpt / video_pacing）
-  let userText = narratePrompts.user;
+  // 准备元数据
+  const takenAtStr = winner.photo.takenAt || winner.photo.createdAt;
+  const takenAtDate = new Date(takenAtStr);
+  const yearsAgo = Math.max(0, shanghaiNow.getFullYear() - takenAtDate.getFullYear());
+  const dateFormatted = takenAtStr.split("T")[0] || takenAtStr.split(" ")[0]; // 处理 ISO 或 YYYY-MM-DD HH:mm:ss
+
+  const tags = Array.isArray(winner.analysis.tags)
+    ? (winner.analysis.tags as { name: string }[]).map((t) => t.name).join("、")
+    : "无";
+  const emotions = winner.analysis.emotionalAnalysis
+    ? `${(winner.analysis.emotionalAnalysis as { primary: string; secondary: string }).primary || "未知"} / ${(winner.analysis.emotionalAnalysis as { primary: string; secondary: string }).secondary || "未知"}`
+    : "未知";
+  const originalNarrative = winner.analysis.narrative || "无描述";
+
+  // 替换 user prompt 中的占位符
+  let userText = narratePrompts.user
+    .replace("{date}", dateFormatted)
+    .replace("{years_ago}", yearsAgo.toString())
+    .replace("{tags}", tags)
+    .replace("{emotions}", emotions)
+    .replace("{narrative}", originalNarrative);
+
   if (isVideo) {
     const transcriptExcerpt = (winner.analysis.transcript ?? "").slice(0, 200) || "（无转录）";
     const videoPacing = winner.analysis.videoPacing ?? "未知";
