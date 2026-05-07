@@ -1,0 +1,456 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00000000000000000000020 /* RelightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018; settings = {}; };
+		A00000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000019; settings = {}; };
+		A00000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001A; settings = {}; };
+		A0000000000000000000004B /* Photo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000044; settings = {}; };
+		A0000000000000000000004C /* DailyPick.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000045; settings = {}; };
+		A0000000000000000000004D /* ApiResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000046; settings = {}; };
+		A0000000000000000000004E /* RelightError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000047; settings = {}; };
+		A0000000000000000000004F /* RelightClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000048; settings = {}; };
+		A00000000000000000000050 /* WallpaperCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000049; settings = {}; };
+		A00000000000000000000051 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004A; settings = {}; };
+		A00000000000000000000055 /* WallpaperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000053; settings = {}; };
+		A00000000000000000000056 /* ImageWallpaperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000054; settings = {}; };
+		A00000000000000000000058 /* VideoFrameExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000057; settings = {}; };
+		A0000000000000000000005A /* DynamicHeicBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000059; settings = {}; };
+		A0000000000000000000005C /* VideoWallpaperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005B; settings = {}; };
+		A00000000000000000000064 /* MenuBarCommandBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005F; settings = {}; };
+		A00000000000000000000065 /* MenuBarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060; settings = {}; };
+		A00000000000000000000066 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061; settings = {}; };
+		A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062; settings = {}; };
+		A00000000000000000000068 /* AboutTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063; settings = {}; };
+		A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006A; settings = {}; };
+		A0000000000000000000006E /* AutostartManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B; settings = {}; };
+		A0000000000000000000006F /* BeijingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C; settings = {}; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A00000000000000000000018 /* RelightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelightApp.swift; sourceTree = "<group>"; };
+		A00000000000000000000019 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A0000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A0000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A0000000000000000000001C /* Relight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Relight.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000044 /* Photo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Photo.swift; sourceTree = "<group>"; };
+		A00000000000000000000045 /* DailyPick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyPick.swift; sourceTree = "<group>"; };
+		A00000000000000000000046 /* ApiResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApiResponse.swift; sourceTree = "<group>"; };
+		A00000000000000000000047 /* RelightError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelightError.swift; sourceTree = "<group>"; };
+		A00000000000000000000048 /* RelightClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelightClient.swift; sourceTree = "<group>"; };
+		A00000000000000000000049 /* WallpaperCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCache.swift; sourceTree = "<group>"; };
+		A0000000000000000000004A /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		A00000000000000000000053 /* WallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperEngine.swift; sourceTree = "<group>"; };
+		A00000000000000000000054 /* ImageWallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageWallpaperEngine.swift; sourceTree = "<group>"; };
+		A00000000000000000000057 /* VideoFrameExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoFrameExtractor.swift; sourceTree = "<group>"; };
+		A00000000000000000000059 /* DynamicHeicBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicHeicBuilder.swift; sourceTree = "<group>"; };
+		A0000000000000000000005B /* VideoWallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoWallpaperEngine.swift; sourceTree = "<group>"; };
+		A0000000000000000000005F /* MenuBarCommandBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarCommandBus.swift; sourceTree = "<group>"; };
+		A00000000000000000000060 /* MenuBarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContent.swift; sourceTree = "<group>"; };
+		A00000000000000000000061 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000062 /* GeneralSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsTab.swift; sourceTree = "<group>"; };
+		A00000000000000000000063 /* AboutTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutTab.swift; sourceTree = "<group>"; };
+		A0000000000000000000006A /* WallpaperCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCoordinator.swift; sourceTree = "<group>"; };
+		A0000000000000000000006B /* AutostartManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutostartManager.swift; sourceTree = "<group>"; };
+		A0000000000000000000006C /* BeijingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeijingTime.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00000000000000000000017 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A0000000000000000000000B /* MainGroup */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000D /* Relight */,
+				A0000000000000000000000C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A0000000000000000000000C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000001C /* Relight.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000000D /* Relight */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000018 /* RelightApp.swift */,
+				A00000000000000000000019 /* ContentView.swift */,
+				A0000000000000000000001A /* Assets.xcassets */,
+				A0000000000000000000001B /* Info.plist */,
+				A00000000000000000000040 /* Models */,
+				A00000000000000000000041 /* Networking */,
+				A00000000000000000000042 /* Storage */,
+				A00000000000000000000043 /* Settings */,
+				A00000000000000000000052 /* WallpaperEngine */,
+				A0000000000000000000005D /* UI */,
+				A00000000000000000000069 /* Coordinator */,
+			);
+			path = Relight;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000040 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000044 /* Photo.swift */,
+				A00000000000000000000045 /* DailyPick.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000041 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000046 /* ApiResponse.swift */,
+				A00000000000000000000047 /* RelightError.swift */,
+				A00000000000000000000048 /* RelightClient.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000042 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000049 /* WallpaperCache.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000043 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000004A /* AppSettings.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000052 /* WallpaperEngine */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000053 /* WallpaperEngine.swift */,
+				A00000000000000000000054 /* ImageWallpaperEngine.swift */,
+				A00000000000000000000057 /* VideoFrameExtractor.swift */,
+				A00000000000000000000059 /* DynamicHeicBuilder.swift */,
+				A0000000000000000000005B /* VideoWallpaperEngine.swift */,
+			);
+			path = WallpaperEngine;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000005D /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000005F /* MenuBarCommandBus.swift */,
+				A00000000000000000000060 /* MenuBarContent.swift */,
+				A00000000000000000000061 /* SettingsView.swift */,
+				A0000000000000000000005E /* SettingsTabs */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000005E /* SettingsTabs */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000062 /* GeneralSettingsTab.swift */,
+				A00000000000000000000063 /* AboutTab.swift */,
+			);
+			path = SettingsTabs;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000069 /* Coordinator */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000006A /* WallpaperCoordinator.swift */,
+				A0000000000000000000006B /* AutostartManager.swift */,
+				A0000000000000000000006C /* BeijingTime.swift */,
+			);
+			path = Coordinator;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A0000000000000000000000E /* Relight */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000010 /* Build configuration list for PBXNativeTarget "Relight" */;
+			buildPhases = (
+				A00000000000000000000015 /* Sources */,
+				A00000000000000000000016 /* Resources */,
+				A00000000000000000000017 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Relight;
+			productName = Relight;
+			productReference = A0000000000000000000001C /* Relight.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A0000000000000000000000A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = A0000000000000000000000F /* Build configuration list for PBXProject "Relight" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A0000000000000000000000B;
+			productRefGroup = A0000000000000000000000C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A0000000000000000000000E /* Relight */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00000000000000000000016 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000022 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000000015 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000020 /* RelightApp.swift in Sources */,
+				A00000000000000000000021 /* ContentView.swift in Sources */,
+				A0000000000000000000004B /* Photo.swift in Sources */,
+				A0000000000000000000004C /* DailyPick.swift in Sources */,
+				A0000000000000000000004D /* ApiResponse.swift in Sources */,
+				A0000000000000000000004E /* RelightError.swift in Sources */,
+				A0000000000000000000004F /* RelightClient.swift in Sources */,
+				A00000000000000000000050 /* WallpaperCache.swift in Sources */,
+				A00000000000000000000051 /* AppSettings.swift in Sources */,
+				A00000000000000000000055 /* WallpaperEngine.swift in Sources */,
+				A00000000000000000000056 /* ImageWallpaperEngine.swift in Sources */,
+				A00000000000000000000058 /* VideoFrameExtractor.swift in Sources */,
+				A0000000000000000000005A /* DynamicHeicBuilder.swift in Sources */,
+				A0000000000000000000005C /* VideoWallpaperEngine.swift in Sources */,
+				A00000000000000000000064 /* MenuBarCommandBus.swift in Sources */,
+				A00000000000000000000065 /* MenuBarContent.swift in Sources */,
+				A00000000000000000000066 /* SettingsView.swift in Sources */,
+				A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */,
+				A00000000000000000000068 /* AboutTab.swift in Sources */,
+				A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */,
+				A0000000000000000000006E /* AutostartManager.swift in Sources */,
+				A0000000000000000000006F /* BeijingTime.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A00000000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		A00000000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Relight/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "app.relight.mac";
+				PRODUCT_NAME = Relight;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Relight/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "app.relight.mac";
+				PRODUCT_NAME = Relight;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A0000000000000000000000F /* Build configuration list for PBXProject "Relight" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000011 /* Debug */,
+				A00000000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000010 /* Build configuration list for PBXNativeTarget "Relight" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000013 /* Debug */,
+				A00000000000000000000014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = A0000000000000000000000A /* Project object */;
+}

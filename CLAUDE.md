@@ -86,6 +86,7 @@ worktree 里 `pnpm dev` 直接启动 backend + web；workers 用 `pnpm --filter 
 ```
 apps/backend/    # Hono API 服务 (默认 :3000)
 apps/web/        # Next.js 前端 (默认 :3001)
+apps/mac/        # SwiftUI macOS 壁纸 APP（独立 Xcode 工程，xcodebuild 构建）
 packages/shared/ # 共享类型、Zod Schema、API 路由常量
 ```
 
