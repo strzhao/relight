@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import ImageIO
 
 @main
 struct RelightApp: App {
@@ -63,6 +64,58 @@ enum SelfTest {
                 logger.info("download done: \(url.path)")
                 try await Task.sleep(for: .milliseconds(100))
                 exit(0)
+            case "heic-schema-probe":
+                // 优先用 Sonoma.heic（多帧动态壁纸，含 apple_desktop:apr metadata），fallback 到 iMac Blue
+                let candidates = [
+                    "/System/Library/Desktop Pictures/Sonoma.heic",
+                    "/System/Library/Desktop Pictures/Big Sur.heic",
+                    "/System/Library/Desktop Pictures/iMac Blue.heic",
+                ]
+                let heicURL = URL(fileURLWithPath: candidates.first { FileManager.default.fileExists(atPath: $0) } ?? candidates.last!)
+                print("[schema-probe] reading: \(heicURL.path)")
+                guard let src = CGImageSourceCreateWithURL(heicURL as CFURL, nil) else {
+                    print("[schema-probe] failed to open: \(heicURL.path)")
+                    exit(1)
+                }
+                let count = CGImageSourceGetCount(src)
+                print("[schema-probe] frame count: \(count)")
+                // 遍历每帧的 metadata
+                for frameIdx in 0..<min(count, 3) {
+                    print("[schema-probe] --- frame \(frameIdx) ---")
+                    if let metadata = CGImageSourceCopyMetadataAtIndex(src, frameIdx, nil) {
+                        if let tags = CGImageMetadataCopyTags(metadata) as? [CGImageMetadataTag] {
+                            print("[schema-probe] tag count: \(tags.count)")
+                            for tag in tags {
+                                let prefix = (CGImageMetadataTagCopyPrefix(tag) as String?) ?? "?"
+                                let name = (CGImageMetadataTagCopyName(tag) as String?) ?? "?"
+                                let value = CGImageMetadataTagCopyValue(tag)
+                                let typeRaw = CGImageMetadataTagGetType(tag)
+                                print("[schema-probe] [\(prefix):\(name)] type=\(typeRaw) value=\(String(describing: value))")
+                                // 若 value 是 String 且疑似 base64 plist，尝试解码
+                                if let strValue = value as? String,
+                                   let plistData = Data(base64Encoded: strValue) {
+                                    if let decoded = try? PropertyListSerialization.propertyList(from: plistData, format: nil) {
+                                        print("[schema-probe]   decoded-plist: \(decoded)")
+                                    } else {
+                                        print("[schema-probe]   (not a valid plist, raw bytes len=\(plistData.count))")
+                                    }
+                                }
+                            }
+                        } else {
+                            print("[schema-probe] no tags at frame \(frameIdx)")
+                        }
+                    } else {
+                        print("[schema-probe] no metadata at frame \(frameIdx)")
+                    }
+                }
+                // 也打印图片属性
+                if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [String: Any] {
+                    print("[schema-probe] image props keys: \(props.keys.sorted())")
+                }
+                print("[schema-probe] done")
+                try await Task.sleep(for: .milliseconds(100))
+                exit(0)
+
             case "image-wallpaper":
                 let pick = try await RelightClient().fetchTodayPick()
                 guard let photo = pick.photo else {
@@ -80,6 +133,41 @@ enum SelfTest {
                 logger.info("image-wallpaper applied: \(url.path)")
                 print("image-wallpaper applied: \(url.path)")
                 exit(0)
+
+            case "video-wallpaper":
+                let videoPhotoId = "09728ce3-6c07-4389-a9c1-f22d12f9f297"
+                let settings = AppSettings.shared
+                guard let apiURL = URL(string: "\(settings.apiURL)/api/photos/\(videoPhotoId)/original") else {
+                    print("[self-test] invalid API URL"); exit(1)
+                }
+                let (data, response) = try await URLSession.shared.data(from: apiURL)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    print("[self-test] HTTP error: \(response)"); exit(1)
+                }
+                let cache = WallpaperCache.shared
+                try cache.ensureDirectories()
+                let fakePhoto = Photo(
+                    id: videoPhotoId,
+                    storageSourceId: "test",
+                    filePath: "/tmp/relight-video-e2e/test-promo.mp4",
+                    fileHash: "4c81094b954e514f906b10fa92dc1dead79daa3d82dd24edc7889d0aa0eaa0ad",
+                    width: 1280, height: 720,
+                    fileSize: data.count,
+                    thumbnailPath: nil, takenAt: nil, fileMtime: nil,
+                    createdAt: ISO8601DateFormatter().string(from: Date()),
+                    mediaType: "video", durationSec: 49.1, videoCodec: "h264", videoFps: 30
+                )
+                let sourceURL = try cache.writeOriginal(
+                    hash: fakePhoto.fileHash, ext: "mp4", data: data
+                )
+                let result = try await VideoWallpaperEngine().apply(
+                    photo: fakePhoto, sourceURL: sourceURL, on: NSScreen.screens
+                )
+                print("[self-test] video-wallpaper applied: \(result.path)")
+                logger.info("video-wallpaper applied: \(result.path)")
+                try await Task.sleep(for: .milliseconds(100))
+                exit(0)
+
             default:
                 print("[self-test] unknown mode: \(mode)")
                 logger.error("unknown mode: \(mode)")

@@ -7,6 +7,7 @@ enum RelightError: Error, CustomStringConvertible {
     case cacheWriteFailed(path: URL, underlying: Error)
     case noPickAvailable
     case wallpaperSetFailed(reason: String, underlying: Error?)
+    case videoConversionFailed(reason: String, underlying: Error?)
 
     var description: String {
         switch self {
@@ -22,6 +23,8 @@ enum RelightError: Error, CustomStringConvertible {
             return "今日精选不可用"
         case .wallpaperSetFailed(let reason, _):
             return "壁纸设置失败: \(reason)"
+        case .videoConversionFailed(let reason, _):
+            return "视频转换失败: \(reason)"
         }
     }
 }
