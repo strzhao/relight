@@ -6,6 +6,7 @@ enum RelightError: Error, CustomStringConvertible {
     case decodingFailed(underlying: Error)
     case cacheWriteFailed(path: URL, underlying: Error)
     case noPickAvailable
+    case wallpaperSetFailed(reason: String, underlying: Error?)
 
     var description: String {
         switch self {
@@ -19,6 +20,8 @@ enum RelightError: Error, CustomStringConvertible {
             return "缓存写入失败 \(path.path): \(err.localizedDescription)"
         case .noPickAvailable:
             return "今日精选不可用"
+        case .wallpaperSetFailed(let reason, _):
+            return "壁纸设置失败: \(reason)"
         }
     }
 }

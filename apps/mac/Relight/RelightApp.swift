@@ -63,6 +63,23 @@ enum SelfTest {
                 logger.info("download done: \(url.path)")
                 try await Task.sleep(for: .milliseconds(100))
                 exit(0)
+            case "image-wallpaper":
+                let pick = try await RelightClient().fetchTodayPick()
+                guard let photo = pick.photo else {
+                    logger.error("no photo")
+                    print("no photo"); exit(1)
+                }
+                if photo.isVideo {
+                    logger.error("today pick is video, ImageEngine 不支持。请等任务 004 实现 VideoEngine")
+                    print("today pick is video, skipping"); exit(2)  // 用 exit 2 区分"非错误但跳过"
+                }
+                let sourceURL = try await RelightClient().downloadOriginal(photo)
+                let url = try await ImageWallpaperEngine().apply(
+                    photo: photo, sourceURL: sourceURL, on: NSScreen.screens
+                )
+                logger.info("image-wallpaper applied: \(url.path)")
+                print("image-wallpaper applied: \(url.path)")
+                exit(0)
             default:
                 print("[self-test] unknown mode: \(mode)")
                 logger.error("unknown mode: \(mode)")
