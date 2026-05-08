@@ -1,3 +1,33 @@
+### [2026-05-08] Drizzle `onConflictDoNothing()` 配 `.returning()` 时同冲突返回空数组
+
+<!-- tags: drizzle, sqlite, onconflict, returning, orm, bug -->
+
+**Scenario**: 用 `INSERT ... ON CONFLICT DO NOTHING RETURNING *` 实现"幂等插入并立刻取回新行"——典型场景是写入有唯一约束的精选/汇总表，并需要拿到新行 id 做后续更新或下游引用。
+
+**Lesson**: ORM 的 onConflictDoNothing 在冲突命中时不返回已有行，而是返回空数组；任何"取 returning[0]"的代码必须先做空数组提前 return（或显式回查），否则空对象解构/属性访问会触发 TypeError，且单测里第一次插入永远命中分支，掩盖该 bug。
+
+**Evidence**: `apps/backend/src/jobs/daily-selection.ts` 阶段 3 — `db.insert(dailyPicks).values({...}).onConflictDoNothing().returning()` 同日重跑 daily-selection job 时返回 `[]`，原代码直接读 `insertedRows[0].id` 抛 `TypeError: Cannot read properties of undefined`；plan-reviewer 第一轮在 design 阶段就识别为 BLOCKER，修复方式：`const insertedPick = insertedRows[0]; if (!insertedPick) { job.log("已存在，跳过"); return; }`。
+
+### [2026-05-08] tsup 打包后 ESM `import.meta.url` 相对路径基准在 dev/prod 不同步
+
+<!-- tags: esm, import-meta-url, tsup, dev-vs-prod, asset-path, build, bug -->
+
+**Scenario**: 后端 ESM 模块通过 `new URL("../../assets/...", import.meta.url)` 引用工程内静态资产（字体、图片、Prompt 模板），希望同一份代码在 `tsx` 直跑源码与 `tsup` 打包后的 dist bundle 都能正确解析。
+
+**Lesson**: 源码目录结构与构建产物目录结构不一致时，`import.meta.url` 在两边解析到的基准目录不同步，硬编码相对路径只能命中一边；要么在运行时嗅探产物特征（如 url 中是否包含构建输出目录名）走两套相对深度，要么在构建配置里把资产平移到 dist 内与源码同源的相对位置——单元测试常因只跑 tsx 路径而漏掉这类问题，必须在 prod build 后做一次 smoke。
+
+**Evidence**: `apps/backend/src/lib/wallpaper/composer.ts:25` 用 `new URL("../../../assets/fonts/", import.meta.url)`：dev tsx 命中 `apps/backend/assets/fonts/`，prod dist 期望 `dist/assets/fonts/`，结果 prod 解析到不存在路径 → satori 抛错 → 路由 302 降级；QA Tier 1.5 真实场景命令 `curl /api/daily/.../wallpaper` 返回 47ms 302 才暴露（typecheck/build/单元测试全绿）。修复：检测 `import.meta.url.includes("/dist/")` 决定使用哪一段相对路径。
+
+### [2026-05-08] Satori 的 `jsxImportSource` 子路径必须精确到子包根
+
+<!-- tags: satori, jsx, jsx-runtime, esm, typescript, jsximportsource, bug -->
+
+**Scenario**: 在 Node ESM 后端用 satori 渲染服务端 JSX，需要避开引入 React，于是用 satori 自带的 jsx 子包配 `tsconfig.json` 的 `jsxImportSource`。
+
+**Lesson**: ESM 解析 `jsxImportSource` 时会自动拼 `/jsx-runtime` 后缀，因此其值必须是"暴露 jsx-runtime 入口的那个子包根目录"，不是父包名也不是更深路径；猜错路径会在运行时（不是编译时）抛 `Cannot find module .../jsx-runtime`，导致 typecheck 通过、合成路由全失败。先在 node 中 `await import("<candidate>/jsx-runtime")` 验明能解析再写入 tsconfig 是更安全的做法。
+
+**Evidence**: 蓝队首版 `tsconfig.json` 写 `jsxImportSource: "satori"`，期望 ESM 解析为 `satori/jsx-runtime`，实际 satori 把 jsx 入口放在子包 `satori/jsx`，要的是 `satori/jsx/jsx-runtime`；正确写法 `jsxImportSource: "satori/jsx"`。typecheck/build 全部通过、单元测试也跑过（fixture 在 dev tsx 下偶然命中），仅 prod 实时合成路径暴露报错。
+
 ### [2026-05-06] DB 中 file_path 可能是绝对路径时用 path.resolve 而非 path.join
 
 <!-- tags: path, file-system, nas, smb, storage, route, bug -->

@@ -1,5 +1,23 @@
 # 架构决策日志
 
+### [2026-05-08] 后端图片合成选 Satori + Resvg 流水线而非无头浏览器
+
+<!-- tags: image-composition, satori, resvg, chromium, server-rendering, daily-selection, design -->
+
+**Background**: 每日精选阶段 3 需要把胜出照片 + 标题 + 叙事文案合成一张"杂志版"壁纸图，要求：(a) 视觉与前端 React 版 DailyHero 大致一致；(b) 能按目标屏幕物理像素动态出图，覆盖多分辨率/多屏；(c) 跑在常驻 BullMQ worker 进程里、并能在 API 路由实时合成；(d) 中英混排 + 衬线字体高保真。
+
+**Choice**: `satori`（JSX → SVG，固定模板字体内联）+ `@resvg/resvg-js`（SVG → PNG）+ `sharp`（PNG → mozjpeg JPEG）三段流水线；JSX 模板放在 `apps/backend/src/lib/wallpaper/template.tsx`，字体作为 ttf/otf 资产入仓由 tsup 复制到 dist。
+
+**Alternatives rejected**:
+- 无头浏览器（Playwright/Puppeteer + Chromium）：渲染保真度最高且能直接复用前端组件，但 Chromium 二进制约 200MB，cold start 慢，常驻 worker / 容器化部署负担重；命中率不高的多分辨率合成场景下不划算。
+- 服务端 Canvas（node-canvas / skia-canvas）：依赖原生模块编译，CJK 字体支持差，复杂排版要手写 + 自己处理 baseline/letter-spacing。
+
+**Trade-offs**:
+- 必须接受 Satori CSS 子集：不支持 OKLCH（需预转 hex）、不支持 `clamp()` 等响应式函数（改用按宽度的 `scale = W / 1800` 因子计算固定 px）、box-model 仅 flex。
+- 不能直接复用前端 React 组件，得维护一套"印刷版" JSX 模板；视觉一致性靠人工对照 + 后续设计同步。
+- 字体以二进制资产入仓 + 构建产物中复制，关注 `import.meta.url` 在 dev/dist 的路径基准（见对应 pattern）。
+- 输出尺寸由后端控制，可按目标屏幕物理像素实时合成 + 落盘缓存（`(pickDate, W, H)` 为 key），相比浏览器路径更可控、可幂等。
+
 ### [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt（而非单帧图片处理或多帧独立分析）
 
 <!-- tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal -->

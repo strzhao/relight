@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-08] 后端图片合成选 Satori + Resvg 而非无头浏览器 | tags: image-composition, satori, resvg, chromium, server-rendering, daily-selection, design | → decisions.md
 - [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt | tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal | → decisions.md
 - [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例 | tags: tech-stack, backend, orm, conventions, design | → decisions.md
 - [2026-05-02] AI 分析质量验收采用纯规则自动化评分，非 AI 评估 AI | tags: ai, evaluation, testing, design | → decisions.md
@@ -16,6 +17,9 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-08] Drizzle `onConflictDoNothing()` 配 `.returning()` 时同冲突返回空数组 | tags: drizzle, sqlite, onconflict, returning, orm, bug | → patterns.md
+- [2026-05-08] tsup 打包后 ESM `import.meta.url` 相对路径基准在 dev/prod 不同步 | tags: esm, import-meta-url, tsup, dev-vs-prod, asset-path, build, bug | → patterns.md
+- [2026-05-08] Satori 的 `jsxImportSource` 子路径必须精确到子包根 | tags: satori, jsx, jsx-runtime, esm, typescript, jsximportsource, bug | → patterns.md
 - [2026-05-06] DB file_path 可能是绝对路径时用 path.resolve 而非 path.join | tags: path, file-system, nas, smb, storage, route, bug | → patterns.md
 - [2026-05-06] BullMQ Job mock 必须含 log/updateProgress 等接口方法 | tags: bullmq, vitest, mock, job, testing, integration | → patterns.md
 - [2026-05-06] 视频 daily-selection 阶段 2 必须读 cover JPEG 而非整视频文件 | tags: video, daily-selection, sharp, oom, cover-frame, ai-vision, performance, design | → patterns.md
