@@ -42,3 +42,14 @@ playwright-report/
 # Runtime data
 apps/backend/photos/
 apps/backend/data/
+
+# Autopilot ephemeral state (sessions/requirements 是按对话生成的临时工作目录，不入版本)
+# 不带末尾 / —— 这样在 worktree 里它们是 symlink (非目录) 时也能匹配
+.autopilot/sessions
+.autopilot/requirements
+
+# Autopilot 合并冲突时遗留的备份目录
+.autopilot-conflict-*/
+
+# Worktree 本地配置
+local-config.json
