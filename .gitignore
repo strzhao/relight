@@ -41,6 +41,7 @@ playwright-report/
 
 # Runtime data
 apps/backend/photos/
+apps/backend/photos
 apps/backend/data/
 
 # Autopilot ephemeral state (sessions/requirements 是按对话生成的临时工作目录，不入版本)
