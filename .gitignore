@@ -41,4 +41,5 @@ playwright-report/
 
 # Runtime data
 apps/backend/photos/
+apps/backend/photos
 apps/backend/data/

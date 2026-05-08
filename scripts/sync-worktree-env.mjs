@@ -201,9 +201,11 @@ for (const envFile of mainEnvCandidates) {
     const { map } = parseEnvFile(envFile);
     if (map.has("STORAGE_ROOT")) {
       storageRoot = map.get("STORAGE_ROOT");
-      // 如果是相对路径，转为绝对路径（相对于主仓库根）
+      // 相对路径以 .env 所在目录为基准（backend 进程 cwd 与 apps/backend/.env 同目录）
+      // 早先用 mainRepoRoot 作 base 会让 apps/backend/.env 里的 "./photos" 解析到仓库根，
+      // 但 backend 实际数据在 apps/backend/photos，导致 worktree STORAGE_ROOT 指向不存在的目录
       if (!path.isAbsolute(storageRoot)) {
-        storageRoot = path.resolve(mainRepoRoot, storageRoot);
+        storageRoot = path.resolve(path.dirname(envFile), storageRoot);
       }
       break;
     }
@@ -216,6 +218,32 @@ if (!storageRoot) {
 
 // DATABASE_PATH 始终指向主仓库绝对路径
 const databasePath = path.join(mainRepoRoot, "apps", "backend", "data", "relight.db");
+
+// ─── 在 worktree 内为 photos 数据目录建符号链接 ───────────────────────────────
+// backend 的 thumbnail/original 路由用 process.cwd() 相对解析 thumbnailPath（如
+// "photos/thumbnails/<id>.jpg"），不会用 STORAGE_ROOT 拼路径。worktree 启动 backend
+// 时 cwd=apps/backend，相对路径会落到 worktree 内不存在的目录上，导致缩略图静默
+// 降级为 SVG "缩略图缺失"。建一个指向主仓库的 symlink，让 cwd 相对解析也命中实
+// 际数据。
+const worktreePhotosLink = path.join(worktreeRoot, "apps", "backend", "photos");
+const mainPhotosTarget = path.join(mainRepoRoot, "apps", "backend", "photos");
+if (fs.existsSync(mainPhotosTarget)) {
+  try {
+    const existing = fs.lstatSync(worktreePhotosLink, { throwIfNoEntry: false });
+    if (existing?.isSymbolicLink()) {
+      const current = fs.readlinkSync(worktreePhotosLink);
+      if (current !== mainPhotosTarget) {
+        fs.unlinkSync(worktreePhotosLink);
+        fs.symlinkSync(mainPhotosTarget, worktreePhotosLink);
+      }
+    } else if (!existing) {
+      fs.symlinkSync(mainPhotosTarget, worktreePhotosLink);
+    }
+    // existing 但不是 symlink（如真实目录）— 不动，让用户手动决定
+  } catch (e) {
+    console.warn(`[sync-worktree-env] photos symlink 创建失败: ${e.message}`);
+  }
+}
 
 // ─── 写 apps/backend/.env ─────────────────────────────────────────────────────
 const backendEnvPath = path.join(worktreeRoot, "apps", "backend", ".env");
