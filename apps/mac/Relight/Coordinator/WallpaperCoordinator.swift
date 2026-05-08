@@ -10,6 +10,12 @@ actor WallpaperCoordinator {
   nonisolated private let settings: AppSettings
   private let logger: Logger
 
+  private let imageOptions: [NSWorkspace.DesktopImageOptionKey: Any] = [
+    .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+    .allowClipping: false,
+    .fillColor: NSColor(srgbRed: 0.972, green: 0.961, blue: 0.929, alpha: 1.0),
+  ]
+
   init(client: RelightClient, imageEngine: any WallpaperEngine,
        videoEngine: any WallpaperEngine, settings: AppSettings,
        logger: Logger = Logger(subsystem: "app.relight.mac", category: "coordinator")) {
@@ -28,6 +34,35 @@ actor WallpaperCoordinator {
         logger.warning("today pick has no photo")
         return
       }
+
+      // 图片 + 已有合成图 URL → 分屏下载合成图
+      if !photo.isVideo, pick.composedImageUrl != nil {
+        for screen in NSScreen.screens {
+          let scale = screen.backingScaleFactor
+          let w = Int(screen.frame.width * scale)
+          let h = Int(screen.frame.height * scale)
+          do {
+            let composedURL = try await client.downloadComposedWallpaper(
+              pickDate: pick.pickDate, width: w, height: h
+            )
+            try NSWorkspace.shared.setDesktopImageURL(composedURL, for: screen, options: imageOptions)
+            logger.info("屏幕 \(screen.localizedName) 壁纸已设置为合成图: \(composedURL.path)")
+          } catch {
+            logger.warning("screen \(screen.localizedName) 合成图失败: \(String(describing: error))，回退原图")
+            do {
+              let originalURL = try await client.downloadOriginal(photo)
+              try NSWorkspace.shared.setDesktopImageURL(originalURL, for: screen, options: imageOptions)
+            } catch {
+              logger.error("screen \(screen.localizedName) 原图也失败: \(String(describing: error))")
+            }
+          }
+        }
+        await MainActor.run { [pick] in settings.lastAppliedPickDate = pick.pickDate }
+        logger.info("壁纸已更新（合成图路径）: \(pick.pickDate)")
+        return
+      }
+
+      // 视频或无合成图 → 旧路径
       let sourceURL = try await client.downloadOriginal(photo)
       let engine: any WallpaperEngine = photo.isVideo ? videoEngine : imageEngine
       let url = try await engine.apply(photo: photo, sourceURL: sourceURL, on: NSScreen.screens)

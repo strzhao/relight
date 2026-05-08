@@ -151,6 +151,7 @@ export const dailyPicks = sqliteTable("daily_picks", {
   title: text("title").notNull(),
   narrative: text("narrative").notNull(),
   score: real("score").notNull().default(0),
+  composedImagePath: text("composed_image_path"),
   createdAt: text("created_at").notNull(),
 });
 

@@ -73,10 +73,8 @@ vi.mock("node:fs/promises", async () => {
   ): ReturnType<typeof actual.readFile> => {
     const pathStr = typeof p === "string" ? p : String(p);
     if (pathStr.endsWith(".txt")) {
-      // biome-ignore lint/suspicious/noExplicitAny: 透传真实 readFile
       return (actual.readFile as any)(p, ...rest);
     }
-    // biome-ignore lint/suspicious/noExplicitAny: 复用统一 mock 进行断言
     return (mockReadFile as any)(p, ...rest);
   };
   return {
@@ -159,6 +157,7 @@ function createTestDb() {
       title TEXT NOT NULL,
       narrative TEXT NOT NULL,
       score REAL NOT NULL,
+      composed_image_path TEXT,
       created_at TEXT NOT NULL
     );
   `);
@@ -172,7 +171,6 @@ function createMockJob(data: Record<string, unknown> = {}, id = "test") {
     name: "daily-selection",
     log: vi.fn(),
     updateProgress: vi.fn(),
-    // biome-ignore lint/suspicious/noExplicitAny: BullMQ Job mock
   } as any;
 }
 

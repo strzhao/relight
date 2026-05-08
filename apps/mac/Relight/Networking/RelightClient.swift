@@ -36,6 +36,32 @@ final class RelightClient {
         return pick
     }
 
+    func downloadComposedWallpaper(pickDate: String, width: Int, height: Int) async throws -> URL {
+        if let cached = WallpaperCache.shared.findCachedComposed(pickDate: pickDate, width: width, height: height) {
+            return cached
+        }
+
+        let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: "\(baseURL)/api/daily/\(pickDate)/wallpaper?width=\(width)&height=\(height)") else {
+            throw RelightError.invalidResponse(statusCode: 0, body: "无效的壁纸合成图 URL")
+        }
+
+        let (data, response) = try await performRequest(url: url)
+        let httpResponse = response as! HTTPURLResponse
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8)
+            throw RelightError.invalidResponse(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+        guard contentType.lowercased().contains("image/jpeg") || contentType.lowercased().contains("image/jpg") else {
+            throw RelightError.invalidResponse(statusCode: httpResponse.statusCode, body: "非 JPEG 响应: \(contentType)")
+        }
+
+        return try WallpaperCache.shared.writeComposed(pickDate: pickDate, width: width, height: height, data: data)
+    }
+
     func downloadOriginal(_ photo: Photo) async throws -> URL {
         let cache = WallpaperCache.shared
         try cache.ensureDirectories()

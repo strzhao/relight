@@ -7,6 +7,7 @@ struct DailyPick: Codable, Identifiable {
     let title: String
     let narrative: String
     let score: Double
+    let composedImageUrl: String?
     let createdAt: String
     let photo: Photo?
 }

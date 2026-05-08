@@ -100,6 +100,7 @@ export interface DailyPick {
   title: string;
   narrative: string;
   score: number;
+  composedImageUrl?: string | null;
   createdAt: string;
   photo?: Photo;
 }

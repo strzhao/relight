@@ -21,6 +21,34 @@ final class WallpaperCache {
         rootURL.appendingPathComponent("dynamic-heic")
     }
 
+    var composedDir: URL {
+        ensureSubdir("composed")
+    }
+
+    private func ensureSubdir(_ name: String) -> URL {
+        let url = rootURL.appendingPathComponent(name)
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: url.path) {
+            try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        return url
+    }
+
+    func findCachedComposed(pickDate: String, width: Int, height: Int) -> URL? {
+        let url = composedDir.appendingPathComponent("\(pickDate)_\(width)x\(height).jpg")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func writeComposed(pickDate: String, width: Int, height: Int, data: Data) throws -> URL {
+        let url = composedDir.appendingPathComponent("\(pickDate)_\(width)x\(height).jpg")
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            throw RelightError.cacheWriteFailed(path: url, underlying: error)
+        }
+        return url
+    }
+
     func ensureDirectories() throws {
         let fm = FileManager.default
         for dir in [originalDir, dynamicHeicDir] {

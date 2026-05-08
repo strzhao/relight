@@ -16,7 +16,7 @@
     "enabled": true
   },
   "files": {
-    "ignore": [".next", ".turbo", "dist", "node_modules", "*.db", ".claude"]
+    "ignore": [".next", ".turbo", "dist", "node_modules", "*.db", ".claude", "**/assets/fonts/**"]
   },
   "overrides": [
     {

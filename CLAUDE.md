@@ -99,7 +99,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **路由** (`src/routes/`): 每个文件导出一个 `new Hono()` 子路由:
 - `photos.ts` — 照片列表 (分页/标签过滤/排序)、详情 (JOIN 标签+分析+存储源)、缩略图
-- `daily.ts` — 每日精选：查询最新精选照片（支持日期参数）、手动触发精选任务
+- `daily.ts` — 每日精选：查询最新精选照片（支持日期参数）、手动触发精选任务、新增 `GET /:pickDate/wallpaper` 按尺寸实时合成杂志版壁纸（支持 `width`/`height` query param，磁盘缓存命中时直接返回）
 - `scan.ts` — 触发扫描 (POST 入队)、扫描状态查询
 - `admin.ts` — 管理后台 API: 综合统计、队列状态、健康检查、分页分析列表
 - `tags.ts`, `settings.ts`, `health.ts` — 辅助路由
@@ -109,7 +109,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）
-- 精选流程 (`daily-selection.ts`): 两阶段 AI 流水线 — 阶段1 用文本模型从历史上今天的已分析照片中评选最佳（评分+标题+理由）→ 阶段2 用视觉模型为胜出照片生成叙事文案 → 写入 dailyPicks（pickDate 唯一约束，幂等覆盖）
+- 精选流程 (`daily-selection.ts`): 三阶段流水线 — 阶段1 用文本模型从历史上今天的已分析照片中评选最佳（评分+标题+理由）→ 阶段2 用视觉模型为胜出照片生成叙事文案 → 阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，含照片+标题+叙事文案）落盘，路径写入 `dailyPicks.composedImagePath` → 写入 dailyPicks（pickDate 唯一约束，幂等覆盖）
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段
@@ -134,6 +134,13 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 **HEIC 支持** (`src/lib/heic.ts`): 通过 `heic-decode` (WASM，纯 JS，无原生依赖) 将 HEIC/HEIF 解码为 RGBA 像素数据，再经 sharp resize + JPEG 编码。导出 `isHeicFile(filePath)` 和 `heicFileToJpeg(buffer, options?)` / `convertHeicToJpeg(buffer, options?)`。macOS 上 sharp 预编译的 libvips 不包含 HEIC 解码支持，因此选择 heic-decode 而非依赖 sharp。
 
 **缩略图生成** (`src/lib/thumbnail.ts`): 800px max (`fit: "inside"`)，quality 85，HEIC 文件先经 heic-decode 解码。输出统一 `.jpg` 扩展名。
+
+**壁纸合成器** (`src/lib/wallpaper/`):
+- `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/.wallpaper-cache/` 目录。
+- `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`），杂志版排版：大图铺底 + 渐变遮罩 + 标题（Fraunces） + 叙事文案（Noto Serif SC）+ 日期/品牌印记。
+- `colors.ts` — 从照片主色调提取渐变色，增强视觉层次。
+- 字体资产放在 `apps/backend/assets/fonts/`（Fraunces `.ttf` + Noto Serif SC `.otf`），tsup 构建时通过 `copyPublicDir` 自动复制到 `dist/assets/`。
+- `tsup.config.ts` — 后端独立构建配置，处理 Satori JSX 转换和字体资产复制。
 
 **CLI 工具** (`src/cli/`):
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
@@ -166,9 +173,15 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                    阶段2: 视觉模型叙事 (为胜出照片生成叙事文案)
                                     ↓
+                   阶段3: Satori 合成杂志版壁纸 (5K 16:9 JPEG 落盘)
+                          composedImagePath 写入 dailyPicks
+                                    ↓
                           每日精选 → dailyPicks (pickDate 唯一)
                                     ↓
                          前端首页 DailyHero 组件展示
+                                    ↓
+              mac App: GET /api/daily/:pickDate/wallpaper?width=&height=
+                       (按屏幕尺寸实时合成/缓存命中直接返回，设为系统壁纸)
 ```
 
 ## 设计体系

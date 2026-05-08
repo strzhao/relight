@@ -143,7 +143,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   const takenAtStr = winner.photo.takenAt || winner.photo.createdAt;
   const takenAtDate = new Date(takenAtStr);
   const yearsAgo = Math.max(0, shanghaiNow.getFullYear() - takenAtDate.getFullYear());
-  const dateFormatted = takenAtStr.split("T")[0] || takenAtStr.split(" ")[0]; // 处理 ISO 或 YYYY-MM-DD HH:mm:ss
+  const dateFormatted = takenAtStr.split("T")[0] ?? takenAtStr.split(" ")[0] ?? takenAtStr; // 处理 ISO 或 YYYY-MM-DD HH:mm:ss
 
   const tags = Array.isArray(winner.analysis.tags)
     ? (winner.analysis.tags as { name: string }[]).map((t) => t.name).join("、")
@@ -245,8 +245,8 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
 
   job.log(`叙事结果: title="${narrateResult.title}", score=${narrateResult.score}`);
 
-  // 4. 写入 daily_picks（onConflictDoNothing 去重）
-  await db
+  // 4. 写入 daily_picks（onConflictDoNothing 去重，用 returning 拿到插入行）
+  const insertedRows = await db
     .insert(schema.dailyPicks)
     .values({
       id: crypto.randomUUID(),
@@ -257,9 +257,42 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       score: narrateResult.score,
       createdAt: new Date().toISOString(),
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning();
+
+  const insertedPick = insertedRows[0];
+  if (!insertedPick) {
+    job.log("dailyPicks 已存在（同日重跑），跳过阶段 3");
+    job.log("每日精选完成");
+    return;
+  }
 
   job.log("每日精选写入成功");
+
+  // 5. 阶段 3: 合成默认尺寸壁纸图（失败不阻塞精选；视频跳过）
+  const isVideoPhase3 = (winner.photo.mediaType ?? "image") === "video";
+  if (!isVideoPhase3) {
+    try {
+      job.log("阶段 3: 合成默认壁纸图 5120×2880");
+      const { composeAndSave } = await import("../lib/wallpaper/composer");
+      const composedPath = await composeAndSave({
+        pick: insertedPick,
+        photo: winner.photo,
+        width: 5120,
+        height: 2880,
+        cacheKey: "default",
+      });
+      await db
+        .update(schema.dailyPicks)
+        .set({ composedImagePath: composedPath })
+        .where(eq(schema.dailyPicks.id, insertedPick.id));
+      job.log(`阶段 3 完成: ${composedPath}`);
+    } catch (err) {
+      job.log(`阶段 3 失败（不影响精选）: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else {
+    job.log("阶段 3 跳过：胜出照片为视频，本次不合成壁纸图");
+  }
 
   job.log("每日精选完成");
 }
