@@ -53,3 +53,6 @@ apps/backend/data/
 
 # Worktree 本地配置
 local-config.json
+
+# pnpm debug logs
+pnpm-debug.log*
