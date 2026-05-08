@@ -46,3 +46,4 @@
 - [2026-05-07] PM2 reload 中断 in-flight job 是预期行为，配 retry-failed 工具是正确处理 | tags: pm2, supervisor, bullmq, worker, kill-timeout, reload, sigkill | → patterns.md
 - [2026-05-07] xcodebuild ad-hoc 签名打包不能加 CODE_SIGNING_ALLOWED=NO | tags: xcodebuild, mac, code-signing, ad-hoc, hardened-runtime, gatekeeper, archive, bug | → patterns.md
 - [2026-05-07] Release+Hardened Runtime+LSUIElement APP 的 stdout 在 terminal 调用时会被吞 | tags: macos, swiftui, hardened-runtime, lsuielement, stdout, release-build, debug-vs-release, code-signing | → patterns.md
+- [2026-05-08] macOS App 行为异常先比 binary mtime vs 源码 mtime — DerivedData/build/dist/Applications 三路径独立易错位 | tags: macos, xcode, debug, derived-data, stale-build, swiftui, lsuielement, scene, debugging-pattern, bug | → patterns.md
