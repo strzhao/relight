@@ -25,6 +25,21 @@ export const storageSources = sqliteTable("storage_sources", {
   lastError: text("last_error"),
 });
 
+/** 连拍组 */
+export const bursts = sqliteTable("bursts", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  storageSourceId: text("storage_source_id")
+    .notNull()
+    .references(() => storageSources.id),
+  // 不加 FK 避免与 photos 循环依赖；应用层维护一致性
+  representativePhotoId: text("representative_photo_id"),
+  memberCount: integer("member_count").notNull().default(0),
+  manualOverride: integer("manual_override", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull(),
+});
+
 /** 照片 */
 export const photos = sqliteTable(
   "photos",
@@ -51,10 +66,20 @@ export const photos = sqliteTable(
     durationSec: real("duration_sec"),
     videoCodec: text("video_codec"),
     videoFps: real("video_fps"),
+    // 连拍支持（nullable，单图留 NULL）
+    burstId: text("burst_id"),
+    isBurstRepresentative: integer("is_burst_representative", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    phash: text("phash"), // 64-bit dHash 十六进制（16 chars）
   },
   (t) => ({
     unq_storage_file: unique().on(t.storageSourceId, t.filePath),
     idx_photos_created_at: index("idx_photos_created_at").on(t.createdAt),
+    // 按 burst_id 快速查找同组成员
+    idx_photos_burst_id: index("idx_photos_burst_id").on(t.burstId),
+    // 加速 detectBursts ±60s 时间窗口查询（storageSourceId + takenAt 联合索引）
+    idx_photos_taken_burst: index("idx_photos_taken_burst").on(t.storageSourceId, t.takenAt),
   }),
 );
 
@@ -199,15 +224,28 @@ export const settings = sqliteTable("settings", {
 
 // ===== Drizzle Relations =====
 
+export const burstsRelations = relations(bursts, ({ one, many }) => ({
+  storageSource: one(storageSources, {
+    fields: [bursts.storageSourceId],
+    references: [storageSources.id],
+  }),
+  photos: many(photos),
+}));
+
 export const storageSourcesRelations = relations(storageSources, ({ many }) => ({
   photos: many(photos),
   scanLogs: many(scanLogs),
+  bursts: many(bursts),
 }));
 
 export const photosRelations = relations(photos, ({ one, many }) => ({
   storageSource: one(storageSources, {
     fields: [photos.storageSourceId],
     references: [storageSources.id],
+  }),
+  burst: one(bursts, {
+    fields: [photos.burstId],
+    references: [bursts.id],
   }),
   photoTags: many(photoTags),
   analyses: many(photoAnalyses),

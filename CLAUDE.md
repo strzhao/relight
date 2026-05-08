@@ -44,6 +44,7 @@ pnpm --filter @relight/backend workers     # 启动 Worker 进程（独立于 AP
 pnpm --filter @relight/backend build       # tsup 打包
 pnpm --filter @relight/backend start       # 跑生产构建产物
 pnpm --filter @relight/backend tsx src/cli/backfill-media-type.ts  # 历史视频数据回填 mediaType / durationSec
+pnpm --filter @relight/backend tsx src/cli/detect-bursts.ts        # 历史照片连拍组回填（识别已有照片中的连拍关系）
 
 # 前端专属
 pnpm --filter @relight/web dev             # 启动前端 (next dev --turbopack -p 3001)
@@ -102,13 +103,14 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `daily.ts` — 每日精选：查询最新精选照片（支持日期参数）、手动触发精选任务
 - `scan.ts` — 触发扫描 (POST 入队)、扫描状态查询
 - `admin.ts` — 管理后台 API: 综合统计、队列状态、健康检查、分页分析列表
+- `bursts.ts` — 连拍组 API：`GET /api/bursts/:id/members`（组内成员列表）、`PUT /api/bursts/:id/representative`（手动切换代表）
 - `tags.ts`, `settings.ts`, `health.ts` — 辅助路由
 
 **异步任务系统** (`src/jobs/` + `src/workers/`):
 - 三个 BullMQ 队列：`scan-storage`、`analyze-photo`、`daily-selection`
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
-- 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo
-- 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）
+- 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo；扫描结束后调用 `detectBursts` 识别连拍组（时间窗口 ≤3s + dHash 汉明距离 ≤10），写入 `bursts` 表并标记每组代表
+- 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）；分析完成后调用 `calibrateBurstRepresentative` 在组内竞争代表位（选评分最高者）
 - 精选流程 (`daily-selection.ts`): 两阶段 AI 流水线 — 阶段1 用文本模型从历史上今天的已分析照片中评选最佳（评分+标题+理由）→ 阶段2 用视觉模型为胜出照片生成叙事文案 → 写入 dailyPicks（pickDate 唯一约束，幂等覆盖）
 
 **AI 层** (`src/ai/`):
@@ -126,7 +128,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `index.ts` — 工厂函数 `createStorageAdapter(type)`，目前仅实现 local，SMB/WebDAV 待扩展
 
 **数据库** (`src/db/`):
-- `schema.ts` — Drizzle SQLite schema: storageSources, photos, tags, photoTags (复合主键), photoAnalyses (JSON 列存储复杂分析), dailyPicks, scanLogs, settings (key-value)
+- `schema.ts` — Drizzle SQLite schema: storageSources, photos（含 burstId/isBurstRepresentative/burstRank 三列）, tags, photoTags (复合主键), photoAnalyses (JSON 列存储复杂分析), dailyPicks, scanLogs, settings (key-value), **bursts**（连拍组：id, representativeId, memberCount, detectedAt）
 - `index.ts` — better-sqlite3 初始化，WAL 模式，外键开启
 
 **配置** (`src/lib/config.ts`): 所有环境变量集中管理，带默认值。AI 服务默认 `http://127.0.0.1:8001/v1`（本地部署的 qwen 兼容服务）。

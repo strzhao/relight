@@ -30,7 +30,8 @@ type Action =
   | { type: "LOAD_SUCCESS"; photos: Photo[]; total: number; page: number; pageSize: number }
   | { type: "LOAD_MORE_SUCCESS"; photos: Photo[]; total: number; page: number; pageSize: number }
   | { type: "LOAD_ERROR"; error: string }
-  | { type: "RESET" };
+  | { type: "RESET" }
+  | { type: "UPDATE_PHOTO"; photoId: string; patch: Partial<Photo> };
 
 const initialState: State = {
   photos: [],
@@ -71,6 +72,11 @@ function reducer(state: State, action: Action): State {
       };
     case "RESET":
       return initialState;
+    case "UPDATE_PHOTO":
+      return {
+        ...state,
+        photos: state.photos.map((p) => (p.id === action.photoId ? { ...p, ...action.patch } : p)),
+      };
     default:
       return state;
   }
@@ -194,6 +200,11 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
     };
   }, []);
 
+  /** 局部更新某张照片（切换连拍代表后用，避免 reset 丢失滚动位置） */
+  const updatePhoto = useCallback((photoId: string, patch: Partial<Photo>) => {
+    dispatch({ type: "UPDATE_PHOTO", photoId, patch });
+  }, []);
+
   return {
     photos: state.photos,
     isLoading: state.isLoading,
@@ -202,5 +213,6 @@ export function usePhotosInfinite(options: UsePhotosInfiniteOptions = {}) {
     hasMore: state.hasMore,
     loadMore,
     reset,
+    updatePhoto,
   };
 }

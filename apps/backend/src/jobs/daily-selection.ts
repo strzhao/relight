@@ -1,5 +1,5 @@
 import type { Job } from "bullmq";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, or, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { aiClient } from "../ai/client";
 import { loadPrompts } from "../ai/prompts";
@@ -55,7 +55,8 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
     .innerJoin(schema.photoAnalyses, eq(schema.photos.id, schema.photoAnalyses.photoId))
     .innerJoin(schema.storageSources, eq(schema.photos.storageSourceId, schema.storageSources.id))
     .where(
-      sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}`,
+      sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}
+        AND (${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`,
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
     .limit(MAX_CANDIDATES);
