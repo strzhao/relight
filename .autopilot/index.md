@@ -51,3 +51,5 @@
 - [2026-05-07] xcodebuild ad-hoc 签名打包不能加 CODE_SIGNING_ALLOWED=NO | tags: xcodebuild, mac, code-signing, ad-hoc, hardened-runtime, gatekeeper, archive, bug | → patterns.md
 - [2026-05-07] Release+Hardened Runtime+LSUIElement APP 的 stdout 在 terminal 调用时会被吞 | tags: macos, swiftui, hardened-runtime, lsuielement, stdout, release-build, debug-vs-release, code-signing | → patterns.md
 - [2026-05-08] macOS App 行为异常先比 binary mtime vs 源码 mtime — DerivedData/build/dist/Applications 三路径独立易错位 | tags: macos, xcode, debug, derived-data, stale-build, swiftui, lsuielement, scene, debugging-pattern, bug | → patterns.md
+- [2026-05-08] IntersectionObserver 监听条件渲染节点必须用 callback ref，不能用 useRef + useEffect | tags: react, intersectionobserver, callback-ref, conditional-rendering, useeffect, infinite-scroll, bug | → patterns.md
+- [2026-05-08] Playwright page.route glob 中 `?` 是单字符通配符，匹配 query string 必须用 `*` | tags: playwright, page-route, glob, minimatch, mock, query-string, e2e, bug | → patterns.md
