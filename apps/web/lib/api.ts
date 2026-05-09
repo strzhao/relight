@@ -3,6 +3,7 @@ import type {
   AnalyzeBatchResponse,
   AnalyzeTriggerResponse,
   ApiResponse,
+  Burst,
   DailyPick,
   FileTreeResponse,
   HealthDetails,
@@ -147,6 +148,20 @@ export const api = {
       fetchApi<ApiResponse<AnalyzeTriggerResponse>>(API_ROUTES.analyze.trigger, {
         method: "POST",
         body: JSON.stringify({ photoIds, force }),
+      }),
+  },
+
+  bursts: {
+    /** 获取连拍组所有成员（按拍摄时间升序） */
+    members: (id: string) =>
+      fetchApi<{ success: boolean; data: Photo[]; burst: Burst }>(API_ROUTES.bursts.members(id)),
+    /** 设置连拍代表照片（置 manualOverride=true） */
+    setRepresentative: (id: string, photoId: string) =>
+      fetchApi<
+        ApiResponse<{ burstId: string; representativePhotoId: string; manualOverride: boolean }>
+      >(API_ROUTES.bursts.representative(id), {
+        method: "PATCH",
+        body: JSON.stringify({ photoId }),
       }),
   },
 };

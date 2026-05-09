@@ -29,10 +29,7 @@ for (const p of missing) {
   }
   try {
     const tp = await generateThumbnail(p.filePath, thumbnailDir, p.id);
-    await db
-      .update(schema.photos)
-      .set({ thumbnailPath: tp })
-      .where(eq(schema.photos.id, p.id));
+    await db.update(schema.photos).set({ thumbnailPath: tp }).where(eq(schema.photos.id, p.id));
     okCount++;
     console.log(`[ok] ${p.id} -> ${tp}`);
   } catch (e) {

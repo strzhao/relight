@@ -346,6 +346,17 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
   const tagCount = tagMap.size;
   job.log(`AI 分析完成: ${tagCount} 个标签, 美学评分: ${result.aestheticScore}`);
 
+  // 6c. 连拍代表自动校准（仅当 manualOverride=false 时）
+  const freshPhoto = await db
+    .select({ burstId: schema.photos.burstId })
+    .from(schema.photos)
+    .where(eq(schema.photos.id, photoId));
+
+  const burstId = freshPhoto[0]?.burstId;
+  if (burstId) {
+    await calibrateBurstRepresentative(photoId, burstId, job);
+  }
+
   // 上报完成进度 — 所有 DB 写入已成功
   await job.updateProgress({
     phase: "completed",
@@ -640,6 +651,87 @@ async function upsertVideoPlaceholder(
       photoId,
       ...values,
     });
+  }
+}
+
+/**
+ * 连拍代表自动校准。
+ *
+ * 分析完成后，若照片属于连拍组且 manualOverride=false，
+ * 查询同组所有已分析照片，将 aestheticScore 最高的设为代表。
+ */
+async function calibrateBurstRepresentative(
+  photoId: string,
+  burstId: string,
+  job: Job<AnalyzeJobData>,
+): Promise<void> {
+  try {
+    // 检查 manualOverride
+    const burstRows = await db
+      .select({ manualOverride: schema.bursts.manualOverride })
+      .from(schema.bursts)
+      .where(eq(schema.bursts.id, burstId));
+
+    const burst = burstRows[0];
+    if (!burst || burst.manualOverride) {
+      return; // 用户已手动指定代表，跳过自动校准
+    }
+
+    // 查询同组所有照片的最新 aestheticScore
+    const members = await db
+      .select({
+        photoId: schema.photos.id,
+        aestheticScore: schema.photoAnalyses.aestheticScore,
+      })
+      .from(schema.photos)
+      .innerJoin(schema.photoAnalyses, eq(schema.photos.id, schema.photoAnalyses.photoId))
+      .where(eq(schema.photos.burstId, burstId));
+
+    if (members.length === 0) return;
+
+    // 找出评分最高的照片
+    let bestPhotoId = members[0]?.photoId ?? "";
+    let bestScore = members[0]?.aestheticScore ?? 0;
+
+    for (const m of members) {
+      const score = m.aestheticScore ?? 0;
+      if (score > bestScore) {
+        bestScore = score;
+        bestPhotoId = m.photoId;
+      }
+    }
+
+    // 检查是否需要切换代表
+    const currentRepRows = await db
+      .select({ representativePhotoId: schema.bursts.representativePhotoId })
+      .from(schema.bursts)
+      .where(eq(schema.bursts.id, burstId));
+
+    const currentRepId = currentRepRows[0]?.representativePhotoId;
+    if (currentRepId === bestPhotoId) return; // 已是最优代表
+
+    // 三步 UPDATE 包进同步事务，规避并发分析同组照片时的竞态
+    // 注意：better-sqlite3 transaction 严格同步，必须用 drizzle 的 .run() 同步 API（不能 await async）
+    db.transaction((tx) => {
+      tx.update(schema.photos)
+        .set({ isBurstRepresentative: false })
+        .where(eq(schema.photos.burstId, burstId))
+        .run();
+
+      tx.update(schema.photos)
+        .set({ isBurstRepresentative: true })
+        .where(eq(schema.photos.id, bestPhotoId))
+        .run();
+
+      tx.update(schema.bursts)
+        .set({ representativePhotoId: bestPhotoId })
+        .where(eq(schema.bursts.id, burstId))
+        .run();
+    });
+
+    job.log(`连拍代表已校准: ${currentRepId ?? "(无)"} → ${bestPhotoId} (评分 ${bestScore})`);
+  } catch (err) {
+    job.log(`连拍代表校准失败（已忽略）: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

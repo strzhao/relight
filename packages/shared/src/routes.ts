@@ -51,4 +51,8 @@ export const API_ROUTES = {
     trigger: "/api/analyze",
     jobEvents: (jobId: string) => `/api/analyze/jobs/${jobId}/events`,
   },
+  bursts: {
+    members: (id: string) => `/api/bursts/${id}/members`,
+    representative: (id: string) => `/api/bursts/${id}/representative`,
+  },
 } as const;

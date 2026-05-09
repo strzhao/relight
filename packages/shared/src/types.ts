@@ -29,8 +29,28 @@ export interface Photo {
   durationSec?: number | null;
   videoCodec?: string | null;
   videoFps?: number | null;
+  // 连拍支持：burstId 非空时表示属于某个连拍组
+  burstId?: string | null;
+  isBurstRepresentative?: boolean;
+  /** API 计算字段：1=单图，>1=连拍组代表（含成员数量） */
+  burstSize?: number;
   tags?: PhotoTag[];
   analyses?: PhotoAnalysis[];
+}
+
+/** 连拍组 */
+export interface Burst {
+  id: string;
+  storageSourceId: string;
+  representativePhotoId: string | null;
+  memberCount: number;
+  manualOverride: boolean;
+  createdAt: string;
+}
+
+/** 连拍组（含成员列表） */
+export interface BurstWithMembers extends Burst {
+  members: Photo[];
 }
 
 /** 照片-标签关联 */

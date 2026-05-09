@@ -1,5 +1,6 @@
 "use client";
 
+import { BurstSheet } from "@/components/burst-sheet";
 import { DateViewControl } from "@/components/date-view-control";
 import type { DateViewMode } from "@/components/date-view-control";
 import { PhotoCard } from "@/components/photo-card";
@@ -35,6 +36,8 @@ export default function PhotosPage() {
   const [cellSize, setCellSize] = useState(() => calcGridParams(getInitialContentWidth()).cellW);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [burstSheetOpen, setBurstSheetOpen] = useState(false);
+  const [burstSheetId, setBurstSheetId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ResizeObserver: 响应式列数计算 + cellSize (150ms 防抖)
@@ -78,19 +81,40 @@ export default function PhotosPage() {
     };
   }, [updateGridParams]);
 
-  const { photos, isLoading, isFetchingMore, error, hasMore, loadMore, reset } =
+  const { photos, isLoading, isFetchingMore, error, hasMore, loadMore, reset, updatePhoto } =
     usePhotosInfinite();
 
-  // Lightbox 点击处理
+  // 点击处理：连拍组 → BurstSheet；单图 → Lightbox
   const handlePhotoClick = useCallback(
     (photo: Photo) => {
-      const idx = photos.findIndex((p) => p.id === photo.id);
-      if (idx !== -1) {
-        setLightboxIndex(idx);
-        setLightboxOpen(true);
+      if ((photo.burstSize ?? 1) > 1 && photo.burstId) {
+        setBurstSheetId(photo.burstId);
+        setBurstSheetOpen(true);
+      } else {
+        const idx = photos.findIndex((p) => p.id === photo.id);
+        if (idx !== -1) {
+          setLightboxIndex(idx);
+          setLightboxOpen(true);
+        }
       }
     },
     [photos],
+  );
+
+  // BurstSheet 切换代表后，局部更新列表中的代表照片（不 reset 避免丢失滚动位置）
+  const handleRepresentativeChanged = useCallback(
+    (newRepId: string) => {
+      // 找到当前 burst 内所有成员，将其 isBurstRepresentative 更新
+      // 遍历 photos，同 burstId 的全部重置，再设新代表
+      const burstId = burstSheetId;
+      if (!burstId) return;
+      for (const p of photos) {
+        if (p.burstId === burstId) {
+          updatePhoto(p.id, { isBurstRepresentative: p.id === newRepId });
+        }
+      }
+    },
+    [burstSheetId, photos, updatePhoto],
   );
 
   // 切换视图 → 重置滚动位置
@@ -292,6 +316,14 @@ export default function PhotosPage() {
         onClose={() => setLightboxOpen(false)}
         hasMore={hasMore}
         onLoadMore={loadMore}
+      />
+
+      {/* 连拍组底部抽屉 */}
+      <BurstSheet
+        open={burstSheetOpen}
+        burstId={burstSheetId}
+        onClose={() => setBurstSheetOpen(false)}
+        onRepresentativeChanged={handleRepresentativeChanged}
       />
     </main>
   );

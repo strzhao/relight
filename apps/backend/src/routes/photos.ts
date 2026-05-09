@@ -34,8 +34,10 @@ export const photosRouter = new Hono()
 
     const { page, pageSize, tagId, storageSourceId, sortBy, order, dateFrom, dateTo } = parsed.data;
 
-    // 构建 WHERE 条件
-    const conditions = [];
+    // 构建 WHERE 条件（默认只显示非连拍或连拍代表）
+    const conditions = [
+      sql`(${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`,
+    ];
 
     if (storageSourceId) {
       conditions.push(eq(schema.photos.storageSourceId, storageSourceId));
@@ -83,15 +85,24 @@ export const photosRouter = new Hono()
 
     const total = countResult[0]?.count ?? 0;
 
-    // 查询分页数据
+    // 查询分页数据（LEFT JOIN bursts 取 memberCount → burstSize）
     const offset = (page - 1) * pageSize;
-    const photos = await db
-      .select()
+    const rows = await db
+      .select({
+        photo: schema.photos,
+        burstMemberCount: schema.bursts.memberCount,
+      })
       .from(schema.photos)
+      .leftJoin(schema.bursts, eq(schema.photos.burstId, schema.bursts.id))
       .where(where)
       .orderBy(orderBy)
       .limit(pageSize)
       .offset(offset);
+
+    const photos = rows.map((r) => ({
+      ...r.photo,
+      burstSize: r.burstMemberCount ?? 1,
+    }));
 
     return c.json({
       success: true,

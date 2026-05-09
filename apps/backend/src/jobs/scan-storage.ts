@@ -3,7 +3,9 @@ import path from "node:path";
 import type { Job } from "bullmq";
 import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db";
+import { detectBursts } from "../lib/burst-detector";
 import { config } from "../lib/config";
+import { dHash } from "../lib/phash";
 import { generateThumbnail } from "../lib/thumbnail";
 import { createStorageAdapter } from "../storage";
 import { checkPathAccessibility } from "../storage/check-path";
@@ -283,6 +285,44 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     }
 
     newCount = photoRecords.length;
+
+    // 6.5 计算新照片的 phash（从已生成缩略图读取），并检测连拍
+    const newPhotoIdsWithThumbnail: string[] = [];
+    for (const record of photoRecords) {
+      if (record.thumbnailPath && record.mediaType !== "video") {
+        try {
+          const thumbBuf = await fs.readFile(record.thumbnailPath);
+          const hash = await dHash(thumbBuf);
+          await db
+            .update(schema.photos)
+            .set({ phash: hash })
+            .where(eq(schema.photos.id, record.id));
+          newPhotoIdsWithThumbnail.push(record.id);
+        } catch (phashErr) {
+          job.log(
+            `phash 计算失败 (${record.filePath}): ${phashErr instanceof Error ? phashErr.message : String(phashErr)}`,
+          );
+        }
+      }
+    }
+
+    // 连拍检测（失败不阻塞扫描主流程）
+    if (newPhotoIdsWithThumbnail.length >= 2) {
+      try {
+        const burstResult = await detectBursts({
+          storageSourceId,
+          photoIds: newPhotoIdsWithThumbnail,
+        });
+        job.log(
+          `连拍检测完成: 处理 ${burstResult.groupsCreated} 个连拍组，` +
+            `${burstResult.photosGrouped} 张照片归入连拍组`,
+        );
+      } catch (burstErr) {
+        job.log(
+          `连拍检测失败（已忽略）: ${burstErr instanceof Error ? burstErr.message : String(burstErr)}`,
+        );
+      }
+    }
 
     // 7. 查询已有分析记录，跳过已分析的 photo
     const newPhotoIds = photoRecords.map((p) => p.id);

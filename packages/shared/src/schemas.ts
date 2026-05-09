@@ -64,6 +64,11 @@ export const analyzeBatchSchema = z.object({
   force: z.boolean().optional().default(false),
 });
 
+/** 设置连拍代表照片 */
+export const setRepresentativeSchema = z.object({
+  photoId: z.string().min(1),
+});
+
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;
 export type UpdateSettings = z.infer<typeof updateSettingsSchema>;
 export type ScanNow = z.infer<typeof scanNowSchema>;
@@ -72,3 +77,4 @@ export type DailyPickQuery = z.infer<typeof dailyPickQuerySchema>;
 export type PhotoQuery = z.infer<typeof photoQuerySchema>;
 export type AnalyzePhotos = z.infer<typeof analyzePhotosSchema>;
 export type AnalyzeBatch = z.infer<typeof analyzeBatchSchema>;
+export type SetRepresentative = z.infer<typeof setRepresentativeSchema>;

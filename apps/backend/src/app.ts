@@ -5,6 +5,7 @@ import { AppError } from "./lib/errors";
 import {
   adminRouter,
   analyzeRouter,
+  burstsRouter,
   dailyRouter,
   healthRouter,
   photosRouter,
@@ -53,6 +54,7 @@ export function createApp(): Hono {
   app.route("/api/queues", queuesRouter);
   app.route("/api/storage", storageRouter);
   app.route("/api/analyze", analyzeRouter);
+  app.route("/api/bursts", burstsRouter);
 
   return app;
 }
