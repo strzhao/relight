@@ -32,17 +32,24 @@ const mockLte = vi.hoisted(() =>
   vi.fn((a: unknown, b: unknown) => ({ __op: "lte", left: a, right: b })),
 );
 
+const mockSql = vi.hoisted(() => {
+  const fn = (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    __op: "sql",
+    strings,
+    values,
+  });
+  (fn as unknown as Record<string, unknown>).raw = (s: string) => ({ __op: "sql_raw", s });
+  return fn;
+});
+
 vi.mock("drizzle-orm", () => ({
   eq: mockEq,
   and: mockAnd,
   gte: mockGte,
   lte: mockLte,
+  lt: (a: unknown, b: unknown) => ({ __op: "lt", left: a, right: b }),
   desc: (col: unknown) => ({ __op: "desc", column: col }),
-  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
-    __op: "sql",
-    strings,
-    values,
-  }),
+  sql: mockSql,
 }));
 
 // ---- 捕获 Drizzle ORM 的 values() / set() 参数 ----
@@ -135,6 +142,7 @@ const mockSchema = vi.hoisted(() => ({
     title: "dailyPicks.title",
     narrative: "dailyPicks.narrative",
     score: "dailyPicks.score",
+    members: "dailyPicks.members",
     createdAt: "dailyPicks.created_at",
   },
 }));
@@ -148,12 +156,10 @@ vi.mock("../db", () => ({
 
 const mockGetFileBuffer = vi.hoisted(() => vi.fn());
 const mockGetMimeType = vi.hoisted(() => vi.fn());
+const mockCreateStorageAdapter = vi.hoisted(() => vi.fn());
 
 vi.mock("../storage", () => ({
-  createStorageAdapter: vi.fn().mockReturnValue({
-    getFileBuffer: mockGetFileBuffer,
-    getMimeType: mockGetMimeType,
-  }),
+  createStorageAdapter: mockCreateStorageAdapter,
 }));
 
 // ---- Mock AI client ----
@@ -234,48 +240,43 @@ function createMockJob(overrides: Partial<DailySelectionJobData> = {}): Job<Dail
   } as unknown as Job<DailySelectionJobData>;
 }
 
-/** 构造候选照片（带嵌套分析结果，匹配 DB JOIN 结构） */
+/**
+ * 构造候选照片（EnrichedCandidate 扁平结构，匹配新候选池格式）
+ *
+ * 注意：由于新版 worker 使用 buildCandidatePool（4 源子查询），
+ * makeCandidate 现在返回与 EnrichedCandidate 兼容的格式。
+ * 数据库查询中的原始行结构（photoId, aestheticScore, ...）会被 candidate-pool
+ * 转换为 EnrichedCandidate，所以这里构造的是转换后的对象。
+ */
 function makeCandidate(index: number, overrides: Record<string, unknown> = {}) {
   const baseAestheticScore = 5 + index;
   const analysisOverrides = (overrides.analysis as Record<string, unknown>) ?? {};
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { analysis: _analysis, ...topLevelOverrides } = overrides;
+  const aestheticScore =
+    typeof analysisOverrides.aestheticScore === "number"
+      ? analysisOverrides.aestheticScore
+      : baseAestheticScore;
 
+  // 返回 EnrichedCandidate 格式（candidate-pool.ts 转换后的结构）
   return {
-    sourceType: "local",
-    sourceRootPath: "/photos",
-    photo: {
-      id: `photo-${String(index).padStart(3, "0")}`,
-      storageSourceId: "source-001",
-      filePath: `photo-${index}.jpg`,
-      fileHash: `hash${index}`,
-      width: 4000,
-      height: 3000,
-      fileSize: 5242880,
-      thumbnailPath: `/thumbnails/photo-${index}.jpg`,
-      takenAt: `2019-05-05T${String(10 + index).padStart(2, "0")}:00:00.000Z`,
-      createdAt: "2024-01-01T00:00:00.000Z",
-      fileMtime: 1557062400000,
-    },
-    analysis: {
-      id: `analysis-${index}`,
-      photoId: `photo-${String(index).padStart(3, "0")}`,
-      aiModel: "qwen3.6-35b",
-      rawResponse: "{}",
-      aestheticScore: baseAestheticScore,
-      narrative: `照片${index}的分析描述文案，长度足够用于候选摘要构建。`,
-      tags: [
-        { name: "风景", category: "scene", confidence: 0.9 },
-        { name: "温暖", category: "emotion", confidence: 0.85 },
-      ],
-      composition: { type: "rule_of_thirds", score: 7, description: "经典构图" },
-      colorAnalysis: { palette: ["#FF6B35"], dominant: "#FF6B35", mood: "warm" },
-      emotionalAnalysis: { primary: "peaceful", secondary: "calm", intensity: 7 },
-      usageSuggestions: "适合壁纸",
-      promptVersion: "v2",
-      processedAt: "2024-01-01T00:00:00.000Z",
-      ...analysisOverrides,
-    },
+    photoId: `photo-${String(index).padStart(3, "0")}`,
+    filePath: `photo-${index}.jpg`,
+    takenAt: `2019-05-05T${String(10 + index).padStart(2, "0")}:00:00.000Z`,
+    mediaType: "image" as const,
+    durationSec: null,
+    aestheticScore,
+    yearsAgo: 5,
+    weightedScore: aestheticScore * 1.22,
+    source: "historyToday" as const,
+    narrative: `照片${index}的分析描述文案，长度足够用于候选摘要构建。`,
+    emotionalAnalysis: { primary: "peaceful", secondary: "calm", intensity: 7 },
+    tags: [
+      { name: "风景", category: "scene", confidence: 0.9 },
+      { name: "温暖", category: "emotion", confidence: 0.85 },
+    ],
+    thumbnailPath: `/thumbnails/photo-${index}.jpg`,
+    sourceType: "local" as const,
     ...topLevelOverrides,
   };
 }
@@ -284,9 +285,71 @@ function makeCandidates(count: number) {
   return Array.from({ length: count }, (_, i) => makeCandidate(i));
 }
 
-/** 设置候选查询返回指定结果 */
+/**
+ * 设置候选查询返回指定结果
+ *
+ * 新版 worker 使用多源候选池，查询顺序：
+ * 1. getRecentPickedPhotoIds → 返回空（无最近精选）
+ * 2. historyToday 子查询 → 返回 candidates（第一源承载所有候选）
+ * 3. sameMonth 子查询 → 空
+ * 4. sameSeason 子查询 → 空
+ * 5. agedRandom 子查询 → 空
+ * 6. buildRelatedPool → 空（hero 关联池为空，跳过 AI members 选择）
+ */
 function setupCandidates(candidates: unknown[]) {
-  mockDb.select.mockReturnValueOnce(chainableMock(candidates));
+  // 注意：candidate-pool 内部子查询返回的是 DB 行（photoId, aestheticScore 等），
+  // 不是 EnrichedCandidate。但由于我们 mock 了整个 buildCandidatePool 流程，
+  // 我们需要 mock 底层 db.select 调用链。
+  //
+  // 然而，由于 drizzle-orm 的 sql tag 被 mock，candidate-pool 内部的 sql.raw()
+  // 调用会失败。因此最简单的解法是直接 mock buildCandidatePool 和 getRecentPickedPhotoIds。
+  //
+  // 这里我们通过设置足够多的 mockReturnValueOnce 来模拟：
+  // - select #1: getRecentPickedPhotoIds（返回空 dailyPicks）
+  // - select #2: historyToday 子查询（返回转换前的 DB 行）
+  // - select #3: sameMonth 子查询（空）
+  // - select #4: sameSeason 子查询（空）
+  // - select #5: agedRandom 子查询（空）
+  // select #6+: buildRelatedPool 和其他查询（空）
+  //
+  // 由于 EnrichedCandidate 是候选池内部转换后的结果，DB 行需要包含正确的字段名。
+  // candidate-pool 的子查询选择 photoId, aestheticScore 等字段。
+  // 我们将 makeCandidate 返回的 EnrichedCandidate 作为"DB 行"直接传入
+  // （因为 candidate-pool 会用这些字段重新计算 weightedScore 等）。
+
+  // 将 EnrichedCandidate 格式转回 DB 行格式（historyToday 子查询的返回格式）
+  const dbRows = candidates.map((c) => {
+    const ec = c as ReturnType<typeof makeCandidate>;
+    return {
+      photoId: ec.photoId,
+      filePath: ec.filePath,
+      takenAt: ec.takenAt,
+      mediaType: ec.mediaType,
+      durationSec: ec.durationSec,
+      aestheticScore: ec.aestheticScore,
+      narrative: ec.narrative,
+      emotionalAnalysis: ec.emotionalAnalysis,
+      tags: ec.tags,
+      thumbnailPath: ec.thumbnailPath,
+      sourceType: ec.sourceType,
+    };
+  });
+
+  mockDb.select
+    // #1: getRecentPickedPhotoIds
+    .mockReturnValueOnce(chainableMock([]))
+    // #2: historyToday → 承载所有候选
+    .mockReturnValueOnce(chainableMock(dbRows))
+    // #3: sameMonth → 空
+    .mockReturnValueOnce(chainableMock([]))
+    // #4: sameSeason → 空（可能不被调用，取决于当前月份）
+    .mockReturnValueOnce(chainableMock([]))
+    // #5: agedRandom → 空
+    .mockReturnValueOnce(chainableMock([]))
+    // #6: buildRelatedPool（如果执行到这里）→ 空
+    .mockReturnValueOnce(chainableMock([]))
+    // #7: 视频 narrate 的 analysis 查询（如果是视频 hero）→ 空
+    .mockReturnValueOnce(chainableMock([]));
 }
 
 /** 设置阶段 1 AI chat 返回 valid JSON */
@@ -303,7 +366,7 @@ function setupPhase2Success(title: string, narrative: string, score: number) {
 
 describe("每日精选 Worker — 两阶段 AI 流水线（验收测试）", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     capturedInsertValues = [];
     capturedUpdateSets = [];
 
@@ -316,6 +379,10 @@ describe("每日精选 Worker — 两阶段 AI 流水线（验收测试）", () 
     // 默认文件读取
     mockGetFileBuffer.mockResolvedValue(Buffer.from("fake-image-data-for-sharp"));
     mockGetMimeType.mockReturnValue("image/jpeg");
+    mockCreateStorageAdapter.mockReturnValue({
+      getFileBuffer: mockGetFileBuffer,
+      getMimeType: mockGetMimeType,
+    });
 
     // 默认 AI 返回
     setupPhase1Success(0);

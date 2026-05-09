@@ -316,6 +316,82 @@ export function parseDailySelectResponse(rawResponse: string): {
   };
 }
 
+// ===== 每日精选 — 阶段 1.5 关联成员选择响应 =====
+
+export const dailyMemberItemSchema = z.object({
+  index: z.number().int().min(0),
+  caption: z.string().min(1).max(30),
+});
+
+export const dailyMembersResponseSchema = z.object({
+  members: z.array(dailyMemberItemSchema),
+});
+
+export type DailyMembersResponse = z.infer<typeof dailyMembersResponseSchema>;
+
+/**
+ * 解析每日精选阶段 1.5 关联成员选择响应
+ *
+ * @param rawResponse AI 原始响应字符串
+ * @param poolSize 关联候选池大小，用于 index 越界过滤
+ */
+export function parseDailyMembersResponse(
+  rawResponse: string,
+  poolSize: number,
+): {
+  parsed: DailyMembersResponse | null;
+  error: string | null;
+  fallback: DailyMembersResponse;
+} {
+  const fallback: DailyMembersResponse = { members: [] };
+
+  const { parsed: rawJson, error: extractError } = extractAndParseJson(rawResponse);
+
+  if (extractError || !rawJson) {
+    return { parsed: null, error: extractError, fallback };
+  }
+
+  const result = dailyMembersResponseSchema.safeParse(rawJson);
+
+  let members: { index: number; caption: string }[] = [];
+
+  if (result.success) {
+    members = result.data.members;
+  } else {
+    // 容错：尝试从 rawJson 中手动提取
+    const rawMembers = rawJson.members;
+    if (Array.isArray(rawMembers)) {
+      for (const m of rawMembers) {
+        if (typeof m === "object" && m !== null) {
+          const item = m as Record<string, unknown>;
+          if (typeof item.index === "number" && typeof item.caption === "string") {
+            members.push({
+              index: item.index,
+              caption: String(item.caption).slice(0, 30),
+            });
+          }
+        }
+      }
+    }
+    if (members.length === 0) {
+      return {
+        parsed: null,
+        error: `Zod 校验失败: ${result.error.message}`,
+        fallback,
+      };
+    }
+  }
+
+  // 越界过滤：保留 0 ≤ index < poolSize，丢弃越界项
+  const validMembers = members.filter((m) => m.index >= 0 && m.index < poolSize);
+
+  // 最多 8 张
+  const trimmed = validMembers.slice(0, 8);
+
+  const parsed: DailyMembersResponse = { members: trimmed };
+  return { parsed, error: result.success ? null : "容错恢复", fallback: parsed };
+}
+
 /**
  * 解析每日精选阶段 2 怀旧叙事响应
  */

@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -177,6 +177,11 @@ export const dailyPicks = sqliteTable("daily_picks", {
   narrative: text("narrative").notNull(),
   score: real("score").notNull().default(0),
   composedImagePath: text("composed_image_path"),
+  /** 关联照片（hero 同期兄弟），JSON 列，历史行默认为空数组 */
+  members: text("members", { mode: "json" })
+    .$type<{ photoId: string; caption: string }[]>()
+    .notNull()
+    .default(sql`'[]'`),
   createdAt: text("created_at").notNull(),
 });
 

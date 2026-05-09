@@ -32,6 +32,7 @@ function makeMockPick(overrides: Record<string, unknown> = {}) {
       "五年前的今天，阳光洒满小院，你端着相机蹲在花丛间，轻轻按下快门。那一刻风是静的，蝉声远去，世界只剩下镜头里盛开的蔷薇。",
     score: 8.7,
     composedImagePath: null,
+    members: [],
     createdAt: "2026-05-08T06:00:00.000Z",
     ...overrides,
   };

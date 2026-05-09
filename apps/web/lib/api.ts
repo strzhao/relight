@@ -32,6 +32,21 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Build a full URL by prefixing the API base. Test-mockable as a flat export. */
+export function getApiUrl(path: string): string {
+  return `${BASE_URL}${path}`;
+}
+
+/** Today's daily pick. Flat export for test mocking. */
+export function getTodayPick() {
+  return fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.today);
+}
+
+/** Daily pick by id. Flat export for test mocking. */
+export function getDailyPick(id: string) {
+  return fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.detail(id));
+}
+
 export const api = {
   health: () => fetchApi<{ status: string }>(API_ROUTES.health),
 

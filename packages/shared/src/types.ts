@@ -112,6 +112,13 @@ export interface PhotoAnalysis {
   motionScore?: number | null;
 }
 
+/** 每日精选关联照片 */
+export interface DailyPickMember {
+  photoId: string;
+  caption: string;
+  photo?: Photo;
+}
+
 /** 每日精选 */
 export interface DailyPick {
   id: string;
@@ -123,6 +130,8 @@ export interface DailyPick {
   composedImageUrl?: string | null;
   createdAt: string;
   photo?: Photo;
+  /** 关联兄弟照片，最多 8 张，可能为空数组 */
+  members: DailyPickMember[];
 }
 
 /** 存储源可达性状态 */

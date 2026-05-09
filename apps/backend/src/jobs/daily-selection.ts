@@ -1,15 +1,17 @@
 import type { Job } from "bullmq";
-import { desc, eq, or, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import sharp from "sharp";
 import { aiClient } from "../ai/client";
 import { loadPrompts } from "../ai/prompts";
-import { parseDailyNarrateResponse, parseDailySelectResponse } from "../ai/response-parser";
+import {
+  parseDailyMembersResponse,
+  parseDailyNarrateResponse,
+  parseDailySelectResponse,
+} from "../ai/response-parser";
 import { db, schema } from "../db";
-import { config } from "../lib/config";
 import { createStorageAdapter } from "../storage";
-
-/** 候选照片上限 */
-const MAX_CANDIDATES = 20;
+import { buildCandidatePool, getRecentPickedPhotoIds } from "./daily-selection/candidate-pool";
+import { buildRelatedPool } from "./daily-selection/related-pool";
 
 /**
  * 生成北京时间 YYYY-MM-DD 格式的日期字符串
@@ -26,69 +28,66 @@ function formatPickDate(): string {
 /**
  * daily-selection Worker
  *
- * 两阶段 AI 流水线：
- * 1. 查询今日月日匹配的已分析照片 → 构建候选摘要 → aiClient.chat() 文本模型评选胜者
- * 2. 对胜者照片调用 aiClient.analyzePhoto() 视觉模型 → 生成怀旧标题和文案
- * 3. onConflictDoNothing 写入 daily_picks（pickDate UNIQUE 去重）
+ * 新三阶段 AI 流水线：
+ * 0. 构造 4 源候选池（historyToday / sameMonth / sameSeason / agedRandom）
+ * 1. 文本模型评选 hero（带 source / yearsAgo 标签）
+ * 1.5. 构造 hero 关联候选池 → AI 选 members（视频 hero 跳过）
+ * 2. 视觉模型为 hero 生成怀旧叙事（不变）
+ * 3. 写入 dailyPicks（含 members JSON 列）
  */
 export async function dailySelectionWorker(job: Job): Promise<void> {
-  job.log("开始每日精选");
+  job.log("开始每日精选（新版 4 源候选池）");
 
-  // 生成今日 pickDate（北京时间 YYYY-MM-DD 纯日期字符串）
   const pickDate = formatPickDate();
   job.log(`pickDate: ${pickDate}`);
 
-  // 提取月-日用于候选查询
-  const now = new Date();
-  const shanghaiNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
-  const monthDay = `${String(shanghaiNow.getMonth() + 1).padStart(2, "0")}-${String(shanghaiNow.getDate()).padStart(2, "0")}`;
-  job.log(`月日匹配: ${monthDay}`);
+  // ---- 阶段 0: 构造候选池 ----
+  const recentIds = await getRecentPickedPhotoIds(30);
+  job.log(`最近 30 天去重池: ${recentIds.size} 个 photoId`);
 
-  // 1. 查询候选照片（本月日匹配 + 已有分析记录）
-  const candidates = await db
-    .select({
-      photo: schema.photos,
-      analysis: schema.photoAnalyses,
-      sourceType: schema.storageSources.type,
-    })
-    .from(schema.photos)
-    .innerJoin(schema.photoAnalyses, eq(schema.photos.id, schema.photoAnalyses.photoId))
-    .innerJoin(schema.storageSources, eq(schema.photos.storageSourceId, schema.storageSources.id))
-    .where(
-      sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}
-        AND (${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`,
-    )
-    .orderBy(desc(schema.photoAnalyses.aestheticScore))
-    .limit(MAX_CANDIDATES);
+  const candidates = await buildCandidatePool({
+    now: new Date(),
+    excludeIds: recentIds,
+    maxN: 20,
+  });
 
-  job.log(`查询到 ${candidates.length} 张候选照片`);
+  job.log(`4 源候选池共 ${candidates.length} 张候选`);
 
   if (candidates.length === 0) {
     job.log("今日无候选照片，跳过每日精选");
     return;
   }
 
-  // 2. 阶段 1: 文本评选（带 fallback）
-  job.log("阶段 1: 文本模型评选...");
+  // ---- 阶段 1: 文本评选 hero ----
+  job.log("阶段 1: 文本模型评选 hero...");
 
   const selectPrompts = await loadPrompts("v2", "daily/select");
 
-  // 构建候选摘要文本
+  // 构建候选摘要文本（带 source / yearsAgo 标签）
+  const SOURCE_LABELS: Record<string, string> = {
+    historyToday: "历史上的今天",
+    sameMonth: "同月份",
+    sameSeason: "同季节",
+    agedRandom: "久远抽样",
+  };
+
   const candidateSummaries = candidates
     .map((c, i) => {
-      const a = c.analysis;
-      const emotionalSummary = a.emotionalAnalysis
-        ? `${(a.emotionalAnalysis as Record<string, unknown>).primary || "未知"} / ${(a.emotionalAnalysis as Record<string, unknown>).secondary || "未知"}`
-        : "未知";
+      const emotionalSummary =
+        c.emotionalAnalysis && typeof c.emotionalAnalysis === "object"
+          ? `${(c.emotionalAnalysis as Record<string, unknown>).primary || "未知"} / ${(c.emotionalAnalysis as Record<string, unknown>).secondary || "未知"}`
+          : "未知";
       const mt =
-        (c.photo.mediaType ?? "image") === "video"
-          ? `[视频 ${Math.round(c.photo.durationSec ?? 0)} 秒]`
+        (c.mediaType ?? "image") === "video"
+          ? `[视频 ${Math.round(c.durationSec ?? 0)} 秒]`
           : "[图片]";
+      const sourceLabel = SOURCE_LABELS[c.source] ?? c.source;
+      const yearsLabel = c.yearsAgo >= 1 ? `${c.yearsAgo} 年前` : "近期";
       return [
-        `[${i}] ${mt} 美学评分: ${a.aestheticScore ?? "N/A"}`,
+        `[${i}] ${mt} [来源: ${sourceLabel} / ${yearsLabel}] 美学评分: ${c.aestheticScore ?? "N/A"} 加权分: ${c.weightedScore.toFixed(2)}`,
         `    情感: ${emotionalSummary}`,
-        `    标签: ${Array.isArray(a.tags) ? (a.tags as { name: string }[]).map((t) => t.name).join("、") : "无"}`,
-        `    描述: ${a.narrative ?? "无描述"}`,
+        `    标签: ${Array.isArray(c.tags) ? (c.tags as { name: string }[]).map((t) => t.name).join("、") : "无"}`,
+        `    描述: ${(c.narrative ?? "无描述").slice(0, 80)}`,
       ].join("\n");
     })
     .join("\n\n");
@@ -115,56 +114,127 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
     const selected = selectParsed ?? selectFallback;
     selectedIndex = Math.min(Math.max(0, selected.selectedIndex), candidates.length - 1);
   } catch (err) {
-    // 阶段 1 AI 失败 → fallback: 选 aestheticScore 最高的（列表已按分降序排列）
+    // 阶段 1 AI 失败 → fallback: 选 weightedScore 最高的候选（已按分降序）
     job.log(
-      `阶段 1 AI 失败: ${err instanceof Error ? err.message : String(err)}，fallback 到最高分照片`,
+      `阶段 1 AI 失败: ${err instanceof Error ? err.message : String(err)}，fallback 到最高加权分照片`,
     );
-    // candidates 已按 aestheticScore DESC 排序，index 0 即最高分
     selectedIndex = 0;
   }
 
-  // selectedIndex 已通过 Math.min/max 夹紧到 [0, candidates.length)
-  const winner = candidates[selectedIndex];
-  if (!winner) {
-    // 理论不可达：夹紧逻辑已保证索引有效
+  const hero = candidates[selectedIndex];
+  if (!hero) {
     job.log("内部错误: 胜者索引无效");
     return;
   }
 
-  job.log(`选中照片: index=${selectedIndex}, photoId=${winner.photo.id}`);
+  job.log(
+    `选中 hero: index=${selectedIndex}, photoId=${hero.photoId}, source=${hero.source}, yearsAgo=${hero.yearsAgo}`,
+  );
 
-  // 3. 阶段 2: 视觉模型怀旧叙事（带 fallback）
+  // ---- 阶段 1.5: hero 关联候选池 + AI 选 members ----
+  const isVideo = (hero.mediaType ?? "image") === "video";
+  let members: { photoId: string; caption: string }[] = [];
+
+  if (isVideo) {
+    // 视频 hero 跳过阶段 1.5（设计文档明确不构造关联池）
+    job.log("视频 hero: 跳过阶段 1.5，members = []");
+  } else {
+    job.log("阶段 1.5: 构造关联候选池...");
+
+    // 排除集合 = 30 天去重 + hero 自身
+    const excludeForRelated = new Set([...recentIds, hero.photoId]);
+    const related = await buildRelatedPool(hero, excludeForRelated);
+    job.log(`关联候选池: ${related.length} 张`);
+
+    if (related.length > 0) {
+      try {
+        const membersPrompts = await loadPrompts("v2", "daily/members");
+
+        // 构造 hero 信息
+        const heroEmotion =
+          hero.emotionalAnalysis && typeof hero.emotionalAnalysis === "object"
+            ? `${(hero.emotionalAnalysis as Record<string, unknown>).primary || "未知"}`
+            : "未知";
+        const heroTagsStr = Array.isArray(hero.tags)
+          ? (hero.tags as { name: string }[]).map((t) => t.name).join("、")
+          : "无";
+
+        // 构造关联候选摘要（candidate narrative 截断到 80 字）
+        const relatedSummaries = related
+          .map((r, i) => {
+            const mt = (r.mediaType ?? "image") === "video" ? "[视频]" : "[图片]";
+            const rEmotion =
+              r.emotionalAnalysis && typeof r.emotionalAnalysis === "object"
+                ? `${(r.emotionalAnalysis as Record<string, unknown>).primary || "未知"}`
+                : "未知";
+            const rTags = Array.isArray(r.tags)
+              ? (r.tags as { name: string }[]).map((t) => t.name).join("、")
+              : "无";
+            const desc = (r.narrative ?? "无描述").slice(0, 80);
+            return [
+              `[候选${i}] ${mt} 时间: ${r.takenAt ?? "未知"}`,
+              `  情感: ${rEmotion} | 标签: ${rTags}`,
+              `  描述: ${desc}`,
+            ].join("\n");
+          })
+          .join("\n\n");
+
+        const membersUserPrompt = membersPrompts.user
+          .replace("{hero_taken_at}", hero.takenAt ?? "未知")
+          .replace("{hero_emotion}", heroEmotion)
+          .replace("{hero_tags}", heroTagsStr)
+          .replace("{hero_narrative}", (hero.narrative ?? "无描述").slice(0, 80))
+          .replace("{候选摘要列表}", relatedSummaries);
+
+        const membersRawResponse = await aiClient.chat(membersUserPrompt, membersPrompts.system);
+        job.log(`members 响应长度: ${membersRawResponse.length} chars`);
+
+        const { parsed: membersParsed, error: membersError } = parseDailyMembersResponse(
+          membersRawResponse,
+          related.length,
+        );
+
+        if (membersError) {
+          job.log(`members 解析警告: ${membersError}`);
+        }
+
+        if (membersParsed && membersParsed.members.length > 0) {
+          // 将 index 映射到真实 photoId（parser 已过滤越界，此处再做防御性 filter 满足类型收窄）
+          members = membersParsed.members.flatMap((m) => {
+            const r = related[m.index];
+            return r ? [{ photoId: r.photoId, caption: m.caption }] : [];
+          });
+          job.log(`AI 选出 ${members.length} 张 members`);
+        }
+      } catch (err) {
+        job.log(
+          `阶段 1.5 AI 失败: ${err instanceof Error ? err.message : String(err)}，fallback 到 members = []`,
+        );
+        members = [];
+      }
+    }
+  }
+
+  // ---- 阶段 2: 视觉模型怀旧叙事（不变，仅针对 hero）----
   job.log("阶段 2: 视觉模型生成怀旧叙事...");
 
-  const isVideo = (winner.photo.mediaType ?? "image") === "video";
   const promptPath = isVideo ? "daily/narrate-video" : "daily/narrate";
   const narratePrompts = await loadPrompts("v2", promptPath);
 
-  // 准备元数据
-  const takenAtStr = winner.photo.takenAt || winner.photo.createdAt;
-  const takenAtDate = new Date(takenAtStr);
-  const yearsAgo = Math.max(0, shanghaiNow.getFullYear() - takenAtDate.getFullYear());
-  const dateFormatted = takenAtStr.split("T")[0] ?? takenAtStr.split(" ")[0] ?? takenAtStr; // 处理 ISO 或 YYYY-MM-DD HH:mm:ss
-
-  const tags = Array.isArray(winner.analysis.tags)
-    ? (winner.analysis.tags as { name: string }[]).map((t) => t.name).join("、")
-    : "无";
-  const emotions = winner.analysis.emotionalAnalysis
-    ? `${(winner.analysis.emotionalAnalysis as { primary: string; secondary: string }).primary || "未知"} / ${(winner.analysis.emotionalAnalysis as { primary: string; secondary: string }).secondary || "未知"}`
-    : "未知";
-  const originalNarrative = winner.analysis.narrative || "无描述";
-
-  // 替换 user prompt 中的占位符
-  let userText = narratePrompts.user
-    .replace("{date}", dateFormatted)
-    .replace("{years_ago}", yearsAgo.toString())
-    .replace("{tags}", tags)
-    .replace("{emotions}", emotions)
-    .replace("{narrative}", originalNarrative);
-
+  let userText = narratePrompts.user;
   if (isVideo) {
-    const transcriptExcerpt = (winner.analysis.transcript ?? "").slice(0, 200) || "（无转录）";
-    const videoPacing = winner.analysis.videoPacing ?? "未知";
+    // 读取 hero 的 photoAnalyses 获取 transcript / videoPacing
+    const analysisRows = await db
+      .select({
+        transcript: schema.photoAnalyses.transcript,
+        videoPacing: schema.photoAnalyses.videoPacing,
+      })
+      .from(schema.photoAnalyses)
+      .where(eq(schema.photoAnalyses.photoId, hero.photoId))
+      .limit(1);
+    const analysis = analysisRows[0];
+    const transcriptExcerpt = (analysis?.transcript ?? "").slice(0, 200) || "（无转录）";
+    const videoPacing = analysis?.videoPacing ?? "未知";
     userText = userText
       .replace("{transcript_excerpt}", transcriptExcerpt)
       .replace("{video_pacing}", videoPacing);
@@ -177,25 +247,22 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   };
 
   try {
-    // 读取胜者媒体文件（photo.filePath 已是绝对路径，与 analyze-photo 保持一致）
-    const adapter = createStorageAdapter(winner.sourceType);
+    const adapter = createStorageAdapter(hero.sourceType);
     let buffer: Buffer;
     const mimeType = "image/jpeg";
 
     if (isVideo) {
-      // 视频：读取 cover 缩略图（避免读取整个视频文件 OOM + sharp 不支持视频解码）
-      if (!winner.photo.thumbnailPath) {
+      if (!hero.thumbnailPath) {
         throw new Error("视频无 cover 缩略图");
       }
       const fs = await import("node:fs/promises");
-      const coverBuffer = await fs.readFile(winner.photo.thumbnailPath);
+      const coverBuffer = await fs.readFile(hero.thumbnailPath);
       buffer = await sharp(coverBuffer)
         .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 85 })
         .toBuffer();
     } else {
-      buffer = await adapter.getFileBuffer(winner.photo.filePath);
-      // 按 magic byte 判断 HEIC（兼容扩展名错配，如 iOS 备份的 .JPEG 实为 HEIC）
+      buffer = await adapter.getFileBuffer(hero.filePath);
       const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
       if (isHeicBuffer(buffer)) {
         buffer = await convertHeicToJpeg(buffer, {
@@ -212,7 +279,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
     }
 
     const base64 = buffer.toString("base64");
-    job.log(`胜者照片大小: ${buffer.length} bytes`);
+    job.log(`Hero 照片大小: ${buffer.length} bytes`);
 
     const narrateRawResponse = await aiClient.analyzePhoto(
       base64,
@@ -235,7 +302,6 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
 
     narrateResult = narrateParsed ?? narrateFallback;
   } catch (err) {
-    // 阶段 2 AI 失败 → fallback: 使用模板文案
     job.log(`阶段 2 AI 失败: ${err instanceof Error ? err.message : String(err)}，使用模板文案`);
     narrateResult = {
       title: "今日拾光",
@@ -246,54 +312,21 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
 
   job.log(`叙事结果: title="${narrateResult.title}", score=${narrateResult.score}`);
 
-  // 4. 写入 daily_picks（onConflictDoNothing 去重，用 returning 拿到插入行）
-  const insertedRows = await db
+  // ---- 写库 ----
+  await db
     .insert(schema.dailyPicks)
     .values({
       id: crypto.randomUUID(),
-      photoId: winner.photo.id,
+      photoId: hero.photoId,
       pickDate,
       title: narrateResult.title,
       narrative: narrateResult.narrative,
       score: narrateResult.score,
+      members,
       createdAt: new Date().toISOString(),
     })
-    .onConflictDoNothing()
-    .returning();
+    .onConflictDoNothing();
 
-  const insertedPick = insertedRows[0];
-  if (!insertedPick) {
-    job.log("dailyPicks 已存在（同日重跑），跳过阶段 3");
-    job.log("每日精选完成");
-    return;
-  }
-
-  job.log("每日精选写入成功");
-
-  // 5. 阶段 3: 合成默认尺寸壁纸图（失败不阻塞精选；视频跳过）
-  const isVideoPhase3 = (winner.photo.mediaType ?? "image") === "video";
-  if (!isVideoPhase3) {
-    try {
-      job.log("阶段 3: 合成默认壁纸图 5120×2880");
-      const { composeAndSave } = await import("../lib/wallpaper/composer");
-      const composedPath = await composeAndSave({
-        pick: insertedPick,
-        photo: winner.photo,
-        width: 5120,
-        height: 2880,
-        cacheKey: "default",
-      });
-      await db
-        .update(schema.dailyPicks)
-        .set({ composedImagePath: composedPath })
-        .where(eq(schema.dailyPicks.id, insertedPick.id));
-      job.log(`阶段 3 完成: ${composedPath}`);
-    } catch (err) {
-      job.log(`阶段 3 失败（不影响精选）: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  } else {
-    job.log("阶段 3 跳过：胜出照片为视频，本次不合成壁纸图");
-  }
-
+  job.log(`每日精选写入成功，members: ${members.length} 张`);
   job.log("每日精选完成");
 }
