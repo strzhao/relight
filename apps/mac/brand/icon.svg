@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    拾光 · Relight — App Icon (V5a · 边角构图)
+    Paper #f5e7c5 · 墨痕 sepia · 朱砂 #c87840
+  -->
+  <defs>
+    <linearGradient id="inkstroke" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#5a4a35" stop-opacity="0"/>
+      <stop offset="14%"  stop-color="#5a4a35" stop-opacity="0.5"/>
+      <stop offset="35%"  stop-color="#3d3122" stop-opacity="1"/>
+      <stop offset="65%"  stop-color="#3d3122" stop-opacity="1"/>
+      <stop offset="86%"  stop-color="#5a4a35" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#5a4a35" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="#f5e7c5"/>
+  <rect x="120" y="700" width="704" height="14" rx="7" ry="7" fill="url(#inkstroke)"/>
+  <circle cx="640" cy="400" r="88" fill="#c87840"/>
+</svg>
