@@ -16,7 +16,17 @@
     "enabled": true
   },
   "files": {
-    "ignore": [".next", ".turbo", "dist", "node_modules", "*.db", ".claude", "**/assets/fonts/**"]
+    "ignore": [
+      ".next",
+      ".turbo",
+      "dist",
+      "node_modules",
+      "*.db",
+      ".claude",
+      "**/assets/fonts/**",
+      "apps/mac/**/Assets.xcassets/**",
+      "apps/mac/build/**"
+    ]
   },
   "overrides": [
     {

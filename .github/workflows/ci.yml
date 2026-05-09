@@ -28,17 +28,24 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # 关键：每个步骤都用 if: always() (除 install/checkout)，避免 Lint 失败遮蔽 Test 阶段。
+      # 任一步骤失败仍会让整个 job 失败，但反馈信息一次跑完，不会"挂在 Lint 就退出"。
       - name: Lint (Biome)
+        if: always()
         run: pnpm lint
 
       - name: TypeCheck
+        if: always()
         run: pnpm typecheck
 
       - name: Unit Tests
+        if: always()
         run: pnpm test
 
       - name: Build
+        if: always()
         run: pnpm build
 
       - name: Bundle Size Check
+        if: always()
         run: pnpm test:size

@@ -82,7 +82,7 @@ const mockMemberPhoto = {
   createdAt: "2024-01-01T11:00:00.000Z",
 };
 
-// pick 不含 members（旧数据兼容）
+// pick 不含 members（旧数据兼容），且 composedImagePath 为 null
 const mockPickNoMembers = {
   id: "pick-001",
   photoId: "photo-001",
@@ -90,8 +90,16 @@ const mockPickNoMembers = {
   title: "那年五月",
   narrative: "一段美好的回忆",
   score: 8.5,
+  composedImagePath: null as string | null,
   createdAt: "2024-01-01T00:00:00.000Z",
   // members 字段缺失（旧数据）
+};
+
+// pick 含 composedImagePath（mac App 等客户端需要 composedImageUrl 字段）
+const mockPickWithComposed = {
+  ...mockPickNoMembers,
+  id: "pick-003",
+  composedImagePath: "/storage/daily-composed/today_default.jpg" as string | null,
 };
 
 // pick 含 members
@@ -178,6 +186,31 @@ describe("每日精选路由", () => {
       expect(body.success).toBe(true);
       expect(body.data).toBeNull();
     });
+
+    // composedImageUrl 契约：mac App 依赖此字段决定是否拉合成壁纸
+    it("composedImagePath 非空时 data.composedImageUrl 为 /api/daily/{pickDate}/wallpaper", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([mockPickWithComposed]))
+        .mockReturnValueOnce(chainableMock([mockPhoto]))
+        .mockReturnValueOnce(chainableMock([]));
+
+      const { status, body } = await get("/api/daily/today");
+      expect(status).toBe(200);
+      expect(body.data).toHaveProperty("composedImageUrl");
+      expect(body.data.composedImageUrl).toBe(`/api/daily/${todayPickDate}/wallpaper`);
+    });
+
+    it("composedImagePath 为 null 时 data.composedImageUrl 为 null", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([mockPickNoMembers]))
+        .mockReturnValueOnce(chainableMock([mockPhoto]))
+        .mockReturnValueOnce(chainableMock([]));
+
+      const { status, body } = await get("/api/daily/today");
+      expect(status).toBe(200);
+      expect(body.data).toHaveProperty("composedImageUrl");
+      expect(body.data.composedImageUrl).toBeNull();
+    });
   });
 
   describe("GET /api/daily — 精选列表（分页）", () => {
@@ -213,6 +246,19 @@ describe("每日精选路由", () => {
       expect(body.total).toBe(0);
       expect(body.data).toHaveLength(0);
     });
+
+    it("列表项含 composedImageUrl（合成图存在时为 wallpaper URL）", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([{ count: 1 }]))
+        .mockReturnValueOnce(chainableMock([mockPickWithComposed]))
+        .mockReturnValueOnce(chainableMock([mockPhoto]))
+        .mockReturnValueOnce(chainableMock([]));
+
+      const { status, body } = await get("/api/daily");
+      expect(status).toBe(200);
+      expect(body.data[0]).toHaveProperty("composedImageUrl");
+      expect(body.data[0].composedImageUrl).toBe(`/api/daily/${todayPickDate}/wallpaper`);
+    });
   });
 
   describe("GET /api/daily/:id — 精选详情", () => {
@@ -241,6 +287,18 @@ describe("每日精选路由", () => {
       expect(status).toBe(404);
       expect(body.success).toBe(false);
       expect(body.error).toBeDefined();
+    });
+
+    it("详情含 composedImageUrl（合成图存在时为 wallpaper URL）", async () => {
+      mockDb.select
+        .mockReturnValueOnce(chainableMock([mockPickWithComposed]))
+        .mockReturnValueOnce(chainableMock([mockPhoto]))
+        .mockReturnValueOnce(chainableMock([]));
+
+      const { status, body } = await get("/api/daily/pick-003");
+      expect(status).toBe(200);
+      expect(body.data).toHaveProperty("composedImageUrl");
+      expect(body.data.composedImageUrl).toBe(`/api/daily/${todayPickDate}/wallpaper`);
     });
 
     it("游离 photoId 过滤：members 中已删除 photo 被剔除，正常 photo 保留", async () => {

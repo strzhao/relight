@@ -221,7 +221,24 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   const promptPath = isVideo ? "daily/narrate-video" : "daily/narrate";
   const narratePrompts = await loadPrompts("v2", promptPath);
 
-  let userText = narratePrompts.user;
+  // 元数据注入：narrate prompt 含 {date}/{years_ago}/{tags}/{emotions}/{narrative} 占位符。
+  // 不替换会把字面量原样发给 AI，导致叙事质量塌陷。
+  const heroDate = (hero.takenAt ?? "").split("T")[0]?.split(" ")[0] || "未知日期";
+  const heroTagsForNarrate = Array.isArray(hero.tags)
+    ? (hero.tags as { name: string }[]).map((t) => t.name).join("、")
+    : "无";
+  const heroEmotions =
+    hero.emotionalAnalysis && typeof hero.emotionalAnalysis === "object"
+      ? `${(hero.emotionalAnalysis as Record<string, unknown>).primary || "未知"} / ${(hero.emotionalAnalysis as Record<string, unknown>).secondary || "未知"}`
+      : "未知";
+
+  let userText = narratePrompts.user
+    .replace("{date}", heroDate)
+    .replace("{years_ago}", String(hero.yearsAgo ?? 0))
+    .replace("{tags}", heroTagsForNarrate)
+    .replace("{emotions}", heroEmotions)
+    .replace("{narrative}", hero.narrative ?? "无描述");
+
   if (isVideo) {
     // 读取 hero 的 photoAnalyses 获取 transcript / videoPacing
     const analysisRows = await db
@@ -313,7 +330,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   job.log(`叙事结果: title="${narrateResult.title}", score=${narrateResult.score}`);
 
   // ---- 写库 ----
-  await db
+  const insertedRows = await db
     .insert(schema.dailyPicks)
     .values({
       id: crypto.randomUUID(),
@@ -325,8 +342,58 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       members,
       createdAt: new Date().toISOString(),
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning();
+
+  // 同日重跑时 onConflictDoNothing 不会插入，需要查出已有 pick 用于阶段 3 update
+  let pickRow = insertedRows[0];
+  if (!pickRow) {
+    const existing = await db
+      .select()
+      .from(schema.dailyPicks)
+      .where(eq(schema.dailyPicks.pickDate, pickDate))
+      .limit(1);
+    pickRow = existing[0];
+  }
 
   job.log(`每日精选写入成功，members: ${members.length} 张`);
+
+  // ---- 阶段 3: Satori 合成默认尺寸壁纸（5120×2880），失败不阻塞 ----
+  // 视频精选不合成壁纸图（设计文档：mac App 视频路径走 dynamic .heic）
+  if (pickRow && !isVideo) {
+    try {
+      job.log("阶段 3: 合成默认壁纸图 5120×2880");
+      const photoRows = await db
+        .select()
+        .from(schema.photos)
+        .where(eq(schema.photos.id, hero.photoId))
+        .limit(1);
+      const heroPhoto = photoRows[0];
+      if (!heroPhoto) {
+        throw new Error(`hero photoId=${hero.photoId} 在 photos 表未找到`);
+      }
+
+      const { composeAndSave } = await import("../lib/wallpaper/composer");
+      const composedPath = await composeAndSave({
+        pick: pickRow,
+        photo: heroPhoto,
+        width: 5120,
+        height: 2880,
+        cacheKey: "default",
+      });
+
+      await db
+        .update(schema.dailyPicks)
+        .set({ composedImagePath: composedPath })
+        .where(eq(schema.dailyPicks.id, pickRow.id));
+
+      job.log(`阶段 3 完成: ${composedPath}`);
+    } catch (err) {
+      job.log(`阶段 3 失败（不影响精选）: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else if (isVideo) {
+    job.log("阶段 3 跳过：胜出照片为视频，本次不合成壁纸图");
+  }
+
   job.log("每日精选完成");
 }
