@@ -1,9 +1,9 @@
 "use client";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { getApiUrl, getTodayPick } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { DailyPick, DailyPickMember, Photo } from "@relight/shared";
+import { API_ROUTES, type DailyPick, type DailyPickMember, type Photo } from "@relight/shared";
 import { Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -81,7 +81,7 @@ export function DailyHero({ dailyPick }: DailyHeroProps) {
     let cancelled = false;
     async function load() {
       try {
-        const res = await api.daily.today();
+        const res = await getTodayPick();
         if (cancelled) return;
         if (res.success && res.data) {
           setState({ status: "content", pick: res.data });
@@ -134,7 +134,7 @@ function HeroContent({ pick }: { pick: DailyPick }) {
             <HeroVideo photo={photo} title={pick.title} />
           ) : (
             <img
-              src={api.originalUrl(pick.photoId)}
+              src={getApiUrl(API_ROUTES.photos.original(pick.photoId))}
               alt={pick.title}
               className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
               style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
@@ -242,7 +242,7 @@ function MemberStrip({ members }: { members: DailyPickMember[] }) {
             <div className="relative h-20 w-20 overflow-hidden rounded-sm ring-1 ring-foreground/10 transition-all duration-100 group-hover:ring-foreground/30">
               {photo?.thumbnailPath ? (
                 <img
-                  src={api.thumbnailUrl(member.photoId)}
+                  src={getApiUrl(API_ROUTES.photos.thumbnail(member.photoId))}
                   alt={member.caption}
                   className="h-full w-full object-cover"
                 />
@@ -277,7 +277,7 @@ function HeroVideo({ photo, title }: { photo: Photo; title: string }) {
   if (failed) {
     return (
       <img
-        src={api.thumbnailUrl(photo.id)}
+        src={getApiUrl(API_ROUTES.photos.thumbnail(photo.id))}
         alt={title}
         className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
         style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
@@ -292,8 +292,8 @@ function HeroVideo({ photo, title }: { photo: Photo; title: string }) {
     >
       <video
         ref={videoRef}
-        src={api.rawUrl(photo.id)}
-        poster={api.thumbnailUrl(photo.id)}
+        src={getApiUrl(API_ROUTES.photos.raw(photo.id))}
+        poster={getApiUrl(API_ROUTES.photos.thumbnail(photo.id))}
         autoPlay
         loop
         muted={muted}
