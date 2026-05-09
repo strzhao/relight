@@ -1,3 +1,23 @@
+### [2026-05-09] React SSR `{value} 文本` 在输出 HTML 中插入 `<!-- -->` 注释，破坏文本正则匹配
+
+<!-- tags: react, ssr, render-to-string, comment-marker, regex, jsx, expression-container, test, bug -->
+
+**Scenario**: 前端组件用 `<span>{yearsAgo} 年前的今天</span>` 这种 JSX 表达式 + 紧邻文本节点的写法，平时浏览器渲染没问题；但用 `react-dom/server.renderToString` 生成 HTML 字符串后断言 `expect(html).toMatch(/[0-9]+\s*年前.*今天/)` 时失败。
+
+**Lesson**: React 在 SSR 输出时，会在动态表达式与相邻静态文本之间插入 `<!-- -->` 注释作为文本节点边界标记（hydration mismatch 防护），所以实际 HTML 是 `<span>8<!-- --> 年前的今天</span>`。任何对"数字紧跟中文"的正则、字符串 contains 断言都会被打散。修复：把整段拼成单一表达式 `{`${value} 文本`}`（template literal），React 视作单一字符串节点不再插注释。
+
+**Evidence**: `apps/web/components/daily-hero.tsx` 渲染「N 年前的今天」标签，T17 smoke 测试 `expect(html).toMatch(/[0-9]+\s*年前.*今天/)` 失败；查 SSR 输出发现 `8<!-- --> 年前的今天`。从 `{yearsAgo} 年前的今天` 改为 `{`${yearsAgo} 年前的今天`}` 后通过。该陷阱也会影响 e2e 文本断言（Playwright 的 `getByText` 默认正常化空白但不剥离注释节点）。
+
+### [2026-05-09] 红队 vi.mock 平铺导出 vs 蓝队 `api` 对象——TDD 契约对齐策略
+
+<!-- tags: vitest, vi-mock, tdd, blue-red, contract-drift, ssr, react, mock-shape, hook-vs-prop, design -->
+
+**Scenario**: autopilot 蓝/红队并行实现 + 验收测试。蓝队组件 `import { api } from "@/lib/api"; api.daily.today()`；红队 `vi.mock("@/lib/api", () => ({ getTodayPick: vi.fn(), getApiUrl: vi.fn() }))`——两边 mock 的形状对不上：组件里 `api === undefined`，SSR 渲染立即崩。
+
+**Lesson**: vi.mock 的 export 形状一旦写死，被测组件的 import 形状必须 100% 匹配，否则 mock 等于剥光模块。红队铁律是"绝不修改测试"，所以**实现侧**必须同时提供"对象 API"和"平铺函数"两套导出（兼容层），让蓝队的 `api.xxx()` 和红队 mock 的 `getXxx()` 都能解析；附带收益：平铺函数在 RSC / 静态分析 / SSR 测试场景下更友好。同样的逻辑适用于"组件用 useEffect 内部 fetch vs 测试传 prop 直接渲染"——加个可选 prop 走"受控/非受控双模式"，`prop !== undefined` 切换。
+
+**Evidence**: `apps/web/lib/api.ts` 加 `getApiUrl(path)` / `getTodayPick()` / `getDailyPick(id)` 平铺导出；`apps/web/components/daily-hero.tsx` 把 `api.daily.today()` → `getTodayPick()`、`api.originalUrl(id)` → `getApiUrl(API_ROUTES.photos.original(id))`；同时 `DailyHero({ dailyPick })` 加可选 prop——传入时跳过 fetch 直接渲染（测试 + SSR），未传时回到原来 useEffect fetch 路径。auto-fix 后 T17 smoke 11/11 通过。
+
 ### [2026-05-08] Drizzle `onConflictDoNothing()` 配 `.returning()` 时同冲突返回空数组
 
 <!-- tags: drizzle, sqlite, onconflict, returning, orm, bug -->

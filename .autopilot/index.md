@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-09] 每日精选改为 4 源平等加权混采 + 久远度温和加成 + 30 天去重 + AI 二次评选关联 members | tags: daily-selection, candidate-pool, age-weight, dedup, multi-photo, ai-clustering, design, architecture | → decisions.md
 - [2026-05-08] 后端图片合成选 Satori + Resvg 而非无头浏览器 | tags: image-composition, satori, resvg, chromium, server-rendering, daily-selection, design | → decisions.md
 - [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt | tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal | → decisions.md
 - [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例 | tags: tech-stack, backend, orm, conventions, design | → decisions.md
@@ -17,6 +18,8 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-09] React SSR `{value} 文本` 在输出 HTML 中插入 `<!-- -->` 注释，破坏文本正则匹配 | tags: react, ssr, render-to-string, comment-marker, regex, jsx, expression-container, test, bug | → patterns.md
+- [2026-05-09] 红队 vi.mock 平铺导出 vs 蓝队 `api` 对象——TDD 契约对齐策略 | tags: vitest, vi-mock, tdd, blue-red, contract-drift, ssr, react, mock-shape, hook-vs-prop, design | → patterns.md
 - [2026-05-09] drizzle async transaction 在 better-sqlite3 上抛 `Transaction function cannot return a promise` | tags: drizzle, better-sqlite3, transaction, sync, async, orm, bug, multi-step-update | → patterns.md
 - [2026-05-08] Drizzle `onConflictDoNothing()` 配 `.returning()` 时同冲突返回空数组 | tags: drizzle, sqlite, onconflict, returning, orm, bug | → patterns.md
 - [2026-05-08] tsup 打包后 ESM `import.meta.url` 相对路径基准在 dev/prod 不同步 | tags: esm, import-meta-url, tsup, dev-vs-prod, asset-path, build, bug | → patterns.md

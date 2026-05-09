@@ -1,5 +1,25 @@
 # 架构决策日志
 
+### [2026-05-09] 每日精选改为 4 源平等加权混采 + 久远度温和加成 + 30 天去重 + AI 二次评选关联 members
+
+<!-- tags: daily-selection, candidate-pool, age-weight, dedup, multi-photo, ai-clustering, design, architecture -->
+
+**Background**: 旧每日精选只查"月-日 = 今日"严格匹配 + aestheticScore DESC top 20，痛点：候选池可能为空（用户某月某日没拍过照）/ 仅美学评分排序丧失久远感 / 同一张照片可隔几日复选 / 单图无法呈现"一段时光"。用户诉求是"更多有价值的回忆"+"多张照片有关联（如同一次游玩回顾）"。
+
+**Choice**: 候选池构造拆成 4 个独立子查询平等加权混采 — 历史上的今天 / 同月份不同日 / 同季节不同月 / 久远随机老照片（>2 年前），每源保底 3 张防挤占，全局按 `aestheticScore × (1 + min(0.6, √yearsAgo × 0.1))` 排序（5 年前 +22%、10 年前 +32%、封顶 1.6）；30 天 photoId 去重既覆盖 hero 也覆盖历史 members。新增"阶段 1.5"：hero 选定后再查同日 ±6h 时间窗候选，让 AI 二次评选 0-8 张 members + 每张写一句 12 字 caption；视频 hero 跳过 1.5 退化单图。schema `dailyPicks` 加 `members` JSON 列。
+
+**Alternatives rejected**:
+- 单一扩窗（月-日 ±3 天）：方向一致但不够丰富，没有"久远感"维度；
+- 严格分层 fallback（先用历史上的今天，空了才用其他）：仪式感强但失去多样性；
+- 加权曲线选指数 / 激进 (5 年前 +50%/+100%)：用户明确要"温和"，避免新照片永远选不上；
+- 时间窗 + 标签重叠选 members：依赖标签精度，对"游玩"事件聚类弱；
+- GPS 同地点：当前 photos 无 GPS 字段，前置改造重；
+- 用户反馈点赞/跳过：用户明确本期不做。
+
+**Trade-offs**: AI 调用从每日 2 次增到 3 次（select hero / select members / narrate），token 成本上升约 50%；prompt 上下文长度需要控制（candidate narrative 截断到 80 字，related-pool 上限 20 张）。Members AI 越界 index 必须静默丢弃（不整体 fallback），避免单条坏数据废掉整次 members。视频 hero 不构造关联池，简化视频路径。
+
+**Evidence**: `apps/backend/src/jobs/daily-selection/{candidate-pool,related-pool}.ts` 新建模块；`apps/backend/src/jobs/daily-selection.ts` 重构为三阶段流水线；`v2/daily/members/{system,user}.txt` 新建 prompt；schema dailyPicks 新增 members 列 + 历史行 UPDATE 回填 `[]`；前端 DailyHero 加 `<MemberStrip>` + 「N 年前的今天」标签。提交 `4540f87`，含 110+ 测试（candidate-pool 单测 14 + 集成 6 / related-pool 集成 5 / daily-worker acceptance 28 / multi-photo acceptance 13 / smoke 11 / routes 9）。
+
 ### [2026-05-08] 后端图片合成选 Satori + Resvg 流水线而非无头浏览器
 
 <!-- tags: image-composition, satori, resvg, chromium, server-rendering, daily-selection, design -->
