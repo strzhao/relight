@@ -34,10 +34,23 @@ const mockSharpInstance = {
 const mockSharp = vi.fn(() => mockSharpInstance);
 vi.mock("sharp", () => ({ default: mockSharp }));
 
-// Mock child_process.spawn for video thumbnail
+// Mock child_process.spawn for video thumbnail。
+// 必须暴露 execFile / exec 等其它消费者用到的导出，否则别处 import { execFile }
+// 会抛 "No 'execFile' export is defined on the 'node:child_process' mock"。
+// execFile 默认走 promisify，必须立即调最后一个参数（callback）触发 promise 完成，否则会 hang 5s 超时。
 const mockSpawn = vi.fn();
+const mockExecFile = vi.fn((..._args: unknown[]) => {
+  const last = _args[_args.length - 1];
+  if (typeof last === "function") (last as (e: unknown, ...rest: unknown[]) => void)(null, "", "");
+});
 vi.mock("node:child_process", () => ({
   spawn: (...args: unknown[]) => mockSpawn(...(args as Parameters<typeof mockSpawn>)),
+  execFile: mockExecFile,
+  exec: vi.fn(),
+  execFileSync: vi.fn(),
+  execSync: vi.fn(),
+  spawnSync: vi.fn(),
+  fork: vi.fn(),
 }));
 
 // Mock heic.ts — HEIC 文件走独立分支

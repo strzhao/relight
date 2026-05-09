@@ -20,6 +20,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import sharp from "sharp";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { setupTestSchema } from "../../__tests__/helpers/test-schema";
 import * as schema from "../../db/schema";
 
 // =====================================================================
@@ -91,76 +92,7 @@ vi.mock("node:fs/promises", async () => {
 function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  sqlite.exec(`
-    CREATE TABLE storage_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT,
-      status TEXT,
-      last_error TEXT
-    );
-    CREATE TABLE photos (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL UNIQUE,
-      width INTEGER NOT NULL DEFAULT 0,
-      height INTEGER NOT NULL DEFAULT 0,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path TEXT,
-      taken_at TEXT,
-      file_mtime INTEGER,
-      created_at TEXT NOT NULL,
-      media_type TEXT NOT NULL DEFAULT 'image',
-      duration_sec REAL,
-      video_codec TEXT,
-      video_fps REAL
-    );
-    CREATE TABLE tags (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      category TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE photo_tags (
-      photo_id TEXT NOT NULL,
-      tag_id TEXT NOT NULL,
-      confidence REAL NOT NULL DEFAULT 0,
-      PRIMARY KEY (photo_id, tag_id)
-    );
-    CREATE TABLE photo_analyses (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL,
-      ai_model TEXT NOT NULL,
-      narrative TEXT,
-      aesthetic_score REAL,
-      tags TEXT,
-      composition TEXT,
-      color_analysis TEXT,
-      emotional_analysis TEXT,
-      usage_suggestions TEXT,
-      prompt_version TEXT,
-      raw_response TEXT NOT NULL,
-      processed_at TEXT NOT NULL,
-      transcript TEXT,
-      transcript_segments TEXT,
-      video_pacing TEXT,
-      motion_score REAL
-    );
-    CREATE TABLE daily_picks (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL,
-      pick_date TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      narrative TEXT NOT NULL,
-      score REAL NOT NULL,
-      composed_image_path TEXT,
-      created_at TEXT NOT NULL
-    );
-  `);
+  setupTestSchema(sqlite);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 

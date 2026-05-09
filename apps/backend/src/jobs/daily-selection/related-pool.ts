@@ -42,7 +42,14 @@ export async function buildRelatedPool(
     return [];
   }
 
-  const heroTime = new Date(hero.takenAt).getTime();
+  // EXIF 写入的 takenAt 多为 'YYYY-MM-DD HH:MM:SS' 字面值（无时区）。
+  // 直接 new Date() 会按本地时区解析，再 toISOString() 会平移时区偏移；
+  // 而 SQLite 把 DB 里同样无时区的字符串视为 naive UTC——两侧语义错位。
+  // 这里强制按 UTC 解析：缺少时区标记时补 'Z'，让 JS 与 SQL 比较口径一致。
+  const isoLike = /[Zz]|[+-]\d{2}:?\d{2}$/.test(hero.takenAt)
+    ? hero.takenAt
+    : `${hero.takenAt.replace(" ", "T")}Z`;
+  const heroTime = new Date(isoLike).getTime();
   if (Number.isNaN(heroTime)) return [];
 
   const sixHoursMs = 6 * 3600 * 1000;
@@ -70,11 +77,14 @@ export async function buildRelatedPool(
       sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
     )
     .where(
+      // 必须用 datetime() 包裹两侧再比较：
+      // photos.taken_at 是 'YYYY-MM-DD HH:MM:SS'（空格分隔），windowStart 是 ISO（T 分隔 + Z）。
+      // 直接字符串 >= 会按字典序比较，空格 < 'T'，所有 taken_at 都被错误地判为小于窗口起点。
       sql`${schema.photos.id} != ${hero.photoId}
-          AND COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt}) >= ${windowStart}
-          AND COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt}) <= ${windowEnd}`,
+          AND datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) >= datetime(${windowStart})
+          AND datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) <= datetime(${windowEnd})`,
     )
-    .orderBy(sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt}) ASC`)
+    .orderBy(sql`datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) ASC`)
     .limit(maxRelated + excludeIds.size); // 多取一些，后续过滤
 
   const filtered = rows.filter((r) => !excludeIds.has(r.photoId)).slice(0, maxRelated);

@@ -3,7 +3,13 @@
  * 测试 ageWeightMultiplier 数值断言 + dedupAndQuotaMerge 去重/quota 正确性
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// candidate-pool.ts 顶层 import "../../db"，db/index.ts 模块加载时立即 new Database()，
+// 如果测试 cwd 下 data/ 目录不存在会抛 "Cannot open database because the directory does not exist"。
+// 本测试是纯函数验证，stub 掉 db 模块即可。
+vi.mock("../../../db", () => ({ db: {}, schema: {} }));
+
 import { type EnrichedCandidate, ageWeightMultiplier, dedupAndQuotaMerge } from "../candidate-pool";
 
 // ===== ageWeightMultiplier 数值断言 =====

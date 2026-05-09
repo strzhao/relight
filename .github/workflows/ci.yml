@@ -16,6 +16,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # BullMQ / ioredis 相关测试需要真实 Redis，否则 ECONNREFUSED 6379 全挂
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      REDIS_URL: redis://localhost:6379
+
     steps:
       - uses: actions/checkout@v4
 
@@ -42,9 +57,11 @@ jobs:
         if: always()
         run: pnpm test
 
+      # @relight/mac 是 SwiftUI 工程，build 走 xcodebuild，只能在 macOS 跑
+      # Linux runner 上用 turbo --filter 排除
       - name: Build
         if: always()
-        run: pnpm build
+        run: pnpm exec turbo build --filter='!@relight/mac'
 
       - name: Bundle Size Check
         if: always()

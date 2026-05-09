@@ -19,6 +19,11 @@ import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3"
 import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as realSchema from "../db/schema";
+import { setupTestSchema } from "./helpers/test-schema";
+
+// 表 DDL 委托给 helpers/test-schema.ts；本测试设计意图要求 status NOT NULL，传 strict option
+const createTables = (sqlite: Database.Database) =>
+  setupTestSchema(sqlite, { strictStorageStatus: true });
 
 // =========================================================================
 // 类型定义（设计文档声明）
@@ -187,10 +192,10 @@ beforeAll(async () => {
   permissionDeniedSourceId = crypto.randomUUID();
   unknownSourceId = crypto.randomUUID();
 
-  // 使用原始 SQL INSERT 以避免 Drizzle schema 中尚无 status/last_error 列的问题
-  // 新列的 DEFAULT 约束确保初始值为 status='unknown', last_error=NULL
+  // 使用原始 SQL INSERT。prod schema 中 status 为 nullable 无 default，
+  // 测试显式把初始 status 设为 'unknown' 模拟检测前的初始状态。
   const insertSource = sqlite.prepare(
-    "INSERT INTO storage_sources (id, name, type, root_path, enabled, last_scan_at) VALUES (?, ?, ?, ?, 1, NULL)",
+    "INSERT INTO storage_sources (id, name, type, root_path, enabled, last_scan_at, status) VALUES (?, ?, ?, ?, 1, NULL, 'unknown')",
   );
 
   // 健康存储源（指向我们创建的临时目录）
@@ -865,89 +870,3 @@ describe("存储源可达性 — 完整数据流验收测试", () => {
 // =========================================================================
 // 辅助：手动建表（含新增 status + last_error 列）
 // =========================================================================
-
-function createTables(sqlite: Database.Database): void {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS storage_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT,
-      status TEXT NOT NULL DEFAULT 'unknown',
-      last_error TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS photos (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL,
-      width INTEGER NOT NULL DEFAULT 0,
-      height INTEGER NOT NULL DEFAULT 0,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path TEXT,
-      taken_at TEXT,
-      file_mtime INTEGER,
-      created_at TEXT NOT NULL,
-      UNIQUE(storage_source_id, file_path)
-    );
-
-    CREATE TABLE IF NOT EXISTS tags (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      category TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS photo_tags (
-      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
-      tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      confidence REAL NOT NULL DEFAULT 0,
-      PRIMARY KEY (photo_id, tag_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS photo_analyses (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
-      ai_model TEXT NOT NULL,
-      raw_response TEXT NOT NULL,
-      narrative TEXT NOT NULL DEFAULT '',
-      aesthetic_score REAL NOT NULL DEFAULT 5,
-      tags TEXT NOT NULL DEFAULT '[]',
-      composition TEXT NOT NULL DEFAULT '{}',
-      color_analysis TEXT NOT NULL DEFAULT '{}',
-      emotional_analysis TEXT NOT NULL DEFAULT '{}',
-      usage_suggestions TEXT NOT NULL DEFAULT '[]',
-      prompt_version TEXT NOT NULL DEFAULT 'v1',
-      processed_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS daily_picks (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL REFERENCES photos(id),
-      pick_date TEXT NOT NULL,
-      title TEXT NOT NULL,
-      narrative TEXT NOT NULL,
-      score REAL NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS scan_logs (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      job_id TEXT,
-      scanned_count INTEGER NOT NULL DEFAULT 0,
-      new_count INTEGER NOT NULL DEFAULT 0,
-      error_count INTEGER NOT NULL DEFAULT 0,
-      started_at TEXT NOT NULL,
-      finished_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-}

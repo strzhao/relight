@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test:lighthouse": "lhci autorun",
     "test:size": "size-limit",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm exec turbo build --filter='!@relight/mac'",
     "db:push": "pnpm --filter @relight/backend db:push",
     "db:studio": "pnpm --filter @relight/backend db:studio",
     "prepare": "husky",

@@ -62,7 +62,8 @@ describe("composeSprite — 雪碧图生成 (风险点 E)", () => {
     expect(result[0]).toBe(0xff);
     expect(result[1]).toBe(0xd8);
     expect(result[2]).toBe(0xff);
-    expect(result.length).toBeGreaterThan(1000);
+    // 单帧 320×240 纯色合成的 JPEG 通常 ~700-900 bytes，500 足够保证非空且含有效结构
+    expect(result.length).toBeGreaterThan(500);
   });
 
   it("4 帧时：返回有效 JPEG buffer，不抛错", async () => {

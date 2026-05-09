@@ -330,7 +330,9 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   job.log(`叙事结果: title="${narrateResult.title}", score=${narrateResult.score}`);
 
   // ---- 写库 ----
-  const insertedRows = await db
+  // 同日重跑：覆盖 hero/title/narrative/score/members 五个业务字段，并清空 composedImagePath
+  // 让阶段 3 重新合成（旧壁纸对应的可能是上一次的 hero）。createdAt 保留不变，记录"首次生成时刻"。
+  const upsertedRows = await db
     .insert(schema.dailyPicks)
     .values({
       id: crypto.randomUUID(),
@@ -342,19 +344,20 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       members,
       createdAt: new Date().toISOString(),
     })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: schema.dailyPicks.pickDate,
+      set: {
+        photoId: hero.photoId,
+        title: narrateResult.title,
+        narrative: narrateResult.narrative,
+        score: narrateResult.score,
+        members,
+        composedImagePath: null,
+      },
+    })
     .returning();
 
-  // 同日重跑时 onConflictDoNothing 不会插入，需要查出已有 pick 用于阶段 3 update
-  let pickRow = insertedRows[0];
-  if (!pickRow) {
-    const existing = await db
-      .select()
-      .from(schema.dailyPicks)
-      .where(eq(schema.dailyPicks.pickDate, pickDate))
-      .limit(1);
-    pickRow = existing[0];
-  }
+  const pickRow = upsertedRows[0];
 
   job.log(`每日精选写入成功，members: ${members.length} 张`);
 

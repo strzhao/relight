@@ -78,77 +78,10 @@ function createMockAdapter(files: MockFileEntry[]) {
   };
 }
 
-// ---- 建表（含修复 5: file_hash UNIQUE 约束） ----
+// 表 DDL 委托给 helpers/test-schema.ts，与 prod schema 保持同步
+import { setupTestSchema } from "./helpers/test-schema";
 
-function createTestTables(sqlite: Database.Database): void {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS storage_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT,
-      status TEXT,
-      last_error TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS photos (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL UNIQUE,
-      width INTEGER NOT NULL DEFAULT 0,
-      height INTEGER NOT NULL DEFAULT 0,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path TEXT,
-      taken_at TEXT,
-      file_mtime TEXT,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS photo_analyses (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
-      ai_model TEXT NOT NULL,
-      raw_response TEXT NOT NULL DEFAULT '',
-      narrative TEXT NOT NULL DEFAULT '',
-      aesthetic_score REAL NOT NULL DEFAULT 5,
-      tags TEXT NOT NULL DEFAULT '[]',
-      composition TEXT NOT NULL DEFAULT '{}',
-      color_analysis TEXT NOT NULL DEFAULT '{}',
-      emotional_analysis TEXT NOT NULL DEFAULT '{}',
-      usage_suggestions TEXT NOT NULL DEFAULT '[]',
-      prompt_version TEXT NOT NULL DEFAULT 'v1',
-      processed_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS scan_logs (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      job_id TEXT,
-      scanned_count INTEGER NOT NULL DEFAULT 0,
-      new_count INTEGER NOT NULL DEFAULT 0,
-      error_count INTEGER NOT NULL DEFAULT 0,
-      started_at TEXT NOT NULL,
-      finished_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS tags (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS photo_tags (
-      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
-      tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      confidence REAL NOT NULL DEFAULT 0,
-      PRIMARY KEY (photo_id, tag_id)
-    );
-  `);
-}
+const createTestTables = setupTestSchema;
 
 // ---- 辅助: 模拟扫描流程 ----
 

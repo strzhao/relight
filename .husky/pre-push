@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# pre-push: 跑同 CI 等价的本地全套验证（lint + typecheck + test + build）
+# 通过后才 push，避免远端 CI 慢周期来回。
+# 紧急情况可用 `git push --no-verify` 绕过。
+echo "[pre-push] running pnpm verify (lint + typecheck + test + build)..."
+echo "[pre-push] tip: skip with 'git push --no-verify'"
+pnpm verify

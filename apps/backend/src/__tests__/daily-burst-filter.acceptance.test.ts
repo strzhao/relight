@@ -25,102 +25,16 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as schema from "../db/schema";
+import { setupTestSchema } from "./helpers/test-schema";
 
 // =========================================================================
-// 构建内存 SQLite（含 bursts 表 + photos 新列）
+// 构建内存 SQLite（含 bursts 表 + photos 新列），DDL 来自共享 helpers/test-schema.ts
 // =========================================================================
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  sqlite.exec(`
-    CREATE TABLE storage_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT,
-      status TEXT,
-      last_error TEXT
-    );
-
-    CREATE TABLE photos (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL UNIQUE,
-      width INTEGER NOT NULL DEFAULT 0,
-      height INTEGER NOT NULL DEFAULT 0,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path TEXT,
-      taken_at TEXT,
-      file_mtime INTEGER,
-      created_at TEXT NOT NULL,
-      media_type TEXT NOT NULL DEFAULT 'image',
-      duration_sec REAL,
-      video_codec TEXT,
-      video_fps REAL,
-      burst_id TEXT,
-      is_burst_representative INTEGER NOT NULL DEFAULT 0,
-      phash TEXT
-    );
-
-    CREATE TABLE bursts (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      representative_photo_id TEXT,
-      member_count INTEGER NOT NULL DEFAULT 0,
-      manual_override INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE tags (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-      category TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE TABLE photo_tags (
-      photo_id TEXT NOT NULL, tag_id TEXT NOT NULL,
-      confidence REAL NOT NULL DEFAULT 0,
-      PRIMARY KEY (photo_id, tag_id)
-    );
-    CREATE TABLE photo_analyses (
-      id TEXT PRIMARY KEY, photo_id TEXT NOT NULL,
-      ai_model TEXT NOT NULL, narrative TEXT,
-      aesthetic_score REAL, tags TEXT, composition TEXT,
-      color_analysis TEXT, emotional_analysis TEXT,
-      usage_suggestions TEXT, prompt_version TEXT,
-      raw_response TEXT NOT NULL, processed_at TEXT NOT NULL,
-      transcript TEXT, transcript_segments TEXT,
-      video_pacing TEXT, motion_score REAL
-    );
-    CREATE TABLE daily_picks (
-      id TEXT PRIMARY KEY, photo_id TEXT NOT NULL,
-      pick_date TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL, narrative TEXT NOT NULL,
-      score REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL
-    );
-    CREATE TABLE scan_logs (
-      id TEXT PRIMARY KEY, storage_source_id TEXT NOT NULL,
-      scanned_count INTEGER NOT NULL DEFAULT 0,
-      new_count INTEGER NOT NULL DEFAULT 0,
-      error_count INTEGER NOT NULL DEFAULT 0,
-      started_at TEXT NOT NULL, finished_at TEXT
-    );
-    CREATE TABLE settings (
-      key TEXT PRIMARY KEY, value TEXT NOT NULL
-    );
-    CREATE TABLE analyze_batches (
-      id TEXT PRIMARY KEY, filter_json TEXT NOT NULL,
-      total_count INTEGER NOT NULL DEFAULT 0,
-      completed_count INTEGER NOT NULL DEFAULT 0,
-      failed_count INTEGER NOT NULL DEFAULT 0,
-      started_at TEXT NOT NULL, finished_at TEXT
-    );
-    CREATE TABLE analyze_batch_jobs (
-      job_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL
-    );
-  `);
+  setupTestSchema(sqlite);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 

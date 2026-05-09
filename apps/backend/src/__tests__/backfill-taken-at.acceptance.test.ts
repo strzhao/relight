@@ -40,6 +40,7 @@ vi.mock("../db", () => ({
 // 接口约定 import（蓝队必须 export 此函数）
 // ============================================================================
 import { backfillTakenAt } from "../cli/backfill-taken-at";
+import { setupTestSchema } from "./helpers/test-schema";
 
 // ============================================================================
 // 测试数据库工厂 — 每个 test 创建独立的 in-memory SQLite
@@ -55,30 +56,7 @@ function createTestDb(): Database.Database {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
 
-  db.exec(`
-    CREATE TABLE storage_sources (
-      id   TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1
-    );
-
-    CREATE TABLE photos (
-      id                TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      file_path         TEXT NOT NULL,
-      file_hash         TEXT NOT NULL UNIQUE,
-      width             INTEGER NOT NULL DEFAULT 0,
-      height            INTEGER NOT NULL DEFAULT 0,
-      file_size         INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path    TEXT,
-      taken_at          TEXT,
-      file_mtime        INTEGER,
-      created_at        TEXT NOT NULL,
-      UNIQUE(storage_source_id, file_path)
-    );
-  `);
+  setupTestSchema(db);
 
   // 插入一个默认存储源供所有测试使用
   db.prepare(`
