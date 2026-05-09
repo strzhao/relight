@@ -314,8 +314,8 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           photoIds: newPhotoIdsWithThumbnail,
         });
         job.log(
-          `连拍检测完成: 新增 ${burstResult.newBurstsCount} 个连拍组，更新 ${burstResult.updatedBurstsCount} 个，` +
-            `${burstResult.assignedPhotosCount} 张照片归入连拍组`,
+          `连拍检测完成: 处理 ${burstResult.groupsCreated} 个连拍组，` +
+            `${burstResult.photosGrouped} 张照片归入连拍组`,
         );
       } catch (burstErr) {
         job.log(

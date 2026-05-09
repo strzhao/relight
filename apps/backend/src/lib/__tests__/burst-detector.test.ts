@@ -180,7 +180,7 @@ describe("detectBursts 聚类逻辑", () => {
     });
 
     // 应该产生至少 1 个连拍组
-    expect(result.newBurstsCount).toBeGreaterThanOrEqual(1);
+    expect(result.groupsCreated).toBeGreaterThanOrEqual(1);
   });
 
   it("时间间隔 >3s → 不应聚组", async () => {
@@ -207,8 +207,8 @@ describe("detectBursts 聚类逻辑", () => {
       photoIds: photos.map((p) => p.id),
     });
 
-    expect(result.newBurstsCount).toBe(0);
-    expect(result.assignedPhotosCount).toBe(0);
+    expect(result.groupsCreated).toBe(0);
+    expect(result.photosGrouped).toBe(0);
   });
 
   it("时间近但 hamming >10 → 不应聚组（场景不同）", async () => {
@@ -235,8 +235,8 @@ describe("detectBursts 聚类逻辑", () => {
       photoIds: photos.map((p) => p.id),
     });
 
-    expect(result.newBurstsCount).toBe(0);
-    expect(result.assignedPhotosCount).toBe(0);
+    expect(result.groupsCreated).toBe(0);
+    expect(result.photosGrouped).toBe(0);
   });
 
   it("空 photoIds → 返回全 0 不报错", async () => {
@@ -246,9 +246,8 @@ describe("detectBursts 聚类逻辑", () => {
       photoIds: [],
     });
 
-    expect(result.newBurstsCount).toBe(0);
-    expect(result.updatedBurstsCount).toBe(0);
-    expect(result.assignedPhotosCount).toBe(0);
+    expect(result.groupsCreated).toBe(0);
+    expect(result.photosGrouped).toBe(0);
   });
 
   it("单张照片 → 不产生连拍组（只含 1 张的组丢弃）", async () => {
@@ -271,6 +270,6 @@ describe("detectBursts 聚类逻辑", () => {
       photoIds: ["p1"],
     });
 
-    expect(result.newBurstsCount).toBe(0);
+    expect(result.groupsCreated).toBe(0);
   });
 });

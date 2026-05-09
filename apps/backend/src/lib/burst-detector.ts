@@ -25,12 +25,10 @@ interface DetectBurstsOptions {
 }
 
 interface DetectBurstsResult {
-  /** 新创建的连拍组数量 */
-  newBurstsCount: number;
-  /** 更新的连拍组数量（合并了新成员） */
-  updatedBurstsCount: number;
+  /** 本次处理的连拍组数量（含新建 + 合并新成员的更新） */
+  groupsCreated: number;
   /** 归入连拍组的照片数量 */
-  assignedPhotosCount: number;
+  photosGrouped: number;
 }
 
 /**
@@ -86,12 +84,11 @@ class UnionFind {
  */
 export async function detectBursts(options: DetectBurstsOptions): Promise<DetectBurstsResult> {
   const { storageSourceId, photoIds } = options;
-  let newBurstsCount = 0;
-  let updatedBurstsCount = 0;
-  let assignedPhotosCount = 0;
+  let groupsCreated = 0;
+  let photosGrouped = 0;
 
   if (photoIds.length === 0) {
-    return { newBurstsCount, updatedBurstsCount, assignedPhotosCount };
+    return { groupsCreated, photosGrouped };
   }
 
   // 1. 查询本批照片，取出 takenAt 范围
@@ -112,7 +109,7 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
   // 过滤出有 takenAt 的照片
   const batchWithTime = batchPhotos.filter((p) => p.takenAt != null);
   if (batchWithTime.length === 0) {
-    return { newBurstsCount, updatedBurstsCount, assignedPhotosCount };
+    return { groupsCreated, photosGrouped };
   }
 
   // 计算 takenAt 范围
@@ -167,7 +164,7 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
     .sort((a, b) => new Date(a.takenAt ?? "").getTime() - new Date(b.takenAt ?? "").getTime());
 
   if (eligible.length < 2) {
-    return { newBurstsCount, updatedBurstsCount, assignedPhotosCount };
+    return { groupsCreated, photosGrouped };
   }
 
   // 5. Union-Find 聚类：遍历相邻对，双重判断
@@ -209,7 +206,7 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
   }
 
   if (validGroups.length === 0) {
-    return { newBurstsCount, updatedBurstsCount, assignedPhotosCount };
+    return { groupsCreated, photosGrouped };
   }
 
   // 构建 id → photo 的快速查找映射
@@ -254,7 +251,7 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
         createdAt: now,
       });
 
-      newBurstsCount++;
+      groupsCreated++;
     } else if (existingBurstIds.size === 1) {
       // 合并新成员到已有组
       burstId = [...existingBurstIds][0] ?? "";
@@ -271,7 +268,7 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
           .update(schema.bursts)
           .set({ memberCount: members.length })
           .where(eq(schema.bursts.id, burstId));
-        updatedBurstsCount++;
+        groupsCreated++;
       }
     } else {
       // 多个现有 burst 需要合并：取第一个 burst，其余合并入它
@@ -301,7 +298,7 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
         .update(schema.bursts)
         .set({ memberCount: members.length })
         .where(eq(schema.bursts.id, burstId));
-      updatedBurstsCount++;
+      groupsCreated++;
     }
 
     // 8. 批量更新 photos：设置 burst_id + is_burst_representative
@@ -332,8 +329,8 @@ export async function detectBursts(options: DetectBurstsOptions): Promise<Detect
         .where(eq(schema.bursts.id, burstId));
     }
 
-    assignedPhotosCount += members.length;
+    photosGrouped += members.length;
   }
 
-  return { newBurstsCount, updatedBurstsCount, assignedPhotosCount };
+  return { groupsCreated, photosGrouped };
 }

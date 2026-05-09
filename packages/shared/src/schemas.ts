@@ -66,7 +66,7 @@ export const analyzeBatchSchema = z.object({
 
 /** 设置连拍代表照片 */
 export const setRepresentativeSchema = z.object({
-  photoId: z.string().uuid(),
+  photoId: z.string().min(1),
 });
 
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;

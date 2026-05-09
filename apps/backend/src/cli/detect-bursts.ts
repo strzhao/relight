@@ -51,9 +51,8 @@ async function main() {
   const sources = await db.select().from(schema.storageSources);
   console.log(`[detect-bursts] 发现 ${sources.length} 个存储源`);
 
-  let totalNewBursts = 0;
-  let totalUpdatedBursts = 0;
-  let totalAssignedPhotos = 0;
+  let totalGroupsProcessed = 0;
+  let totalPhotosGrouped = 0;
   let totalPhashComputed = 0;
 
   for (const source of sources) {
@@ -124,13 +123,12 @@ async function main() {
 
     const result = await detectBursts({ storageSourceId: source.id, photoIds });
     console.log(
-      `[detect-bursts]   聚类结果: 新增 ${result.newBurstsCount} 组，` +
-        `更新 ${result.updatedBurstsCount} 组，归入 ${result.assignedPhotosCount} 张`,
+      `[detect-bursts]   聚类结果: 处理 ${result.groupsCreated} 组，` +
+        `归入 ${result.photosGrouped} 张`,
     );
 
-    totalNewBursts += result.newBurstsCount;
-    totalUpdatedBursts += result.updatedBurstsCount;
-    totalAssignedPhotos += result.assignedPhotosCount;
+    totalGroupsProcessed += result.groupsCreated;
+    totalPhotosGrouped += result.photosGrouped;
   }
 
   // 汇总
@@ -144,7 +142,7 @@ async function main() {
   console.log(`处理 ${sources.length} 个存储源`);
   console.log(`计算 phash: ${totalPhashComputed} 张`);
   console.log(
-    `识别到 ${totalNewBursts} 个新连拍组，更新 ${totalUpdatedBursts} 个已有组，含 ${totalAssignedPhotos} 张照片`,
+    `识别到 ${totalGroupsProcessed} 个连拍组，含 ${totalPhotosGrouped} 张照片`,
   );
   console.log(
     `数据库当前: bursts 表 ${burstCount[0]?.count ?? 0} 行，` +
