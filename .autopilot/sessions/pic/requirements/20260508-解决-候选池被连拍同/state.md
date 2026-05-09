@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 6
 max_iterations: 30
@@ -12,7 +12,7 @@ fast_mode: false
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.claude/worktrees/pic/.autopilot/sessions/pic/requirements/20260508-解决-候选池被连拍同"
 session_id: 84809395-141d-401d-bf55-8698b277f28c
 started_at: "2026-05-08T15:14:52Z"
@@ -393,3 +393,7 @@ Tier 0+1 本任务相关 ❌ = 16（≥ 3） → 跳过 Wave 1.5/2，直接 auto
 - [2026-05-09T01:25:00Z] 用户在 review-accept 选"先修复 B1 再 merge"。修复尝试：用 `db.transaction(async tx => ...)` 包 PATCH + calibrateBurstRepresentative 的多步 UPDATE
 - [2026-05-09T01:30:00Z] **修复后跑 Tier 0 → 2 个 PATCH 用例 fail**（status 500 而非 200）。**Root cause**: `better-sqlite3` 的 transaction API 严格同步，drizzle async callback 返回 Promise → `TypeError: Transaction function cannot return a promise`（这是 better-sqlite3 的设计限制，与 PostgreSQL 不同；蓝队原来 scan-storage.ts:248 的 async tx 没爆是因为 e2e 没触发该路径）
 - [2026-05-09T01:35:00Z] **修复 B1（最终版）**: 改为 drizzle 同步 `.run()` API + sync 回调（去掉 async/await）。改两处：bursts.ts PATCH + analyze-photo.ts calibrateBurstRepresentative。验证：Tier 0 67/67 ✅，typecheck ✅，蓝队单测 19/19 ✅。phase=merge
+- [2026-05-09T08:40:00Z] commit-agent 执行：commit `a6aa3f5` 创建（v0.6.0 minor 升级 + CLAUDE.md 更新）
+- [2026-05-09T08:50:00Z] **发现 commit a6aa3f5 内容错误**：commit-agent 跑 git reset 后只 stage 了 implement 阶段最初版本，auto-fix 阶段 5 处修复（schemas.ts/burst-detector.ts/scan-storage.ts/cli/detect-bursts.ts/burst-detector.test.ts）丢失。**root cause**: auto-fix 阶段我修改文件后**未重新 git add**，commit-agent reset 后只看到旧 stage
+- [2026-05-09T08:53:00Z] 创建恢复 commit `660489d` (fix(burst): 恢复 auto-fix 阶段丢失的 5 处契约修复)。验证 Tier 0 67/67 ✅，typecheck ✅，蓝队单测 19/19 ✅
+- [2026-05-09T08:55:00Z] 知识沉淀到 patterns.md + index.md：新增 [2026-05-09] drizzle async transaction 在 better-sqlite3 上抛错条目；主仓库 commit `66a46f4`。knowledge_extracted=true，phase=done
