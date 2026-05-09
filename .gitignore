@@ -43,6 +43,8 @@ playwright-report/
 apps/backend/photos/
 apps/backend/photos
 apps/backend/data/
+# 仓库根的 photos/ 是测试以错误 cwd 跑时把合成产物泄漏到这里的目录，不入版本
+/photos/
 
 # Autopilot ephemeral state (sessions/requirements 是按对话生成的临时工作目录，不入版本)
 # 不带末尾 / —— 这样在 worktree 里它们是 symlink (非目录) 时也能匹配

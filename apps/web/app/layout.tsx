@@ -1,25 +1,30 @@
 import type { Metadata } from "next";
-import { Fraunces, Geist, Noto_Serif_SC } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const sans = Geist({
-  subsets: ["latin"],
+const sans = localFont({
+  src: "../public/fonts/Geist-Variable.woff2",
   display: "swap",
   variable: "--font-sans",
+  weight: "100 900",
 });
 
-const display = Fraunces({
-  subsets: ["latin"],
+const display = localFont({
+  src: [
+    { path: "../public/fonts/Fraunces-Variable.ttf", style: "normal", weight: "100 900" },
+    { path: "../public/fonts/Fraunces-Italic-Variable.ttf", style: "italic", weight: "100 900" },
+  ],
   display: "swap",
   variable: "--font-display",
-  axes: ["SOFT", "WONK", "opsz"],
 });
 
-const serifSC = Noto_Serif_SC({
-  subsets: ["latin"],
+const serifSC = localFont({
+  src: [
+    { path: "../public/fonts/NotoSerifSC-400.woff2", weight: "400", style: "normal" },
+    { path: "../public/fonts/NotoSerifSC-500.woff2", weight: "500", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-serif-sc",
-  weight: ["300", "400", "500", "600", "700", "900"],
 });
 
 export const metadata: Metadata = {
