@@ -547,3 +547,31 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 **Why 这很重要**：minimatch/picomatch 与 shell glob 通配符语义不同（shell `?` 也是单字符通配但不常见），URL 含 `?` 引入二义性，测试中难发现——失败表现是「mock 没生效，调用了真实后端」而不是显式错误。
 
 **Evidence**: 本任务设计阶段 plan-reviewer 第 2 轮审查发现并指出，修正为 `**/api/daily*` 后红队 Playwright e2e 3/3 PASS。
+
+### [2026-05-09] drizzle async transaction 在 better-sqlite3 driver 上抛 `Transaction function cannot return a promise`
+
+<!-- tags: drizzle, better-sqlite3, transaction, sync, async, sqlite, orm, bug, multi-step-update -->
+
+**Scenario**: 写多步 UPDATE 包事务规避并发竞态时，按 PostgreSQL/Postgres-drizzle 的经验顺手写 `await db.transaction(async (tx) => { await tx.update(...).set(...).where(...); ... })`，TS 类型校验通过、看起来合理，但运行时抛 `TypeError: Transaction function cannot return a promise`，HTTP 返回 500。**奇怪的是**：错误抛出**前**事务里的 UPDATE 已经成功执行（DB 状态正确），只在最后 commit 阶段抛错——给"代码逻辑没问题，只是 hono 反映 500"的错觉，难定位。
+
+**Lesson**:
+- `better-sqlite3` 的 `transaction()` API **严格同步**（库设计），drizzle 在该 driver 上原样转发，async callback 返回 Promise → 抛错
+- 必须用 drizzle 的同步 `.run()` API + sync 回调：
+  ```ts
+  // ❌ 错（在 better-sqlite3 上）
+  await db.transaction(async (tx) => {
+    await tx.update(schema.x).set({...}).where(...);
+    await tx.update(schema.y).set({...}).where(...);
+  });
+
+  // ✅ 对
+  db.transaction((tx) => {
+    tx.update(schema.x).set({...}).where(...).run();
+    tx.update(schema.y).set({...}).where(...).run();
+  });
+  ```
+- 单步 `await tx.insert(...).values(...)`（如 `scan-storage.ts:248`）能跑通是因为 callback 返回的 Promise 在 commit 前 microtask 内可能已 resolve，但**多步 await 之间事件循环让步必然爆**——所以"以前能跑"不代表新写也能跑
+
+**Why 这很重要**：迁移自 PostgreSQL 的 drizzle 习惯（PG driver 支持 async tx）+ TypeScript 类型不报错 → 误以为通用 → 100% 概率运行时炸。debug 困难因为部分 SQL 已成功（DB 改了），错误冒出来是 commit 阶段非具体业务逻辑。
+
+**Evidence**: `apps/backend/src/routes/bursts.ts` PATCH `/api/bursts/:id/representative` 三步 UPDATE 包事务校验代表归属——首版 async callback 测试时 DB 改对了但接口返回 500，红队 16/24 用例 fail；改为 sync 回调 + `.run()` 后 67/67 PASS。同步修了 `apps/backend/src/jobs/analyze-photo.ts:calibrateBurstRepresentative` 同模式问题。

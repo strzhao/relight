@@ -17,6 +17,7 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-09] drizzle async transaction 在 better-sqlite3 上抛 `Transaction function cannot return a promise` | tags: drizzle, better-sqlite3, transaction, sync, async, orm, bug, multi-step-update | → patterns.md
 - [2026-05-08] Drizzle `onConflictDoNothing()` 配 `.returning()` 时同冲突返回空数组 | tags: drizzle, sqlite, onconflict, returning, orm, bug | → patterns.md
 - [2026-05-08] tsup 打包后 ESM `import.meta.url` 相对路径基准在 dev/prod 不同步 | tags: esm, import-meta-url, tsup, dev-vs-prod, asset-path, build, bug | → patterns.md
 - [2026-05-08] Satori 的 `jsxImportSource` 子路径必须精确到子包根 | tags: satori, jsx, jsx-runtime, esm, typescript, jsximportsource, bug | → patterns.md
