@@ -1,5 +1,27 @@
 # 架构决策日志
 
+### [2026-05-10] apps/web 拆分双 tsconfig — 生产严格 + 测试松弛，恢复 noUncheckedIndexedAccess
+
+<!-- tags: tsconfig, typescript, strict, noUncheckedIndexedAccess, test-infra, dom-api, monorepo, design -->
+
+**Background**: 根 `tsconfig.json` 开启 `strict: true` + `noUncheckedIndexedAccess: true`（数组/对象索引访问返回 `T | undefined` 强制空检查）。但 `apps/web` 早期 override 关闭了此项 — 因为前端测试用例大量出现 `querySelectorAll(...)[0]` / `Array.from(nodeList).indexOf(node)` 这种 DOM API 索引访问，启严格后每行都需 `!` 非空断言或显式空检查，工程负担过大。问题：override 影响**整个 apps/web 范围**包括生产代码，让组件里的 `videoRefs.current[i]` 等也能裸访问，类型安全被削弱。
+
+**Choice**: 拆分双 tsconfig：
+- `apps/web/tsconfig.json` — 生产代码（components/hooks/lib/app/pages），删除 override 继承根 `noUncheckedIndexedAccess: true`，新增 `exclude: ["__tests__/**", "e2e/**"]`
+- `apps/web/tsconfig.test.json` — 测试代码（__tests__/e2e/vitest.*），`extends: "./tsconfig.json"` + 仅对自己关闭 `noUncheckedIndexedAccess: false`
+- `package.json` typecheck 改为 `tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit` 两段验证
+
+**Alternatives rejected**:
+- 全 web 包降级（原状）：丢失生产代码索引安全，qa-reviewer 标 BLOCKER
+- 给红队测试加 `!` 非空断言：违反红队铁律不准改测试代码
+- 给红队测试加 `// @ts-expect-error`：同上违反红队铁律
+- TypeScript references / project mode：本项目无独立编译产物，过于重
+- 保持单 tsconfig + 测试用 `// @ts-nocheck`：粗粒度禁用所有类型检查，掩盖真实错误
+
+**Trade-offs**: 双 tsc 调用让 typecheck 时间翻倍（本项目 ~3s × 2 = 6s，可接受）。需要维护两个文件的 include/exclude 一致性。Next.js 插件只读 root tsconfig，不影响。
+
+**Evidence**: `apps/web/tsconfig.json` + `apps/web/tsconfig.test.json` + `apps/web/package.json` typecheck script 双段。修复后生产代码 `banner-carousel.tsx` 的所有 `videoRefs.current[i]` 都加了 `?? null` 防御；测试代码 `banner-carousel.acceptance.test.ts` 的 `currentSlides[0]`、`Array.from(slides).indexOf(...)` 等保持简洁。typecheck 双段全绿，5-10 banner 改造合并入 commit `2056055`。
+
 ### [2026-05-09] 每日精选改为 4 源平等加权混采 + 久远度温和加成 + 30 天去重 + AI 二次评选关联 members
 
 <!-- tags: daily-selection, candidate-pool, age-weight, dedup, multi-photo, ai-clustering, design, architecture -->

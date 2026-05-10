@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-10] apps/web 拆分双 tsconfig — 生产严格 + 测试松弛，恢复 noUncheckedIndexedAccess | tags: tsconfig, typescript, strict, noUncheckedIndexedAccess, test-infra, dom-api, monorepo, design | → decisions.md
 - [2026-05-09] 每日精选改为 4 源平等加权混采 + 久远度温和加成 + 30 天去重 + AI 二次评选关联 members | tags: daily-selection, candidate-pool, age-weight, dedup, multi-photo, ai-clustering, design, architecture | → decisions.md
 - [2026-05-08] 后端图片合成选 Satori + Resvg 而非无头浏览器 | tags: image-composition, satori, resvg, chromium, server-rendering, daily-selection, design | → decisions.md
 - [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt | tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal | → decisions.md
