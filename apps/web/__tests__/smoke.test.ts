@@ -9,15 +9,16 @@ describe("smoke", () => {
 });
 
 // ============================================================================
-// T17 — DailyHero 多图 members 渲染验收（红队）
+// T17 — DailyHero BannerCarousel 渲染验收（红队）
 //
-// 设计契约来源（state.md T11 + T17 + 设计修订 5）：
+// 设计契约来源（state.md T11 + T17 + 设计修订 BannerCarousel）：
 //   1. mock `/api/daily/today` 返回带 3 张 members 的精选
-//      → [data-testid="member-strip"] 存在
-//      → 包含 3 个 [data-testid="member-thumb"]
+//      → [data-testid="banner-carousel"] 存在
+//      → 包含 4 个 [data-testid="banner-slide"]（hero + 3 members）
 //      → hero 编辑栏含「N 年前的今天」文本
 //   2. mock `/api/daily/today` 返回空 members
-//      → [data-testid="member-strip"] 不存在
+//      → [data-testid="banner-carousel"] 存在（只有 1 个 banner-slide）
+//      → 不渲染 banner-tick / banner-arrow-prev / banner-arrow-next
 //
 // 测试策略：
 //   - vi.mock `lib/api`，控制 getDailyPick/getTodayPick 返回值
@@ -108,21 +109,21 @@ async function renderDailyHero(
 // 场景 1: 含 3 张 members 的精选渲染
 // ============================================================================
 
-describe("T17 — DailyHero 多图 members 渲染验收（jsdom / renderToString）", () => {
-  it("members=3 时，HTML 包含 data-testid='member-strip'", async () => {
+describe("T17 — DailyHero BannerCarousel 渲染验收（jsdom / renderToString）", () => {
+  it("members=3 时，HTML 包含 data-testid='banner-carousel'", async () => {
     const dailyPick = makeDailyPickWithMembers(3);
     const html = await renderDailyHero(dailyPick);
-    expect(html).toContain('data-testid="member-strip"');
+    expect(html).toContain('data-testid="banner-carousel"');
   });
 
-  it("members=3 时，HTML 包含恰好 3 个 data-testid='member-thumb'", async () => {
+  it("members=3 时，HTML 包含恰好 4 个 data-testid='banner-slide'（hero + 3 members）", async () => {
     const dailyPick = makeDailyPickWithMembers(3);
     const html = await renderDailyHero(dailyPick);
 
-    // 统计 data-testid="member-thumb" 出现次数
-    const thumbMatches = html.match(/data-testid="member-thumb"/g);
-    expect(thumbMatches).not.toBeNull();
-    expect(thumbMatches?.length).toBe(3);
+    // hero slide + 3 member slides = 4 banner-slide
+    const slideMatches = html.match(/data-testid="banner-slide"/g);
+    expect(slideMatches).not.toBeNull();
+    expect(slideMatches?.length).toBe(4);
   });
 
   it("members=3 时，hero 编辑栏含「N 年前的今天」文本（takenAt=2018，约 8 年前）", async () => {
@@ -135,47 +136,67 @@ describe("T17 — DailyHero 多图 members 渲染验收（jsdom / renderToString
   });
 
   // ============================================================================
-  // 场景 2: 空 members 时不渲染 strip
+  // 场景 2: 空 members 时仍渲染 banner-carousel，但不渲染多图控件
   // ============================================================================
 
-  it("members=[] 时，HTML 不包含 data-testid='member-strip'", async () => {
+  it("members=[] 时，HTML 仍包含 data-testid='banner-carousel'", async () => {
     const dailyPick = makeDailyPickEmptyMembers();
     const html = await renderDailyHero(dailyPick);
-    expect(html).not.toContain('data-testid="member-strip"');
+    expect(html).toContain('data-testid="banner-carousel"');
   });
 
-  it("members=[] 时，HTML 不包含 data-testid='member-thumb'", async () => {
+  it("members=[] 时，HTML 包含恰好 1 个 data-testid='banner-slide'（仅 hero）", async () => {
     const dailyPick = makeDailyPickEmptyMembers();
     const html = await renderDailyHero(dailyPick);
-    expect(html).not.toContain('data-testid="member-thumb"');
+    const slideMatches = html.match(/data-testid="banner-slide"/g);
+    expect(slideMatches).not.toBeNull();
+    expect(slideMatches?.length).toBe(1);
+  });
+
+  it("members=[] 时，HTML 不包含 data-testid='banner-tick'（单图无指示器）", async () => {
+    const dailyPick = makeDailyPickEmptyMembers();
+    const html = await renderDailyHero(dailyPick);
+    expect(html).not.toContain('data-testid="banner-tick"');
+  });
+
+  it("members=[] 时，HTML 不包含 data-testid='banner-arrow-prev'（单图无箭头）", async () => {
+    const dailyPick = makeDailyPickEmptyMembers();
+    const html = await renderDailyHero(dailyPick);
+    expect(html).not.toContain('data-testid="banner-arrow-prev"');
+  });
+
+  it("members=[] 时，HTML 不包含 data-testid='banner-arrow-next'（单图无箭头）", async () => {
+    const dailyPick = makeDailyPickEmptyMembers();
+    const html = await renderDailyHero(dailyPick);
+    expect(html).not.toContain('data-testid="banner-arrow-next"');
   });
 
   // ============================================================================
   // 场景 3: members=1（边界值）
   // ============================================================================
 
-  it("members=1 时，HTML 包含 member-strip 且只有 1 个 member-thumb", async () => {
+  it("members=1 时，HTML 包含 banner-carousel 且有 2 个 banner-slide（hero + 1 member）", async () => {
     const dailyPick = makeDailyPickWithMembers(1);
     const html = await renderDailyHero(dailyPick);
 
-    expect(html).toContain('data-testid="member-strip"');
-    const thumbMatches = html.match(/data-testid="member-thumb"/g);
-    expect(thumbMatches).not.toBeNull();
-    expect(thumbMatches?.length).toBe(1);
+    expect(html).toContain('data-testid="banner-carousel"');
+    const slideMatches = html.match(/data-testid="banner-slide"/g);
+    expect(slideMatches).not.toBeNull();
+    expect(slideMatches?.length).toBe(2);
   });
 
   // ============================================================================
   // 场景 4: members=8（最大值）
   // ============================================================================
 
-  it("members=8 时，HTML 包含 member-strip 且有 8 个 member-thumb", async () => {
+  it("members=8 时，HTML 包含 banner-carousel 且有 9 个 banner-slide（hero + 8 members）", async () => {
     const dailyPick = makeDailyPickWithMembers(8);
     const html = await renderDailyHero(dailyPick);
 
-    expect(html).toContain('data-testid="member-strip"');
-    const thumbMatches = html.match(/data-testid="member-thumb"/g);
-    expect(thumbMatches).not.toBeNull();
-    expect(thumbMatches?.length).toBe(8);
+    expect(html).toContain('data-testid="banner-carousel"');
+    const slideMatches = html.match(/data-testid="banner-slide"/g);
+    expect(slideMatches).not.toBeNull();
+    expect(slideMatches?.length).toBe(9);
   });
 
   // ============================================================================
@@ -186,21 +207,24 @@ describe("T17 — DailyHero 多图 members 渲染验收（jsdom / renderToString
     await expect(renderDailyHero(null)).resolves.not.toThrow();
   });
 
-  it("dailyPick=null 时，HTML 不包含 member-strip", async () => {
+  it("dailyPick=null 时，HTML 不包含 banner-carousel（降级状态无精选内容）", async () => {
     const html = await renderDailyHero(null);
-    expect(html).not.toContain('data-testid="member-strip"');
+    expect(html).not.toContain('data-testid="banner-carousel"');
   });
 
   // ============================================================================
   // 场景 6: members 兼容性（历史数据 members 为 undefined / null）
   // ============================================================================
 
-  it("members 字段为 undefined（旧 DailyPick 数据）时，HTML 不包含 member-strip", async () => {
+  it("members 字段为 undefined（旧 DailyPick 数据）时，HTML 包含 banner-carousel 且只有 1 个 banner-slide", async () => {
     const dailyPickNoMembers = {
       ...makeDailyPickEmptyMembers(),
       members: undefined as unknown as never[],
     };
     const html = await renderDailyHero(dailyPickNoMembers);
-    expect(html).not.toContain('data-testid="member-strip"');
+    expect(html).toContain('data-testid="banner-carousel"');
+    const slideMatches = html.match(/data-testid="banner-slide"/g);
+    expect(slideMatches).not.toBeNull();
+    expect(slideMatches?.length).toBe(1);
   });
 });

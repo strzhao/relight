@@ -51,6 +51,16 @@
           }
         }
       }
+    },
+    {
+      "include": ["apps/web/components/banner-carousel.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          }
+        }
+      }
     }
   ]
 }

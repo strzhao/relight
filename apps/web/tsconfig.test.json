@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "__tests__/**/*.ts",
+    "__tests__/**/*.tsx",
+    "e2e/**/*.ts",
+    "e2e/**/*.tsx",
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "vitest-augment.d.ts"
+  ],
+  "exclude": ["node_modules"]
+}

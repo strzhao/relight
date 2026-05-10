@@ -1,3 +1,18 @@
+### [2026-05-10] jsdom 不实现 setPointerCapture 副作用 + `<img>` 默认 draggable 吞掉 mousedown — 浏览器交互必须 e2e
+
+<!-- tags: jsdom, pointer-events, set-pointer-capture, native-drag, img, draggable, e2e, playwright, banner-carousel, ui-interaction, bug -->
+
+**Scenario**: BannerCarousel 用 React onPointerDown/Move/Up 实现拖拽切换 + 内部箭头按钮 onClick 触发切换。jsdom 单元测试（红队 12 用例 + smoke）全绿，QA reviewer 7/7 通过，但用户在真实浏览器试用立刻发现：箭头按钮**点击没反应**，拖拽**也不切换**。
+
+**Lesson**:
+- **jsdom 把 `setPointerCapture` 当 no-op**：单元测试里 `<section>` 上的 `setPointerCapture(e.pointerId)` 不影响后续合成 click 派发，所以红队用例 (k) 跑 `nextBtn.click()` 能成功，但真实浏览器 pointer 被 capture 到 section，button 收不到 click。修：handlePointerDown 头部加 `if ((e.target as HTMLElement).closest("button")) return`，控件区域不进入拖拽路径。
+- **`<img>` 元素默认 `draggable=true`**：mousedown 在 img 上立即触发浏览器原生 drag-start（拖图副本），后续 pointermove/pointerup 不再派发到 React。jsdom 不实现原生拖拽，所以单元测试看不见；只有真实浏览器（含 Playwright）会复现。修：所有 banner 内的 `<img>` 加 `draggable={false}`。
+- **凡是涉及 pointer capture / 触摸 / 拖拽 / native draggable 元素的交互功能，jsdom 单元测试不能替代浏览器验证 — 必须有 Playwright e2e 把守**。
+
+**Why 这很重要**：QA Tier 1.5 的「真实场景」铁律本意是「功能在真实用户场景下是否可用」。如果用 grep 代码或 jsdom 单元测试代替真跑浏览器，就把 Tier 1.5 降级成「代码静态自查」，错过浏览器才能暴露的整类 bug。设计 Tier 1.5 时凡场景写明"启动 dev server + 浏览器交互"的，必须真启服务真点真拖，不许用 grep 替代。
+
+**Evidence**: `apps/web/components/banner-carousel.tsx` 修复点：handlePointerDown 加 button 守卫 + img 加 `draggable={false}`。`apps/web/e2e/banner-carousel.spec.ts` 新增 6 用例覆盖箭头/键盘/tick 跳转/拖拽/连续点击防 capture 回归。e2e probe 实测：未修前 mouse.down on img 之后只派发 1 个 pointermove 就停（原生 drag 接管），修后正常派发 10+ 个 pointermove。
+
 ### [2026-05-09] React SSR `{value} 文本` 在输出 HTML 中插入 `<!-- -->` 注释，破坏文本正则匹配
 
 <!-- tags: react, ssr, render-to-string, comment-marker, regex, jsx, expression-container, test, bug -->

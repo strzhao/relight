@@ -18,6 +18,7 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-10] jsdom 不实现 setPointerCapture + `<img>` 默认 draggable 吞 mousedown — UI 交互必须 e2e | tags: jsdom, pointer-events, set-pointer-capture, native-drag, img, draggable, e2e, playwright, ui-interaction, bug | → patterns.md
 - [2026-05-09] React SSR `{value} 文本` 在输出 HTML 中插入 `<!-- -->` 注释，破坏文本正则匹配 | tags: react, ssr, render-to-string, comment-marker, regex, jsx, expression-container, test, bug | → patterns.md
 - [2026-05-09] 红队 vi.mock 平铺导出 vs 蓝队 `api` 对象——TDD 契约对齐策略 | tags: vitest, vi-mock, tdd, blue-red, contract-drift, ssr, react, mock-shape, hook-vs-prop, design | → patterns.md
 - [2026-05-09] drizzle async transaction 在 better-sqlite3 上抛 `Transaction function cannot return a promise` | tags: drizzle, better-sqlite3, transaction, sync, async, orm, bug, multi-step-update | → patterns.md

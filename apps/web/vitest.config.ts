@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     name: "web",
     environment: "jsdom",
+    setupFiles: ["./vitest.setup.ts"],
     exclude: ["e2e/**", "**/node_modules/**", "**/dist/**"],
     coverage: {
       provider: "v8",

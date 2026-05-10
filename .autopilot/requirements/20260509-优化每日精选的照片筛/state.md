@@ -1,6 +1,6 @@
 ---
 active: true
-phase: "merge"
+phase: "done"
 gate: ""
 iteration: 3
 max_iterations: 30
@@ -12,7 +12,7 @@ fast_mode: false
 brief_file: ""
 next_task: ""
 auto_approve: false
-knowledge_extracted: ""
+knowledge_extracted: "true"
 task_dir: "/Users/stringzhao/workspace/relight/.autopilot/requirements/20260509-优化每日精选的照片筛"
 session_id: a81825ae-1d3c-4628-b385-e3642a198857
 started_at: "2026-05-09T03:53:54Z"
@@ -530,3 +530,6 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
 - [2026-05-09T05:50:00Z] QA 轮次 1: T15 13/13 + 蓝队自测 75/75，但 T17 5 个失败（DailyHero 用 useState fetch + api 对象，红队 mock 用 dailyPick prop + 平铺函数）→ 触发快速路径早退至 auto-fix
 - [2026-05-09T06:00:00Z] Auto-fix 应用 5 处修复：lib/api 加平铺导出 + DailyHero 受控 prop + 替换 api 对象引用 + SSR 注释修复 + DailyHeroProps interface
 - [2026-05-09T06:05:00Z] QA 轮次 2: 全部通过（typecheck 4/4 + backend 75/75 + web 419/419 + T17 11/11）→ gate: review-accept
+- [2026-05-10T00:00:00Z] 实际产出已落地: c3648c2 主 feature + a86ab7d/4216a87/97a5d21 三轮后续修复 + c9f87c7 知识沉淀（4 源混采决策 + SSR 注释/红队 mock 契约 2 条 patterns）。merge 阶段无新增可提交内容，工作区残留为下一任务准备的 gpt-taste skill。
+- [2026-05-10T00:00:00Z] knowledge_extracted: true（已通过 c9f87c7 完成）
+- [2026-05-10T00:00:00Z] phase: merge → done

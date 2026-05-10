@@ -1,11 +1,11 @@
 "use client";
 
+import BannerCarousel, { buildSlides } from "@/components/banner-carousel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getApiUrl, getTodayPick } from "@/lib/api";
+import { getTodayPick } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { API_ROUTES, type DailyPick, type DailyPickMember, type Photo } from "@relight/shared";
-import { Volume2, VolumeX } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import type { DailyPick } from "@relight/shared";
+import { useEffect, useState } from "react";
 
 type State =
   | { status: "loading" }
@@ -44,12 +44,6 @@ function parsePickDate(pickDate: string) {
   };
 }
 
-function formatDuration(sec: number) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 /**
  * 计算 takenAt 与今日的年份差。返回正整数；< 1 年返回 null。
  */
@@ -65,7 +59,7 @@ interface DailyHeroProps {
   dailyPick?: DailyPick | null;
 }
 
-export function DailyHero({ dailyPick }: DailyHeroProps) {
+function DailyHero({ dailyPick }: DailyHeroProps) {
   // 受控模式：外部传入 dailyPick → 直接渲染（用于 SSR / 测试 / RSC 预水合）
   // 非受控模式：未传 prop（dailyPick === undefined）→ 内部 fetch
   const isControlled = dailyPick !== undefined;
@@ -120,31 +114,14 @@ export function DailyHero({ dailyPick }: DailyHeroProps) {
 function HeroContent({ pick }: { pick: DailyPick }) {
   const { day, month, year, weekday } = parsePickDate(pick.pickDate);
   const photo = pick.photo;
-  const isVideo = photo && (photo.mediaType ?? "image") === "video";
   const isPortrait = photo ? photo.height > photo.width * 1.05 : false;
   const yearsAgo = calcYearsAgo(photo?.takenAt ?? null);
-  const members = pick.members ?? [];
 
   return (
     <section className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-6 overflow-hidden px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-14 lg:px-10 lg:py-10">
-      {/* Photo / Video */}
-      <figure className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center">
-        {photo ? (
-          isVideo ? (
-            <HeroVideo photo={photo} title={pick.title} />
-          ) : (
-            <img
-              src={getApiUrl(API_ROUTES.photos.original(pick.photoId))}
-              alt={pick.title}
-              className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
-              style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
-            />
-          )
-        ) : (
-          <div className="flex aspect-[4/3] w-full items-center justify-center bg-muted text-muted-foreground">
-            照片不可用
-          </div>
-        )}
+      {/* Banner Carousel — hero + member slides */}
+      <figure className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        <BannerCarousel slides={buildSlides(pick)} />
       </figure>
 
       {/* Editorial column */}
@@ -164,9 +141,7 @@ function HeroContent({ pick }: { pick: DailyPick }) {
               <span className="font-display text-base tracking-wide normal-case italic">
                 {month}
               </span>
-              <span className="tabular-nums">
-                {year} · 周{weekday}
-              </span>
+              <span className="tabular-nums">{`${year} · 周${weekday}`}</span>
             </div>
           </div>
           <div className="flex shrink-0">
@@ -203,120 +178,16 @@ function HeroContent({ pick }: { pick: DailyPick }) {
           {pick.narrative}
         </p>
 
-        {/* Member strip — 同期兄弟照片横向滚动 */}
-        {members.length > 0 && <MemberStrip members={members} />}
-
         {/* Footer — Folio & Signature Anchor */}
         <div className="mt-auto flex items-center justify-end gap-4 pt-16 pb-2 text-[10px] tracking-[0.3em] text-muted-foreground/35 uppercase tabular-nums">
           <div className="flex items-center gap-3">
-            <span className="font-display italic">Vol. {year}</span>
+            <span className="font-display italic">{`Vol. ${year}`}</span>
             <span className="h-px w-10 bg-foreground/10" />
             <span className="font-sans font-light tracking-[0.4em]">Relight Chronicle</span>
           </div>
         </div>
       </div>
     </section>
-  );
-}
-
-/**
- * 关联兄弟照片横向滚动条
- */
-function MemberStrip({ members }: { members: DailyPickMember[] }) {
-  return (
-    <div
-      className="mt-8 flex gap-3 overflow-x-auto pb-1"
-      data-testid="member-strip"
-      style={{ scrollbarWidth: "none" }}
-    >
-      {members.map((member) => {
-        const photo = member.photo;
-        const takenYear = photo?.takenAt ? new Date(photo.takenAt).getFullYear() : null;
-        return (
-          <a
-            key={member.photoId}
-            href={`/photos/${member.photoId}`}
-            className="group flex-shrink-0"
-            data-testid="member-thumb"
-          >
-            <div className="relative h-20 w-20 overflow-hidden rounded-sm ring-1 ring-foreground/10 transition-all duration-100 group-hover:ring-foreground/30">
-              {photo?.thumbnailPath ? (
-                <img
-                  src={getApiUrl(API_ROUTES.photos.thumbnail(member.photoId))}
-                  alt={member.caption}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
-                  无缩略图
-                </div>
-              )}
-              {takenYear !== null && (
-                <span className="absolute right-0.5 bottom-0.5 rounded-sm bg-foreground/60 px-1 py-0 text-[9px] leading-4 text-background/90 tabular-nums">
-                  {takenYear}
-                </span>
-              )}
-            </div>
-            <p className="mt-1 max-w-[80px] truncate text-[10px] text-muted-foreground">
-              {member.caption}
-            </p>
-          </a>
-        );
-      })}
-    </div>
-  );
-}
-
-function HeroVideo({ photo, title }: { photo: Photo; title: string }) {
-  const [muted, setMuted] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  // Some iPhone .MOV files are HEVC-encoded and won't decode in Chrome.
-  // Fall back to the still thumbnail so the layout stays intact.
-  if (failed) {
-    return (
-      <img
-        src={getApiUrl(API_ROUTES.photos.thumbnail(photo.id))}
-        alt={title}
-        className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
-        style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
-      />
-    );
-  }
-
-  return (
-    <div
-      className="relative max-h-full max-w-full"
-      style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
-    >
-      <video
-        ref={videoRef}
-        src={getApiUrl(API_ROUTES.photos.raw(photo.id))}
-        poster={getApiUrl(API_ROUTES.photos.thumbnail(photo.id))}
-        autoPlay
-        loop
-        muted={muted}
-        playsInline
-        preload="metadata"
-        onError={() => setFailed(true)}
-        aria-label={title}
-        className="block h-full w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
-      />
-      {photo.durationSec ? (
-        <span className="absolute top-3 right-3 rounded-sm bg-foreground/45 px-1.5 py-0.5 text-[10px] tracking-wider text-background/95 backdrop-blur-sm tabular-nums">
-          {formatDuration(photo.durationSec)}
-        </span>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => setMuted((m) => !m)}
-        aria-label={muted ? "取消静音" : "静音"}
-        className="absolute right-3 bottom-3 flex size-10 items-center justify-center rounded-full bg-foreground/35 text-background backdrop-blur-md transition-all duration-200 hover:bg-foreground/55"
-      >
-        {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-      </button>
-    </div>
   );
 }
 
@@ -395,3 +266,7 @@ function HeroFrame({
     </section>
   );
 }
+
+// Both named export (for import { DailyHero }) and default export (for mod.default fallback in tests)
+export { DailyHero };
+export default DailyHero;
