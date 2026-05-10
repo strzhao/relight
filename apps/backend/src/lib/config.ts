@@ -28,4 +28,6 @@ export const config = {
     model: process.env.WHISPER_MODEL ?? "large-v3-turbo",
     language: process.env.WHISPER_LANGUAGE ?? "auto",
   },
+  /** 每日精选并行处理并发度（默认 2，可通过 DAILY_SELECTION_CONCURRENCY 环境变量调整） */
+  dailySelectionConcurrency: Number.parseInt(process.env.DAILY_SELECTION_CONCURRENCY ?? "2", 10),
 } as const;

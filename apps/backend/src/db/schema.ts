@@ -1,3 +1,4 @@
+import type { DailyPickMember } from "@relight/shared";
 import { relations, sql } from "drizzle-orm";
 import {
   index,
@@ -185,6 +186,35 @@ export const dailyPicks = sqliteTable("daily_picks", {
   createdAt: text("created_at").notNull(),
 });
 
+/** 每日精选入选明细（一条精选 20 张） */
+export const dailyPickEntries = sqliteTable(
+  "daily_pick_entries",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    dailyPickId: text("daily_pick_id")
+      .notNull()
+      .references(() => dailyPicks.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    photoId: text("photo_id")
+      .notNull()
+      .references(() => photos.id),
+    title: text("title").notNull(),
+    narrative: text("narrative").notNull(),
+    score: real("score").notNull().default(0),
+    members: text("members", { mode: "json" })
+      .$type<DailyPickMember[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    uniqRank: unique().on(t.dailyPickId, t.rank),
+    pickIdx: index("idx_dpe_pick_rank").on(t.dailyPickId, t.rank),
+  }),
+);
+
 /** 扫描日志 */
 export const scanLogs = sqliteTable("scan_logs", {
   id: text("id")
@@ -280,9 +310,21 @@ export const photoAnalysesRelations = relations(photoAnalyses, ({ one }) => ({
   }),
 }));
 
-export const dailyPicksRelations = relations(dailyPicks, ({ one }) => ({
+export const dailyPicksRelations = relations(dailyPicks, ({ one, many }) => ({
   photo: one(photos, {
     fields: [dailyPicks.photoId],
+    references: [photos.id],
+  }),
+  entries: many(dailyPickEntries),
+}));
+
+export const dailyPickEntriesRelations = relations(dailyPickEntries, ({ one }) => ({
+  dailyPick: one(dailyPicks, {
+    fields: [dailyPickEntries.dailyPickId],
+    references: [dailyPicks.id],
+  }),
+  photo: one(photos, {
+    fields: [dailyPickEntries.photoId],
     references: [photos.id],
   }),
 }));

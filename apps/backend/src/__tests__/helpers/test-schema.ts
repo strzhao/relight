@@ -8,7 +8,7 @@ import type Database from "better-sqlite3";
  * 本 helper 让所有需要真实 SQLite 的测试用同一份 DDL，schema.ts 加列时只改这里。
  *
  * 包含表：storage_sources / bursts / photos / tags / photo_tags / photo_analyses /
- *        daily_picks / scan_logs / analyze_batches / analyze_batch_jobs / settings
+ *        daily_picks / daily_pick_entries / scan_logs / analyze_batches / analyze_batch_jobs / settings
  */
 export interface SetupOptions {
   /**
@@ -115,6 +115,20 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       members TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS daily_pick_entries (
+      id TEXT PRIMARY KEY,
+      daily_pick_id TEXT NOT NULL REFERENCES daily_picks(id) ON DELETE CASCADE,
+      rank INTEGER NOT NULL,
+      photo_id TEXT NOT NULL REFERENCES photos(id),
+      title TEXT NOT NULL,
+      narrative TEXT NOT NULL,
+      score REAL NOT NULL DEFAULT 0,
+      members TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      UNIQUE(daily_pick_id, rank)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dpe_pick_rank ON daily_pick_entries(daily_pick_id, rank);
 
     CREATE TABLE IF NOT EXISTS scan_logs (
       id TEXT PRIMARY KEY,

@@ -2,22 +2,21 @@
  * 候选池构造：4 源平等加权混采 + 久远度加权 + 30 天去重
  *
  * 架构：
- * - 4 个独立子查询（historyToday / sameMonth / sameSeason / agedRandom），每源取 K=8 张
+ * - 4 个独立子查询（historyToday / sameMonth / sameSeason / agedRandom），每源取 K=maxN 张
  * - per-source quota：每源保底 3 张 + 剩余 8 槽按 weightedScore 抢占
  * - 合并去重后截前 20 张
+ *
+ * 注：K_PER_SOURCE 设为 maxN（而非固定 8），确保当候选只集中在 1-2 个源时
+ * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
  */
 
 import { and, desc, gte, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
 
-/** 每源最大取回条数 */
-const K_PER_SOURCE = 8;
 /** 全局最大候选数 */
 const MAX_N = 20;
 /** 每源保底席位 */
 const QUOTA_PER_SOURCE = 3;
-/** 抢占池席位 */
-const CONTEST_SLOTS = 8;
 
 /** 4 个候选源标识 */
 export type CandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom";
@@ -58,22 +57,51 @@ export function ageWeightMultiplier(yearsAgo: number): number {
 
 /**
  * 获取最近 daysBack 天精选过的 photoId 集合（含 hero + members）
+ *
+ * 同时扫描两个表：
+ * 1. daily_picks（旧格式：hero photoId + members JSON 列）
+ * 2. daily_pick_entries（新格式：每行一个 entry 的 photo_id + members JSON 列）
+ * 保证 19/20 entry 照片次日不会被重复入选。
  */
 export async function getRecentPickedPhotoIds(daysBack = 30): Promise<Set<string>> {
   const cutoff = new Date(Date.now() - daysBack * 86400_000).toISOString().slice(0, 10);
-  const rows = await db
+
+  // 扫描 daily_picks（旧格式）
+  const pickRows = await db
     .select({ photoId: schema.dailyPicks.photoId, members: schema.dailyPicks.members })
     .from(schema.dailyPicks)
     .where(gte(schema.dailyPicks.pickDate, cutoff));
 
   const ids = new Set<string>();
-  for (const r of rows) {
+  for (const r of pickRows) {
     ids.add(r.photoId);
     const memberList = (r.members as { photoId: string }[] | null) ?? [];
     for (const m of memberList) {
       ids.add(m.photoId);
     }
   }
+
+  // 扫描 daily_pick_entries（新格式），通过 JOIN daily_picks 过滤日期
+  const entryRows = await db
+    .select({
+      photoId: schema.dailyPickEntries.photoId,
+      members: schema.dailyPickEntries.members,
+    })
+    .from(schema.dailyPickEntries)
+    .innerJoin(
+      schema.dailyPicks,
+      sql`${schema.dailyPicks.id} = ${schema.dailyPickEntries.dailyPickId}`,
+    )
+    .where(gte(schema.dailyPicks.pickDate, cutoff));
+
+  for (const r of entryRows) {
+    ids.add(r.photoId);
+    const memberList = (r.members as { photoId: string }[] | null) ?? [];
+    for (const m of memberList) {
+      ids.add(m.photoId);
+    }
+  }
+
   return ids;
 }
 
@@ -129,6 +157,8 @@ export async function buildCandidatePool(
   options: BuildCandidatePoolOptions = {},
 ): Promise<EnrichedCandidate[]> {
   const { now = new Date(), excludeIds = new Set<string>(), maxN = MAX_N } = options;
+  // 每源取回数 = maxN，确保即使只有 1-2 个活跃源也能满足最终 maxN 张的需求
+  const K_PER_SOURCE = maxN;
   const { year, month, day, monthDay, seasonMonths } = getBeijingDateInfo(now);
   const currentYear = year;
   const twoYearsAgo = new Date(now.getTime() - 2 * 365.25 * 86400_000).toISOString();
@@ -312,8 +342,10 @@ export async function buildCandidatePool(
 /**
  * per-source quota 合并：
  * - 每源保底 QUOTA_PER_SOURCE 张（按 weightedScore 取前 3）
- * - 剩余 CONTEST_SLOTS 槽按 weightedScore 全局抢占（来自所有源的非保底候选）
+ * - 剩余槽按 weightedScore 全局抢占（来自所有源的非保底候选），上限 = maxN
  * - 合并 → 同 photoId 去重（保留先出现者）→ 截前 maxN
+ *
+ * 注：抢占池上限设为 maxN（而非固定 8），确保活跃源少时仍能填满 maxN 个唯一候选。
  */
 export function dedupAndQuotaMerge(
   bySource: Record<CandidateSource, EnrichedCandidate[]>,
@@ -339,6 +371,8 @@ export function dedupAndQuotaMerge(
   }
 
   // 抢占池：所有源中未进入保底的候选
+  // 抢占席位 = maxN - 已有保底席位数，确保 quota + contest = maxN（保底不浪费）
+  const contestSlots = Math.max(0, maxN - quotaItems.length);
   const contestPool: EnrichedCandidate[] = [];
   for (const src of sources) {
     for (const item of bySource[src].slice(QUOTA_PER_SOURCE)) {
@@ -351,7 +385,7 @@ export function dedupAndQuotaMerge(
   const contestWinners: EnrichedCandidate[] = [];
   const contestIds = new Set<string>(quotaIds);
   for (const item of contestPool) {
-    if (contestWinners.length >= CONTEST_SLOTS) break;
+    if (contestWinners.length >= contestSlots) break;
     if (!contestIds.has(item.photoId)) {
       contestIds.add(item.photoId);
       contestWinners.push(item);

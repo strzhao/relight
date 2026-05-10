@@ -40,7 +40,7 @@ function parsePickDate(pickDate: string) {
 }
 
 export interface DailyHeroJSXOpts {
-  pick: DailyPick & { composedImagePath?: string | null };
+  pick: Omit<DailyPick, "entries"> & { composedImagePath?: string | null };
   photo: Photo;
   photoDataUrl: string;
   width: number;

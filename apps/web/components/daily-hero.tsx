@@ -3,9 +3,16 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { getApiUrl, getTodayPick } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { API_ROUTES, type DailyPick, type DailyPickMember, type Photo } from "@relight/shared";
+import {
+  API_ROUTES,
+  type DailyPick,
+  type DailyPickEntry,
+  type DailyPickMember,
+  type Photo,
+} from "@relight/shared";
 import { Volume2, VolumeX } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type State =
   | { status: "loading" }
@@ -63,15 +70,18 @@ function calcYearsAgo(takenAt: string | null): number | null {
 
 interface DailyHeroProps {
   dailyPick?: DailyPick | null;
+  /** 初始显示的 entry 索引（用于 SSR 测试和 URL query 同步） */
+  initialEntryIndex?: number;
 }
 
-export function DailyHero({ dailyPick }: DailyHeroProps) {
-  // 受控模式：外部传入 dailyPick → 直接渲染（用于 SSR / 测试 / RSC 预水合）
-  // 非受控模式：未传 prop（dailyPick === undefined）→ 内部 fetch
+export function DailyHero({ dailyPick, initialEntryIndex = 0 }: DailyHeroProps) {
   const isControlled = dailyPick !== undefined;
   const [state, setState] = useState<State>(() => {
     if (isControlled) {
-      return dailyPick ? { status: "content", pick: dailyPick } : { status: "empty" };
+      if (!dailyPick) return { status: "empty" };
+      const hasEntries = dailyPick.entries && dailyPick.entries.length > 0;
+      if (!hasEntries && !dailyPick.photoId) return { status: "empty" };
+      return { status: "content", pick: dailyPick };
     }
     return { status: "loading" };
   });
@@ -84,7 +94,14 @@ export function DailyHero({ dailyPick }: DailyHeroProps) {
         const res = await getTodayPick();
         if (cancelled) return;
         if (res.success && res.data) {
-          setState({ status: "content", pick: res.data });
+          const d = res.data;
+          const hasEntries = d.entries && d.entries.length > 0;
+          const hasPhoto = d.photoId;
+          if (!hasEntries && !hasPhoto) {
+            setState({ status: "empty" });
+          } else {
+            setState({ status: "content", pick: d });
+          }
         } else {
           setState({ status: "empty" });
         }
@@ -111,13 +128,33 @@ export function DailyHero({ dailyPick }: DailyHeroProps) {
       ) : state.status === "error" ? (
         <HeroFrame variant="error" message={state.message} />
       ) : (
-        <HeroContent pick={state.pick} />
+        <HeroContent pick={state.pick} initialEntryIndex={initialEntryIndex} />
       )}
     </div>
   );
 }
 
-function HeroContent({ pick }: { pick: DailyPick }) {
+function HeroContent({
+  pick,
+  initialEntryIndex = 0,
+}: {
+  pick: DailyPick;
+  initialEntryIndex?: number;
+}) {
+  const entries = pick.entries ?? [];
+
+  // 当 entries 为空时回退到旧的单图显示模式
+  if (entries.length === 0) {
+    return <HeroContentLegacy pick={pick} />;
+  }
+
+  return <HeroContentMulti pick={pick} entries={entries} initialIdx={initialEntryIndex} />;
+}
+
+/**
+ * 旧版单图展示（entries 为空时的兼容路径）
+ */
+function HeroContentLegacy({ pick }: { pick: DailyPick }) {
   const { day, month, year, weekday } = parsePickDate(pick.pickDate);
   const photo = pick.photo;
   const isVideo = photo && (photo.mediaType ?? "image") === "video";
@@ -127,7 +164,6 @@ function HeroContent({ pick }: { pick: DailyPick }) {
 
   return (
     <section className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-6 overflow-hidden px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-14 lg:px-10 lg:py-10">
-      {/* Photo / Video */}
       <figure className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center">
         {photo ? (
           isVideo ? (
@@ -146,81 +182,365 @@ function HeroContent({ pick }: { pick: DailyPick }) {
           </div>
         )}
       </figure>
-
-      {/* Editorial column */}
       <div
         className={cn(
           "flex min-h-0 w-full flex-col lg:w-[460px] lg:shrink-0",
           isPortrait ? "lg:py-1" : "lg:py-4",
         )}
       >
-        {/* Masthead — Date & Nav */}
-        <div className="flex flex-wrap items-start justify-between gap-4 border-foreground/15 border-b pb-8">
-          <div className="flex items-baseline gap-2.5">
-            <span className="font-display text-[clamp(4rem,10vw,7rem)] leading-[0.8] font-light italic tabular-nums">
-              {day}
-            </span>
-            <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
-              <span className="font-display text-base tracking-wide normal-case italic">
-                {month}
-              </span>
-              <span className="tabular-nums">
-                {year} · 周{weekday}
-              </span>
-            </div>
-          </div>
-          <div className="flex shrink-0">
-            <FolioNav />
-          </div>
-        </div>
-
-        {/* Years-ago tag — 轻量副标题，仅在 ≥1 年时显示 */}
-        {yearsAgo !== null && (
-          <span
-            className="mt-6 self-start text-[11px] tracking-[0.22em] text-primary/80 uppercase tabular-nums"
-            data-testid="years-ago-label"
-          >
-            {`${yearsAgo} 年前的今天`}
-          </span>
-        )}
-
-        {/* Title */}
-        <h2
-          className={cn(
-            "font-serif-sc text-[clamp(2.5rem,4.4vw,4.2rem)] leading-[1.05] font-medium tracking-[-0.015em]",
-            yearsAgo !== null ? "mt-3" : "mt-10",
-          )}
-          style={{ textWrap: "balance" }}
-        >
-          {pick.title}
-        </h2>
-
-        {/* Narrative */}
-        <p
-          className="font-serif-sc mt-8 max-w-[32ch] text-[1.125rem] leading-[1.8] text-foreground/80"
-          style={{ textWrap: "pretty" }}
-        >
-          {pick.narrative}
-        </p>
-
-        {/* Member strip — 同期兄弟照片横向滚动 */}
+        <EntryEditorial
+          day={day}
+          month={month}
+          year={year}
+          weekday={weekday}
+          title={pick.title}
+          narrative={pick.narrative}
+          yearsAgo={yearsAgo}
+        />
         {members.length > 0 && <MemberStrip members={members} />}
-
-        {/* Footer — Folio & Signature Anchor */}
-        <div className="mt-auto flex items-center justify-end gap-4 pt-16 pb-2 text-[10px] tracking-[0.3em] text-muted-foreground/35 uppercase tabular-nums">
-          <div className="flex items-center gap-3">
-            <span className="font-display italic">Vol. {year}</span>
-            <span className="h-px w-10 bg-foreground/10" />
-            <span className="font-sans font-light tracking-[0.4em]">Relight Chronicle</span>
-          </div>
-        </div>
+        <FolioFooter year={year} />
       </div>
     </section>
   );
 }
 
 /**
- * 关联兄弟照片横向滚动条
+ * 新版多图展示（entries 有数据时）
+ */
+function HeroContentMulti({
+  pick,
+  entries,
+  initialIdx = 0,
+}: {
+  pick: DailyPick;
+  entries: DailyPickEntry[];
+  initialIdx?: number;
+}) {
+  // useSearchParams 在 App Router 之外（如测试 renderToString）会返回 null，安全降级
+  const searchParams = useSearchParams();
+
+  // URL ?entry=N 优先于 initialIdx；初次渲染读 URL，后续 setCurrentIdx 同步回 URL
+  const [currentIdx, setCurrentIdx] = useState(() => {
+    const fromUrl = Number(searchParams?.get("entry") ?? "");
+    const seed = Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : initialIdx;
+    return Math.min(Math.max(0, seed), entries.length - 1);
+  });
+
+  const currentEntry = entries[currentIdx];
+  const { day, month, year, weekday } = parsePickDate(pick.pickDate);
+  const yearsAgo = calcYearsAgo(currentEntry?.photo?.takenAt ?? null);
+
+  const handleSelectIdx = useCallback(
+    (idx: number) => {
+      const clamped = Math.min(Math.max(0, idx), entries.length - 1);
+      setCurrentIdx(clamped);
+      // 同步 URL：rank=0 时省略 query；用 history.replaceState 而非 router.replace，
+      // 避免依赖 useRouter（在测试 renderToString / SSR 之外的非 AppRouter 上下文中会抛 invariant）
+      if (typeof window === "undefined") return;
+      try {
+        const url = new URL(window.location.href);
+        if (clamped === 0) url.searchParams.delete("entry");
+        else url.searchParams.set("entry", String(clamped));
+        window.history.replaceState(window.history.state, "", url.toString());
+      } catch {
+        // 非浏览器环境/受限 origin 静默降级，不影响 UI 切换
+      }
+    },
+    [entries.length],
+  );
+
+  // 键盘 ←/→ 切换（走 handleSelectIdx 统一同步 URL）
+  const containerRef = useRef<HTMLElement>(null);
+  const idxRef = useRef(currentIdx);
+  idxRef.current = currentIdx;
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") {
+        handleSelectIdx(idxRef.current - 1);
+      } else if (e.key === "ArrowRight") {
+        handleSelectIdx(idxRef.current + 1);
+      }
+    };
+    const el = containerRef.current;
+    el?.addEventListener("keydown", handleKeyDown);
+    return () => el?.removeEventListener("keydown", handleKeyDown);
+  }, [handleSelectIdx]);
+
+  if (!currentEntry) return null;
+
+  const isPortrait = currentEntry.photo.height > currentEntry.photo.width * 1.05;
+
+  return (
+    <section
+      ref={containerRef}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: 容器需要接收键盘事件
+      tabIndex={0}
+      aria-label="今日精选导览"
+      className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-4 overflow-hidden px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-12 lg:px-10 lg:py-8"
+    >
+      {/* 左侧：大图 + 系列缩略条 + 20 张栅格 */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-y-3 overflow-hidden">
+        {/* 大图区 */}
+        <EntryBigImage entry={currentEntry} pickTitle={pick.title} eager={currentIdx === 0} />
+
+        {/* 系列缩略条（仅在有系列时显示） */}
+        <EntrySeriesStrip members={currentEntry.members} />
+
+        {/* 20 张缩略图栅格 */}
+        <EntryThumbGrid entries={entries} currentIdx={currentIdx} onSelect={handleSelectIdx} />
+      </div>
+
+      {/* 右侧：日期 + 标题 + 叙事 + Folio nav */}
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-col lg:w-[420px] lg:shrink-0",
+          isPortrait ? "lg:py-1" : "lg:py-4",
+        )}
+      >
+        <EntryEditorial
+          day={day}
+          month={month}
+          year={year}
+          weekday={weekday}
+          title={currentEntry.title}
+          narrative={currentEntry.narrative}
+          yearsAgo={yearsAgo}
+        />
+        <FolioFooter year={year} />
+      </div>
+    </section>
+  );
+}
+
+// ===== 子组件 =====
+
+/**
+ * 大图渲染组件（复用 HeroVideo 视频路径）
+ */
+function EntryBigImage({
+  entry,
+  pickTitle,
+  eager = false,
+}: {
+  entry: DailyPickEntry;
+  pickTitle: string;
+  /** 首屏 rank=0 时设为 true，提升 LCP */
+  eager?: boolean;
+}) {
+  const photo = entry.photo;
+  const isVideo = (photo.mediaType ?? "image") === "video";
+
+  return (
+    <figure
+      className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"
+      aria-live="polite"
+      aria-label={entry.title}
+    >
+      {isVideo ? (
+        <HeroVideo photo={photo} title={entry.title || pickTitle} />
+      ) : (
+        <img
+          src={getApiUrl(API_ROUTES.photos.original(entry.photoId))}
+          alt={entry.title}
+          loading={eager ? "eager" : "lazy"}
+          fetchPriority={eager ? "high" : "auto"}
+          className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5 transition-opacity duration-200"
+          style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
+        />
+      )}
+    </figure>
+  );
+}
+
+/**
+ * 系列缩略条：仅在有 members 时显示
+ */
+function EntrySeriesStrip({
+  members,
+}: {
+  members: (DailyPickMember & { photo: Photo })[];
+}) {
+  if (members.length === 0) return null;
+
+  return (
+    <div
+      className="flex gap-2 overflow-x-auto pb-1"
+      data-testid="entry-series-strip"
+      style={{ scrollbarWidth: "none" }}
+    >
+      {members.map((member, idx) => {
+        const photo = member.photo;
+        const takenYear = photo.takenAt ? new Date(photo.takenAt).getFullYear() : null;
+        return (
+          <a
+            key={member.photoId}
+            href={`/photos/${member.photoId}`}
+            className="group flex-shrink-0"
+            data-testid="entry-series-thumb"
+          >
+            <div className="relative h-16 w-16 overflow-hidden rounded-sm ring-1 ring-foreground/10 transition-all duration-100 group-hover:ring-foreground/30">
+              {photo.thumbnailPath ? (
+                <img
+                  src={getApiUrl(API_ROUTES.photos.thumbnail(member.photoId))}
+                  alt={member.caption}
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-muted text-[9px] text-muted-foreground">
+                  无图
+                </div>
+              )}
+              {takenYear !== null && (
+                <span className="absolute right-0.5 bottom-0.5 rounded-sm bg-foreground/60 px-0.5 py-0 text-[8px] leading-4 text-background/90 tabular-nums">
+                  {takenYear}
+                </span>
+              )}
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * 20 张缩略图栅格（键盘 + 无障碍）
+ */
+function EntryThumbGrid({
+  entries,
+  currentIdx,
+  onSelect,
+}: {
+  entries: DailyPickEntry[];
+  currentIdx: number;
+  onSelect: (idx: number) => void;
+}) {
+  return (
+    <div
+      role="listbox"
+      aria-label="今日精选照片列表"
+      data-testid="entry-thumb-grid"
+      className="flex flex-wrap gap-1.5 overflow-y-auto"
+      style={{ maxHeight: "9rem" }}
+    >
+      {entries.map((entry, idx) => {
+        const isSelected = idx === currentIdx;
+        const photo = entry.photo;
+        return (
+          <button
+            key={entry.photoId}
+            type="button"
+            role="option"
+            aria-selected={isSelected}
+            data-testid="entry-thumb"
+            onClick={() => onSelect(idx)}
+            className={cn(
+              "relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-sm ring-1 transition-all duration-200",
+              isSelected
+                ? "ring-2 ring-primary shadow-sm scale-105"
+                : "ring-foreground/10 hover:ring-foreground/30",
+            )}
+            title={entry.title}
+          >
+            {photo.thumbnailPath ? (
+              <img
+                src={getApiUrl(API_ROUTES.photos.thumbnail(entry.photoId))}
+                alt={entry.title}
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-muted text-[9px] text-muted-foreground">
+                无图
+              </div>
+            )}
+            <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-foreground/50 px-0.5 text-[8px] leading-3.5 text-background/90 tabular-nums">
+              {idx + 1}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * 右侧编辑栏：日期 + 标题 + 叙事
+ */
+function EntryEditorial({
+  day,
+  month,
+  year,
+  weekday,
+  title,
+  narrative,
+  yearsAgo,
+}: {
+  day: string;
+  month: string;
+  year: string;
+  weekday: string;
+  title: string;
+  narrative: string;
+  yearsAgo: number | null;
+}) {
+  return (
+    <>
+      {/* Masthead */}
+      <div className="flex flex-wrap items-start justify-between gap-4 border-foreground/15 border-b pb-8">
+        <div className="flex items-baseline gap-2.5">
+          <span className="font-display text-[clamp(4rem,10vw,7rem)] leading-[0.8] font-light italic tabular-nums">
+            {day}
+          </span>
+          <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
+            <span className="font-display text-base tracking-wide normal-case italic">{month}</span>
+            <span className="tabular-nums">
+              {year} · 周{weekday}
+            </span>
+          </div>
+        </div>
+        <div className="flex shrink-0">
+          <FolioNav />
+        </div>
+      </div>
+
+      {/* Years-ago tag */}
+      {yearsAgo !== null && (
+        <span
+          className="mt-6 self-start text-[11px] tracking-[0.22em] text-primary/80 uppercase tabular-nums"
+          data-testid="years-ago-label"
+        >
+          {`${yearsAgo} 年前的今天`}
+        </span>
+      )}
+
+      {/* Title */}
+      <h2
+        className={cn(
+          "font-serif-sc text-[clamp(2.5rem,4.4vw,4.2rem)] leading-[1.05] font-medium tracking-[-0.015em]",
+          yearsAgo !== null ? "mt-3" : "mt-10",
+        )}
+        style={{ textWrap: "balance" }}
+        data-testid="entry-title"
+      >
+        {title}
+      </h2>
+
+      {/* Narrative */}
+      <p
+        className="font-serif-sc mt-8 max-w-[32ch] text-[1.125rem] leading-[1.8] text-foreground/80"
+        style={{ textWrap: "pretty" }}
+        data-testid="entry-narrative"
+      >
+        {narrative}
+      </p>
+    </>
+  );
+}
+
+/**
+ * 关联兄弟照片横向滚动条（旧版单图模式用）
  */
 function MemberStrip({ members }: { members: DailyPickMember[] }) {
   return (
@@ -272,8 +592,6 @@ function HeroVideo({ photo, title }: { photo: Photo; title: string }) {
   const [failed, setFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Some iPhone .MOV files are HEVC-encoded and won't decode in Chrome.
-  // Fall back to the still thumbnail so the layout stays intact.
   if (failed) {
     return (
       <img
@@ -344,6 +662,18 @@ function FolioNav() {
         ))}
       </ul>
     </nav>
+  );
+}
+
+function FolioFooter({ year }: { year: string }) {
+  return (
+    <div className="mt-auto flex items-center justify-end gap-4 pt-16 pb-2 text-[10px] tracking-[0.3em] text-muted-foreground/35 uppercase tabular-nums">
+      <div className="flex items-center gap-3">
+        <span className="font-display italic">Vol. {year}</span>
+        <span className="h-px w-10 bg-foreground/10" />
+        <span className="font-sans font-light tracking-[0.4em]">Relight Chronicle</span>
+      </div>
+    </div>
   );
 }
 
