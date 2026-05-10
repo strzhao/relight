@@ -73,6 +73,7 @@ function makeDailyPickWithMembers(memberCount: number): DailyPick & {
     createdAt: "2026-05-09T06:00:00.000Z",
     photo: makePhoto(heroId, heroTakenAt),
     members,
+    entries: [],
   };
 }
 
