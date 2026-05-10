@@ -158,7 +158,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
   // 场景 R3-1: 首页渲染 20 张缩略图
   // --------------------------------------------------------------------------
 
-  test("R3-1: 访问首页，等待 20 张 entry 缩略图渲染", async ({ page }) => {
+  test("R3-1: 访问首页，等待 20 个 banner ticks渲染", async ({ page }) => {
     // mock /api/daily/today（含 query string 变体）
     // 注意：使用 * 而非 ? 匹配 query string（patterns.md 已记录）
     await page.route("**/api/daily/today*", async (route) => {
@@ -172,9 +172,9 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     await page.goto("/");
 
-    // 等待 20 张 entry 缩略图渲染
-    // 设计契约：每张缩略图有 data-testid="entry-thumb"
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    // 等待 20 个 banner ticks渲染
+    // 设计契约：每个 entry 对应一个 data-testid="banner-tick"（替代旧版 20 缩略图栅格）
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(20, { timeout: 15000 });
   });
 
@@ -195,7 +195,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
     await page.goto("/");
 
     // 等待首页核心内容渲染
-    await expect(page.locator('[data-testid="entry-thumb"]').first()).toBeVisible({
+    await expect(page.locator('[data-testid="banner-tick"]').first()).toBeVisible({
       timeout: 15000,
     });
 
@@ -220,12 +220,12 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
     await page.goto("/");
 
     // 等待缩略图渲染
-    await expect(page.locator('[data-testid="entry-thumb"]').first()).toBeVisible({
+    await expect(page.locator('[data-testid="banner-tick"]').first()).toBeVisible({
       timeout: 15000,
     });
 
     // rank=0 缩略图应处于选中态
-    const selectedThumb = page.locator('[data-testid="entry-thumb"][aria-selected="true"]');
+    const selectedThumb = page.locator('[data-testid="banner-tick"][aria-selected="true"]');
     await expect(selectedThumb).toBeVisible({ timeout: 5000 });
   });
 
@@ -246,7 +246,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
     await page.goto("/");
 
     // 等待 20 张缩略图渲染
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(20, { timeout: 15000 });
 
     // 初始状态：rank=0 title 可见
@@ -276,7 +276,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     await page.goto("/");
 
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(20, { timeout: 15000 });
 
     // 点击第 5 个缩略图（rank=4）
@@ -311,7 +311,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     await page.goto("/");
 
-    await expect(page.locator('[data-testid="entry-thumb"]').first()).toBeVisible({
+    await expect(page.locator('[data-testid="banner-tick"]').first()).toBeVisible({
       timeout: 15000,
     });
 
@@ -336,7 +336,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     await page.goto("/");
 
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(20, { timeout: 15000 });
 
     // 点击 rank=7（index=7），该 entry 无 members
@@ -370,7 +370,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
     expect(typeof response).toBe("string");
 
     // 不应有 entry-thumb（无 entries）
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(0, { timeout: 5000 });
   });
 
@@ -390,7 +390,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     await page.goto("/");
 
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(20, { timeout: 15000 });
 
     // 初始：rank=0 narrative 可见
@@ -419,7 +419,7 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     await page.goto("/");
 
-    const thumbs = page.locator('[data-testid="entry-thumb"]');
+    const thumbs = page.locator('[data-testid="banner-tick"]');
     await expect(thumbs).toHaveCount(20, { timeout: 15000 });
 
     // 连续快速点击 rank=1, rank=3, rank=9
@@ -436,5 +436,88 @@ test.describe("首页 DailyHero entries 交互 — E2E 验收（R3 场景）", (
 
     // rank=9 的 title 应显示
     await expect(page.getByText("E2E 精选标题 rank=9")).toBeVisible({ timeout: 3000 });
+  });
+
+  // --------------------------------------------------------------------------
+  // 场景 R3-11: 系列条点击原地切换大图（不跳转），右侧 editorial 不变
+  // --------------------------------------------------------------------------
+
+  test("R3-11: 点击系列条 member，大图原地切换 + 不跳转 + editorial 保持", async ({ page }) => {
+    await page.route("**/api/daily/today*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(make20EntriesApiResponse()),
+      });
+    });
+    await mockThumbnails(page);
+
+    await page.goto("/");
+
+    // 等待 banner-tick 渲染
+    const ticks = page.locator('[data-testid="banner-tick"]');
+    await expect(ticks).toHaveCount(20, { timeout: 15000 });
+
+    // rank=0 有 3 个 members → 系列条共 4 个 thumb（1 primary + 3 members）
+    const seriesThumbs = page.locator('[data-testid="entry-series-thumb"]');
+    await expect(seriesThumbs).toHaveCount(4, { timeout: 5000 });
+
+    // 初始：第 0 个系列项（primary）aria-selected="true"
+    await expect(seriesThumbs.nth(0)).toHaveAttribute("aria-selected", "true");
+
+    // 记录当前 URL（点击 member 不应改 URL ?entry=）
+    const urlBefore = page.url();
+
+    // 点击系列条第 2 项（member[1]）
+    await seriesThumbs.nth(2).click();
+    await page.waitForTimeout(200);
+
+    // 选中态从 primary 迁移到第 2 项
+    await expect(seriesThumbs.nth(2)).toHaveAttribute("aria-selected", "true");
+    await expect(seriesThumbs.nth(0)).not.toHaveAttribute("aria-selected", "true");
+
+    // URL 不变（系列条点击不改 ?entry= 参数）
+    expect(page.url()).toBe(urlBefore);
+
+    // editorial title 仍是 rank=0（系列条切换不改右侧叙事）
+    await expect(page.getByText("E2E 精选标题 rank=0")).toBeVisible();
+  });
+
+  // --------------------------------------------------------------------------
+  // 场景 R3-12: 系列条点击不跳转到 /photos/[id]
+  // --------------------------------------------------------------------------
+
+  test("R3-12: 点击系列条 member 不跳转到 /photos/[id]", async ({ page }) => {
+    await page.route("**/api/daily/today*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(make20EntriesApiResponse()),
+      });
+    });
+    await mockThumbnails(page);
+
+    await page.goto("/");
+
+    const ticks = page.locator('[data-testid="banner-tick"]');
+    await expect(ticks).toHaveCount(20, { timeout: 15000 });
+
+    const seriesThumbs = page.locator('[data-testid="entry-series-thumb"]');
+    await expect(seriesThumbs.first()).toBeVisible({ timeout: 5000 });
+
+    // 监听 navigation
+    let navigatedAway = false;
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame() && /\/photos\//.test(frame.url())) {
+        navigatedAway = true;
+      }
+    });
+
+    // 点击系列条第 1 项（member[0]）
+    await seriesThumbs.nth(1).click();
+    await page.waitForTimeout(300);
+
+    expect(navigatedAway).toBe(false);
+    expect(page.url()).not.toMatch(/\/photos\//);
   });
 });

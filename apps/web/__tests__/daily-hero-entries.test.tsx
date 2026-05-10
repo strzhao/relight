@@ -212,35 +212,30 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
   // 验收场景 2: 20 张缩略图栅格渲染
   // ----------------------------------------------------------------
 
-  describe("场景 2 — 20 张缩略图栅格（EntryThumbGrid）渲染", () => {
-    it("含 20 entries 时，HTML 包含 20 个 data-testid='entry-thumb'", async () => {
+  describe("场景 2 — banner 轮播 ticks 渲染（替代 20 缩略图栅格）", () => {
+    it("含 20 entries 时，HTML 包含 20 个 data-testid='banner-tick'", async () => {
       const dailyPick = make20EntriesDailyPick();
       const html = await renderDailyHero(dailyPick);
 
-      // 每个缩略图应有 data-testid="entry-thumb"
-      const thumbMatches = html.match(/data-testid="entry-thumb"/g);
-      expect(thumbMatches).not.toBeNull();
-      expect(thumbMatches?.length).toBe(20);
+      // 每个 entry 对应一个 tick（替代旧版 20 缩略图栅格）
+      const tickMatches = html.match(/data-testid="banner-tick"/g);
+      expect(tickMatches).not.toBeNull();
+      expect(tickMatches?.length).toBe(20);
     });
 
-    it("缩略图容器 role='listbox' 存在（无障碍契约）", async () => {
+    it("ticks 容器 role='tablist' 存在（无障碍契约）", async () => {
       const dailyPick = make20EntriesDailyPick();
       const html = await renderDailyHero(dailyPick);
-
-      // 缩略图列表应有 role="listbox" 或含 entry-thumb 的父容器
-      // 验证无障碍标记
-      expect(html).toMatch(/role="listbox"|data-testid="entry-thumb-grid"/);
+      expect(html).toMatch(/role="tablist"/);
     });
 
-    it("默认选中第 1 张（rank=0）— aria-selected='true' 出现在 rank=0 缩略图上", async () => {
+    it("默认选中第 1 张（rank=0）— aria-selected='true' 出现在 rank=0 tick 上", async () => {
       const dailyPick = make20EntriesDailyPick();
       const html = await renderDailyHero(dailyPick);
-
-      // 至少存在一个 aria-selected="true"（选中态）
       expect(html).toContain('aria-selected="true"');
     });
 
-    it("7 entries 时，缩略图栅格只渲染 7 张（不填空位）", async () => {
+    it("7 entries 时，只渲染 7 个 ticks（不填空位）", async () => {
       const sevenEntries = Array.from({ length: 7 }, (_, i) => makeEntry(i, 0));
       const entry0 = sevenEntries[0]!;
       const dailyPick: DailyPick = {
@@ -257,9 +252,16 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
       };
 
       const html = await renderDailyHero(dailyPick);
-      const thumbMatches = html.match(/data-testid="entry-thumb"/g);
-      expect(thumbMatches).not.toBeNull();
-      expect(thumbMatches?.length).toBe(7);
+      const tickMatches = html.match(/data-testid="banner-tick"/g);
+      expect(tickMatches).not.toBeNull();
+      expect(tickMatches?.length).toBe(7);
+    });
+
+    it("含 prev/next 箭头按钮（多 entry 时）", async () => {
+      const dailyPick = make20EntriesDailyPick();
+      const html = await renderDailyHero(dailyPick);
+      expect(html).toContain('data-testid="banner-arrow-prev"');
+      expect(html).toContain('data-testid="banner-arrow-next"');
     });
   });
 
@@ -267,42 +269,30 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
   // 验收场景 3: 选中态迁移（rank=0 → rank=4）
   // ----------------------------------------------------------------
 
-  describe("场景 3 — 点击第 5 个缩略图（rank=4）后选中态迁移", () => {
+  describe("场景 3 — 切换 entry 后右侧 editorial 同步（initialEntryIndex 模拟）", () => {
     it("renderToString 时 entries[0] 内容出现在 HTML 中（初始状态验证）", async () => {
       const dailyPick = make20EntriesDailyPick();
       const html = await renderDailyHero(dailyPick);
 
-      // 初始态：rank=0 的 title 可见
       expect(html).toContain("精选标题 rank=0");
-      // 初始态：rank=4 的 title 不是主要显示内容（可能存在于缩略图 alt 中，但不是主标题）
-      // 此断言验证初始 editorial 区域显示 rank=0 内容
       const titleCount = (html.match(/精选标题 rank=0/g) ?? []).length;
       expect(titleCount).toBeGreaterThan(0);
     });
 
-    it("切换到 rank=4 后（通过 initialEntryIndex prop），rank=4 title 出现在 editorial 区域", async () => {
+    it("通过 initialEntryIndex=4 切换后，rank=4 title 出现在 editorial 区域", async () => {
       const dailyPick = make20EntriesDailyPick();
-
-      // 通过 initialEntryIndex=4 模拟点击 rank=4 后的状态
-      // CONTRACT_AMBIGUOUS: 组件可能不支持 initialEntryIndex prop，
-      // 在此情况下此断言验证 SSR 初始渲染的灵活性
       const html = await renderDailyHeroAtIdx(dailyPick, 4);
 
-      // 如果组件支持 initialEntryIndex：rank=4 的 title 应出现在 editorial 区域
-      // 如果不支持：仍应显示 rank=0，但不应崩溃
-      expect(html).toBeTruthy();
-      expect(html.length).toBeGreaterThan(100);
+      expect(html).toContain("精选标题 rank=4");
+      // editorial 区域 data-testid="entry-title" 必含 rank=4
+      expect(html).toMatch(/data-testid="entry-title"[^>]*>[^<]*精选标题 rank=4/);
     });
 
-    it("所有 20 个 entry 的 rank 都渲染在 data-testid='entry-thumb' 中", async () => {
+    it("ticks 内首屏当前 entry 的 photoId 出现在大图区", async () => {
       const dailyPick = make20EntriesDailyPick();
       const html = await renderDailyHero(dailyPick);
-
-      // 验证 20 张缩略图的 photoId 都出现在 HTML 中（通过 src 或 data-photo-id）
-      for (let i = 0; i < 20; i++) {
-        const photoId = `entry-photo-${String(i).padStart(3, "0")}`;
-        expect(html).toContain(photoId);
-      }
+      // 大图区应包含 entries[0] 的 photoId
+      expect(html).toContain("entry-photo-000");
     });
   });
 
@@ -333,13 +323,14 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
       expect(html).toContain('data-testid="entry-series-strip"');
     });
 
-    it("rank=0 entries members=3 时，HTML 包含 3 个 data-testid='entry-series-thumb'", async () => {
+    it("rank=0 entries members=3 时，HTML 包含 4 个 data-testid='entry-series-thumb'（1 primary + 3 members）", async () => {
       const dailyPick = make20EntriesDailyPick(); // rank=0 有 3 张 members
       const html = await renderDailyHero(dailyPick);
 
+      // 系列条第 0 项是 entry 自身 photo（让用户能切回主图），其后是 N 个 members
       const thumbMatches = html.match(/data-testid="entry-series-thumb"/g);
       expect(thumbMatches).not.toBeNull();
-      expect(thumbMatches?.length).toBe(3);
+      expect(thumbMatches?.length).toBe(4);
     });
   });
 
@@ -356,11 +347,11 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
       expect(html.length).toBeGreaterThan(0);
     });
 
-    it("entries=[] 时 HTML 不包含 data-testid='entry-thumb'（无缩略图）", async () => {
+    it("entries=[] 时 HTML 不包含 data-testid='banner-tick'（无 ticks）", async () => {
       const dailyPick = makeEmptyEntriesDailyPick();
       const html = await renderDailyHero(dailyPick);
 
-      expect(html).not.toContain('data-testid="entry-thumb"');
+      expect(html).not.toContain('data-testid="banner-tick"');
     });
 
     it("entries=[] 时 HTML 不包含 data-testid='entry-series-strip'", async () => {
@@ -408,11 +399,11 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
   });
 
   // ----------------------------------------------------------------
-  // 验收场景 7: 各 entry 都在缩略图栅格中有对应 photo
+  // 验收场景 7: SSR 首屏只渲染当前 entry 的大图（其它 entry 走 banner-tick 切换后才加载）
   // ----------------------------------------------------------------
 
-  describe("场景 7 — 所有 entries 的 photo 都在缩略图中渲染", () => {
-    it("含 5 entries 时，5 张 entry photo 的 id 全部出现在 HTML 中", async () => {
+  describe("场景 7 — SSR 首屏 photo 仅当前 entry 的", () => {
+    it("含 5 entries 时，HTML 含 entries[0] 的 photoId（大图区）", async () => {
       const fiveEntries = Array.from({ length: 5 }, (_, i) => makeEntry(i, 0));
       const entry0 = fiveEntries[0]!;
       const dailyPick: DailyPick = {
@@ -429,11 +420,11 @@ describe("DailyHero entries 多图展示 — 验收测试（红队）", () => {
       };
 
       const html = await renderDailyHero(dailyPick);
-
-      for (let i = 0; i < 5; i++) {
-        const photoId = `entry-photo-${String(i).padStart(3, "0")}`;
-        expect(html).toContain(photoId);
-      }
+      // 大图：entries[0] photoId 必出现在 entry-big-image figure 内
+      expect(html).toMatch(/data-testid="entry-big-image"[\s\S]*entry-photo-000/);
+      // banner ticks 数量 = 5
+      const tickMatches = html.match(/data-testid="banner-tick"/g);
+      expect(tickMatches?.length).toBe(5);
     });
   });
 });

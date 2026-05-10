@@ -205,8 +205,11 @@ function HeroContentLegacy({ pick }: { pick: DailyPick }) {
 }
 
 /**
- * 新版多图展示（entries 有数据时）
+ * 新版多图展示（entries 有数据时）— banner 轮播 20 entries + 当前 entry 的系列条原地换图
  */
+const AUTO_ROTATE_MS = 10_000;
+const DRAG_THRESHOLD = 80;
+
 function HeroContentMulti({
   pick,
   entries,
@@ -216,6 +219,9 @@ function HeroContentMulti({
   entries: DailyPickEntry[];
   initialIdx?: number;
 }) {
+  const total = entries.length;
+  const isMultiple = total > 1;
+
   // useSearchParams 在 App Router 之外（如测试 renderToString）会返回 null，安全降级
   const searchParams = useSearchParams();
 
@@ -223,71 +229,277 @@ function HeroContentMulti({
   const [currentIdx, setCurrentIdx] = useState(() => {
     const fromUrl = Number(searchParams?.get("entry") ?? "");
     const seed = Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : initialIdx;
-    return Math.min(Math.max(0, seed), entries.length - 1);
+    return Math.min(Math.max(0, seed), total - 1);
   });
+
+  // 当前 entry 内部的子图索引：0 = entry 自身 photo，1+ = members[subIdx-1]
+  // entry 切换时（无论自动/手动）必须重置为 0
+  const [subIdx, setSubIdx] = useState(0);
+  const [leavingIdx, setLeavingIdx] = useState<number | null>(null);
 
   const currentEntry = entries[currentIdx];
   const { day, month, year, weekday } = parsePickDate(pick.pickDate);
   const yearsAgo = calcYearsAgo(currentEntry?.photo?.takenAt ?? null);
 
-  const handleSelectIdx = useCallback(
-    (idx: number) => {
-      const clamped = Math.min(Math.max(0, idx), entries.length - 1);
-      setCurrentIdx(clamped);
-      // 同步 URL：rank=0 时省略 query；用 history.replaceState 而非 router.replace，
-      // 避免依赖 useRouter（在测试 renderToString / SSR 之外的非 AppRouter 上下文中会抛 invariant）
-      if (typeof window === "undefined") return;
-      try {
-        const url = new URL(window.location.href);
-        if (clamped === 0) url.searchParams.delete("entry");
-        else url.searchParams.set("entry", String(clamped));
-        window.history.replaceState(window.history.state, "", url.toString());
-      } catch {
-        // 非浏览器环境/受限 origin 静默降级，不影响 UI 切换
+  // ── refs：单一权威 idx，避免 stale closure ──
+  const containerRef = useRef<HTMLElement>(null);
+  const currentIdxRef = useRef(currentIdx);
+  currentIdxRef.current = currentIdx;
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const leavingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── 同步 URL（不变） ──
+  const syncUrl = useCallback((clamped: number) => {
+    if (typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      if (clamped === 0) url.searchParams.delete("entry");
+      else url.searchParams.set("entry", String(clamped));
+      window.history.replaceState(window.history.state, "", url.toString());
+    } catch {
+      // 非浏览器环境/受限 origin 静默降级
+    }
+  }, []);
+
+  // ── 切换 entry（核心权威） ──
+  const transitionTo = useCallback(
+    (next: number) => {
+      const clamped = Math.min(Math.max(0, next), total - 1);
+      const prev = currentIdxRef.current;
+      if (clamped === prev) return;
+
+      if (leavingTimeoutRef.current) {
+        clearTimeout(leavingTimeoutRef.current);
+        leavingTimeoutRef.current = null;
       }
+
+      setLeavingIdx(prev);
+      setCurrentIdx(clamped);
+      currentIdxRef.current = clamped;
+      setSubIdx(0); // entry 切换 → 重置子图索引
+      syncUrl(clamped);
+
+      leavingTimeoutRef.current = setTimeout(() => {
+        setLeavingIdx(null);
+        leavingTimeoutRef.current = null;
+      }, 600);
     },
-    [entries.length],
+    [total, syncUrl],
   );
 
-  // 键盘 ←/→ 切换（走 handleSelectIdx 统一同步 URL）
-  const containerRef = useRef<HTMLElement>(null);
-  const idxRef = useRef(currentIdx);
-  idxRef.current = currentIdx;
+  const stopInterval = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  const startInterval = useCallback(() => {
+    if (!isMultiple) return;
+    stopInterval();
+    intervalRef.current = setInterval(() => {
+      const next = (currentIdxRef.current + 1) % total;
+      transitionTo(next);
+    }, AUTO_ROTATE_MS);
+  }, [isMultiple, total, stopInterval, transitionTo]);
+
+  // 手动 nav：切换后重置自动计时
+  const navGoTo = useCallback(
+    (next: number) => {
+      transitionTo(next);
+      startInterval();
+    },
+    [transitionTo, startInterval],
+  );
+
+  // ── lifecycle：自动轮播 + 键盘 + 可见性切换 ──
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    if (!isMultiple) return;
+    startInterval();
+
+    const handleKey = (e: KeyboardEvent) => {
+      // focus guard：仅当焦点在容器内时响应（避免输入框被劫持）
+      const container = containerRef.current;
+      if (container && !container.contains(document.activeElement)) return;
       if (e.key === "ArrowLeft") {
-        handleSelectIdx(idxRef.current - 1);
+        navGoTo((currentIdxRef.current - 1 + total) % total);
       } else if (e.key === "ArrowRight") {
-        handleSelectIdx(idxRef.current + 1);
+        navGoTo((currentIdxRef.current + 1) % total);
       }
     };
-    const el = containerRef.current;
-    el?.addEventListener("keydown", handleKeyDown);
-    return () => el?.removeEventListener("keydown", handleKeyDown);
-  }, [handleSelectIdx]);
+    const handleVisibility = () => {
+      if (document.hidden) stopInterval();
+      else startInterval();
+    };
+    document.addEventListener("keydown", handleKey);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      stopInterval();
+      if (leavingTimeoutRef.current) {
+        clearTimeout(leavingTimeoutRef.current);
+        leavingTimeoutRef.current = null;
+      }
+      document.removeEventListener("keydown", handleKey);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [isMultiple, total, startInterval, stopInterval, navGoTo]);
+
+  // ── pointer/drag ──
+  const dragStartX = useRef<number | null>(null);
+  const dragDeltaX = useRef(0);
+  const [dragOffset, setDragOffset] = useState(0);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!isMultiple) return;
+    if ((e.target as HTMLElement).closest("button, a")) return;
+    dragStartX.current = e.clientX;
+    dragDeltaX.current = 0;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (dragStartX.current === null) return;
+    const delta = e.clientX - dragStartX.current;
+    dragDeltaX.current = delta;
+    setDragOffset(delta * 0.4);
+  };
+  const handlePointerUp = () => {
+    if (dragStartX.current === null) return;
+    const delta = dragDeltaX.current;
+    dragStartX.current = null;
+    dragDeltaX.current = 0;
+    setDragOffset(0);
+    if (delta < -DRAG_THRESHOLD) navGoTo((currentIdxRef.current + 1) % total);
+    else if (delta > DRAG_THRESHOLD) navGoTo((currentIdxRef.current - 1 + total) % total);
+  };
 
   if (!currentEntry) return null;
 
-  const isPortrait = currentEntry.photo.height > currentEntry.photo.width * 1.05;
+  // 当前实际展示的图（entry 自身或某个 member）+ caption（仅 member 有）
+  const subPhoto =
+    subIdx === 0
+      ? currentEntry.photo
+      : (currentEntry.members[subIdx - 1]?.photo ?? currentEntry.photo);
+  const subCaption = subIdx > 0 ? (currentEntry.members[subIdx - 1]?.caption ?? "") : "";
+  const subPhotoId =
+    subIdx === 0
+      ? currentEntry.photoId
+      : (currentEntry.members[subIdx - 1]?.photoId ?? currentEntry.photoId);
+  const isPortrait = subPhoto.height > subPhoto.width * 1.05;
 
   return (
     <section
       ref={containerRef}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: 容器需要接收键盘事件
       tabIndex={0}
+      data-testid="daily-banner"
+      aria-roledescription="carousel"
       aria-label="今日精选导览"
       className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-y-4 overflow-hidden px-5 py-5 md:px-8 lg:flex-row lg:items-stretch lg:gap-x-12 lg:px-10 lg:py-8"
+      style={{ touchAction: "pan-y" }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
-      {/* 左侧：大图 + 系列缩略条 + 20 张栅格 */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-y-3 overflow-hidden">
-        {/* 大图区 */}
-        <EntryBigImage entry={currentEntry} pickTitle={pick.title} eager={currentIdx === 0} />
+      {/* 局部样式：交叉淡入 + tick 进度填充 */}
+      <style>{`
+        .dh-stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
+        .dh-image { transition: opacity 600ms cubic-bezier(.22,1,.36,1), transform 600ms cubic-bezier(.22,1,.36,1); will-change: opacity, transform; }
+        .dh-caption { animation: dh-cap-in 480ms cubic-bezier(.22,1,.36,1) both; }
+        @keyframes dh-cap-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .dh-tick-fill { height: 100%; width: 0; background: currentColor; border-radius: 1px; }
+        .dh-tick-fill.is-running { animation: dh-fill 10s linear forwards; }
+        @keyframes dh-fill { from { width: 0; } to { width: 100%; } }
+        @media (prefers-reduced-motion: reduce) {
+          .dh-image, .dh-caption { transition-duration: 0s !important; animation-duration: 0s !important; }
+          .dh-tick-fill.is-running { animation-duration: 0s !important; }
+        }
+      `}</style>
 
-        {/* 系列缩略条（仅在有系列时显示） */}
-        <EntrySeriesStrip members={currentEntry.members} />
+      {/* 左侧：大图（可换 member）+ 系列条 + 轮播控件 */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col gap-y-3 overflow-hidden">
+        <div className="dh-stage">
+          <EntryBigImage
+            key={`${currentIdx}-${subIdx}`}
+            photo={subPhoto}
+            photoId={subPhotoId}
+            alt={subIdx === 0 ? currentEntry.title : subCaption || currentEntry.title}
+            caption={subCaption}
+            eager={currentIdx === 0 && subIdx === 0}
+            dragOffsetPx={dragOffset}
+          />
+        </div>
 
-        {/* 20 张缩略图栅格 */}
-        <EntryThumbGrid entries={entries} currentIdx={currentIdx} onSelect={handleSelectIdx} />
+        {/* 系列条：仅当当前 entry 有 members 时展示，点击原地换图 */}
+        {currentEntry.members.length > 0 && (
+          <EntrySeriesStrip
+            entry={currentEntry}
+            subIdx={subIdx}
+            onSelect={(nextSub) => {
+              setSubIdx(nextSub);
+              // 任何手动切换（含系列内换图）都重置 banner 自动跳转倒计时
+              startInterval();
+            }}
+          />
+        )}
+
+        {/* 轮播控件：prev/next + ticks（多 entry 时才显示） */}
+        {isMultiple && (
+          <>
+            <button
+              type="button"
+              data-testid="banner-arrow-prev"
+              aria-label="上一张"
+              onClick={() => navGoTo((currentIdx - 1 + total) % total)}
+              className="font-display absolute top-1/2 left-2 -translate-y-1/2 text-5xl italic text-foreground/30 transition-colors duration-100 hover:text-foreground/80"
+              style={{ lineHeight: 1 }}
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              data-testid="banner-arrow-next"
+              aria-label="下一张"
+              onClick={() => navGoTo((currentIdx + 1) % total)}
+              className="font-display absolute top-1/2 right-2 -translate-y-1/2 text-5xl italic text-foreground/30 transition-colors duration-100 hover:text-foreground/80"
+              style={{ lineHeight: 1 }}
+            >
+              ›
+            </button>
+
+            {/* ticks：每个 entry 一个；当前那个填充进度 */}
+            <div
+              className="absolute bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-1.5 text-foreground/70"
+              role="tablist"
+              aria-label="今日精选轮播指示器"
+            >
+              {entries.map((entry, i) => {
+                const isActive = i === currentIdx;
+                return (
+                  <button
+                    key={entry.photoId}
+                    type="button"
+                    data-testid="banner-tick"
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-label={`跳转到第 ${i + 1} 张`}
+                    onClick={() => navGoTo(i)}
+                    className="h-0.5 overflow-hidden rounded-sm bg-foreground/20 transition-all duration-200 hover:bg-foreground/50"
+                    style={{ width: isActive ? 32 : 16 }}
+                  >
+                    <span
+                      className={`dh-tick-fill${isActive ? " is-running" : ""}`}
+                      key={`tick-fill-${i}-${isActive ? "active" : "idle"}`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* 离场前一帧的隐藏 leaving photo（仅用于 cross-fade 视觉占位） */}
+        {leavingIdx !== null && false /* 简化：不渲染离场层，靠 key 触发 image 重渲染 */}
       </div>
 
       {/* 右侧：日期 + 标题 + 叙事 + Folio nav */}
@@ -315,74 +527,119 @@ function HeroContentMulti({
 // ===== 子组件 =====
 
 /**
- * 大图渲染组件（复用 HeroVideo 视频路径）
+ * 大图渲染组件（接受任意 photo —— entry 自身或 member —— 配合 caption 覆盖层做原地换图）
  */
 function EntryBigImage({
-  entry,
-  pickTitle,
+  photo,
+  photoId,
+  alt,
+  caption = "",
   eager = false,
+  dragOffsetPx = 0,
 }: {
-  entry: DailyPickEntry;
-  pickTitle: string;
-  /** 首屏 rank=0 时设为 true，提升 LCP */
+  photo: Photo;
+  photoId: string;
+  alt: string;
+  /** 仅在显示 member 时有值，作为底部覆盖层 */
+  caption?: string;
+  /** 首屏首张时 true，提升 LCP */
   eager?: boolean;
+  /** 拖拽中的水平偏移像素，由父组件计算 */
+  dragOffsetPx?: number;
 }) {
-  const photo = entry.photo;
   const isVideo = (photo.mediaType ?? "image") === "video";
+  const transformStyle =
+    dragOffsetPx !== 0 ? { transform: `translateX(${dragOffsetPx}px)` } : undefined;
 
   return (
     <figure
       className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"
       aria-live="polite"
-      aria-label={entry.title}
+      aria-label={alt}
+      data-testid="entry-big-image"
     >
       {isVideo ? (
-        <HeroVideo photo={photo} title={entry.title || pickTitle} />
+        <HeroVideo photo={photo} title={alt} />
       ) : (
         <img
-          src={getApiUrl(API_ROUTES.photos.original(entry.photoId))}
-          alt={entry.title}
+          src={getApiUrl(API_ROUTES.photos.original(photoId))}
+          alt={alt}
           loading={eager ? "eager" : "lazy"}
           fetchPriority={eager ? "high" : "auto"}
-          className="max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5 transition-opacity duration-200"
-          style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
+          draggable={false}
+          className="dh-image max-h-full max-w-full object-contain shadow-[0_50px_120px_-30px_oklch(0.155_0.006_95_/_0.55)] ring-1 ring-foreground/5"
+          style={{ aspectRatio: `${photo.width} / ${photo.height}`, ...(transformStyle ?? {}) }}
         />
+      )}
+      {caption && (
+        <div
+          data-testid="entry-big-caption"
+          className="dh-caption pointer-events-none absolute right-0 bottom-0 left-0 bg-gradient-to-t from-foreground/55 to-transparent px-5 pt-10 pb-4"
+        >
+          <p className="font-serif-sc text-sm leading-relaxed text-background/95">{caption}</p>
+        </div>
       )}
     </figure>
   );
 }
 
 /**
- * 系列缩略条：仅在有 members 时显示
+ * 系列缩略条：在大图下方，点击原地切换大图（不跳转）
+ * 项 0 = entry 自身 photo，1+ = members[i-1]
  */
 function EntrySeriesStrip({
-  members,
+  entry,
+  subIdx,
+  onSelect,
 }: {
-  members: (DailyPickMember & { photo: Photo })[];
+  entry: DailyPickEntry;
+  subIdx: number;
+  onSelect: (nextSub: number) => void;
 }) {
-  if (members.length === 0) return null;
+  // 第一项始终是 entry 自身 photo（让用户能切回主图）
+  const items: { kind: "primary" | "member"; photoId: string; photo: Photo; caption: string }[] = [
+    { kind: "primary", photoId: entry.photoId, photo: entry.photo, caption: entry.title },
+    ...entry.members.map((m) => ({
+      kind: "member" as const,
+      photoId: m.photoId,
+      photo: m.photo,
+      caption: m.caption,
+    })),
+  ];
 
   return (
     <div
       className="flex gap-2 overflow-x-auto pb-1"
       data-testid="entry-series-strip"
+      role="listbox"
+      aria-label="系列照片"
       style={{ scrollbarWidth: "none" }}
     >
-      {members.map((member, idx) => {
-        const photo = member.photo;
-        const takenYear = photo.takenAt ? new Date(photo.takenAt).getFullYear() : null;
+      {items.map((item, idx) => {
+        const isActive = idx === subIdx;
+        const takenYear = item.photo.takenAt ? new Date(item.photo.takenAt).getFullYear() : null;
         return (
-          <a
-            key={member.photoId}
-            href={`/photos/${member.photoId}`}
-            className="group flex-shrink-0"
+          <button
+            key={item.photoId}
+            type="button"
+            role="option"
+            aria-selected={isActive}
             data-testid="entry-series-thumb"
+            data-kind={item.kind}
+            title={item.caption}
+            onClick={() => onSelect(idx)}
+            className={cn(
+              "group relative flex-shrink-0 overflow-hidden rounded-sm transition-all duration-150",
+              isActive
+                ? "ring-2 ring-primary scale-105"
+                : "ring-1 ring-foreground/10 hover:ring-foreground/30",
+            )}
           >
-            <div className="relative h-16 w-16 overflow-hidden rounded-sm ring-1 ring-foreground/10 transition-all duration-100 group-hover:ring-foreground/30">
-              {photo.thumbnailPath ? (
+            <div className="relative h-16 w-16">
+              {item.photo.thumbnailPath ? (
                 <img
-                  src={getApiUrl(API_ROUTES.photos.thumbnail(member.photoId))}
-                  alt={member.caption}
+                  src={getApiUrl(API_ROUTES.photos.thumbnail(item.photoId))}
+                  alt={item.caption}
                   loading="lazy"
                   className="h-full w-full object-cover"
                 />
@@ -397,67 +654,6 @@ function EntrySeriesStrip({
                 </span>
               )}
             </div>
-          </a>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * 20 张缩略图栅格（键盘 + 无障碍）
- */
-function EntryThumbGrid({
-  entries,
-  currentIdx,
-  onSelect,
-}: {
-  entries: DailyPickEntry[];
-  currentIdx: number;
-  onSelect: (idx: number) => void;
-}) {
-  return (
-    <div
-      role="listbox"
-      aria-label="今日精选照片列表"
-      data-testid="entry-thumb-grid"
-      className="flex flex-wrap gap-1.5 overflow-y-auto"
-      style={{ maxHeight: "9rem" }}
-    >
-      {entries.map((entry, idx) => {
-        const isSelected = idx === currentIdx;
-        const photo = entry.photo;
-        return (
-          <button
-            key={entry.photoId}
-            type="button"
-            role="option"
-            aria-selected={isSelected}
-            data-testid="entry-thumb"
-            onClick={() => onSelect(idx)}
-            className={cn(
-              "relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-sm ring-1 transition-all duration-200",
-              isSelected
-                ? "ring-2 ring-primary shadow-sm scale-105"
-                : "ring-foreground/10 hover:ring-foreground/30",
-            )}
-            title={entry.title}
-          >
-            {photo.thumbnailPath ? (
-              <img
-                src={getApiUrl(API_ROUTES.photos.thumbnail(entry.photoId))}
-                alt={entry.title}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-muted text-[9px] text-muted-foreground">
-                无图
-              </div>
-            )}
-            <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-foreground/50 px-0.5 text-[8px] leading-3.5 text-background/90 tabular-nums">
-              {idx + 1}
-            </span>
           </button>
         );
       })}
