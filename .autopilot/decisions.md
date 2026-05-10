@@ -1,5 +1,24 @@
 # 架构决策日志
 
+### [2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12（质量优先于数量）
+
+<!-- tags: daily-selection, candidate-pool, theme-dedup, cluster, maxN, quality-over-quantity, dirname-time-window, design -->
+
+**Background**: 每日精选升级到 20 条目展示后，候选池仅按 photoId 去重 + bursts 5 秒窗过滤连拍代表，无法识别"同主题/同事件但跨 5 秒窗"的重复。实测 top 20 出现 7 组短时差重复（朱红 4 张/姜黄 3 张/雪桥 23s/河流 4s/京都同秒），实际只有 12-13 个独立回忆。同时用户反馈 maxN=20 让 AI narrate 摊薄，标题"那年 X 的 Y"模板感重，质感参差。
+
+**Choice**: 候选池末尾插入 `clusterByDirnameAndTime` 纯函数（dirname + |Δt| ≤60min 闭区间，weightedScore desc + takenAt asc 选代表），同簇非代表 photoId 进入 entry.members 显示为系列条；同时 maxN 从 20 降到 12（aestheticScore 全部 ≥8.5，AI 调用 -40%，标题更鲜活）。
+
+**OUT-OF-SCOPE**（明确不解决，留给 GPS+meta 项目）：跨 dirname 同主题（如 14年前/珂珂手机 vs DCIM/105APPLE 都是伏见稻荷）、Δt>60min 同 dirname（如同日洪崖洞 1h31min 跨午晚）、跨年份同地点。
+
+**Alternatives rejected**:
+- 扩大候选池 K_PER_SOURCE 到 1.5x 重跑：plan-reviewer 指出会破坏 4 源等比混采契约（historyToday 单源吃下更多 quota+contest 槽位），违反 per-source quota 公平性
+- AI 二次校准选 hero：成本高且解析飘
+- 加 dHash 信号：实测同主题 dHash 差异大（如朱红 4 张 hex 完全不同），命中率不足
+
+**Lesson**: 当架构有"等比混采"等隐性公平性契约时，单点放宽参数会破坏全局。聚类是质量补丁，不该用扩大候选池来"凑数"——宁缺勿滥。
+
+
+
 ### [2026-05-10] apps/web 拆分双 tsconfig — 生产严格 + 测试松弛，恢复 noUncheckedIndexedAccess
 
 <!-- tags: tsconfig, typescript, strict, noUncheckedIndexedAccess, test-infra, dom-api, monorepo, design -->
