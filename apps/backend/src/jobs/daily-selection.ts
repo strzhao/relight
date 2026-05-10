@@ -9,7 +9,7 @@ import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { createStorageAdapter } from "../storage";
 import { buildCandidatePool, getRecentPickedPhotoIds } from "./daily-selection/candidate-pool";
-import type { EnrichedCandidate } from "./daily-selection/candidate-pool";
+import type { ClusteredCandidate } from "./daily-selection/cluster";
 import { buildRelatedPool } from "./daily-selection/related-pool";
 
 /**
@@ -44,7 +44,7 @@ interface EntryResult {
  * @param log - 日志函数
  */
 async function processSingleEntry(
-  candidate: EnrichedCandidate,
+  candidate: ClusteredCandidate,
   rank: number,
   otherHeroIds: Set<string>,
   recentIds: Set<string>,
@@ -163,7 +163,11 @@ async function processSingleEntry(
     try {
       // 排除集 = 30 天去重 + candidate 自身 + 其它 entry 的 hero photoId（避免跨 entry 重复）
       const excludeForRelated = new Set([...recentIds, candidate.photoId, ...otherHeroIds]);
-      const related = await buildRelatedPool(candidate, excludeForRelated);
+      // 同簇兄弟优先做 members，使聚类后的"主题代表"在叙事上不丢失现场感
+      const related = await buildRelatedPool(candidate, excludeForRelated, {
+        maxRelated: 20,
+        priorityIds: new Set(candidate.clusterSiblingIds),
+      });
 
       if (related.length > 0) {
         const membersPrompts = await loadPrompts("v2", "daily/members");
@@ -267,7 +271,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   const candidates = await buildCandidatePool({
     now: new Date(),
     excludeIds: recentIds,
-    maxN: 20,
+    maxN: 12,
   });
 
   job.log(`4 源候选池共 ${candidates.length} 张候选`);

@@ -184,13 +184,33 @@ describe("buildRelatedPool 集成测试", () => {
       addPhoto(testSqlite, `r${i}`, time);
     }
 
-    const result = await buildRelatedPool(
-      { photoId: "hero1", takenAt: heroTime },
-      new Set(),
-      5, // maxRelated = 5
-    );
+    const result = await buildRelatedPool({ photoId: "hero1", takenAt: heroTime }, new Set(), {
+      maxRelated: 5,
+    });
 
     expect(result.length).toBeLessThanOrEqual(5);
+  });
+
+  it("priorityIds 命中者排到结果最前（保持各自 takenAt 升序）", async () => {
+    const { buildRelatedPool } = await import("../related-pool");
+    addSource(testSqlite);
+
+    const heroTime = "2022-05-09T12:00:00Z";
+    addPhoto(testSqlite, "hero1", heroTime);
+
+    // SQL 默认按 takenAt asc 排序，构造 4 张：a < b < c < d
+    addPhoto(testSqlite, "a", "2022-05-09T08:00:00Z"); // 普通
+    addPhoto(testSqlite, "b", "2022-05-09T10:00:00Z"); // priority
+    addPhoto(testSqlite, "c", "2022-05-09T13:00:00Z"); // 普通
+    addPhoto(testSqlite, "d", "2022-05-09T14:00:00Z"); // priority
+
+    const result = await buildRelatedPool({ photoId: "hero1", takenAt: heroTime }, new Set(), {
+      priorityIds: new Set(["b", "d"]),
+    });
+
+    const ids = result.map((r) => r.photoId);
+    // 期望：[b, d, a, c] —— priority 在前（保持 b<d 升序），其余在后（保持 a<c 升序）
+    expect(ids).toEqual(["b", "d", "a", "c"]);
   });
 
   it("连拍去重契约：同组连拍的非代表成员不进入关联池", async () => {

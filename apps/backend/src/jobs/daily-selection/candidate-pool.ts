@@ -12,9 +12,10 @@
 
 import { and, desc, gte, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
+import { type ClusteredCandidate, clusterByDirnameAndTime } from "./cluster";
 
-/** 全局最大候选数 */
-const MAX_N = 20;
+/** 全局最大候选数（质量优化：从 20 降到 12，避免低分照片摊薄整体质感 + 减 40% AI narrate 调用）*/
+const MAX_N = 12;
 /** 每源保底席位 */
 const QUOTA_PER_SOURCE = 3;
 
@@ -151,11 +152,17 @@ function calcYearsAgo(takenAt: string | null, currentYear: number): number {
 }
 
 /**
- * 构造候选池（4 源平等混采 + per-source quota）
+ * 构造候选池（4 源平等混采 + per-source quota + 主题去重聚类）
+ *
+ * 流程：
+ *   1. 4 源各取 K=maxN 张
+ *   2. dedupAndQuotaMerge 做去重 + per-source quota（不截断 maxN）
+ *   3. clusterByDirnameAndTime 做主题去重，每簇只保留代表
+ *   4. 截前 maxN（聚类后簇数 < maxN 时直接接受 N<20，不做 K 回退）
  */
 export async function buildCandidatePool(
   options: BuildCandidatePoolOptions = {},
-): Promise<EnrichedCandidate[]> {
+): Promise<ClusteredCandidate[]> {
   const { now = new Date(), excludeIds = new Set<string>(), maxN = MAX_N } = options;
   // 每源取回数 = maxN，确保即使只有 1-2 个活跃源也能满足最终 maxN 张的需求
   const K_PER_SOURCE = maxN;
@@ -335,8 +342,25 @@ export async function buildCandidatePool(
   const sameSeason = toEnriched(sameSeasonRows, "sameSeason");
   const agedRandom = toEnriched(agedRandomRows, "agedRandom");
 
-  // ---- per-source quota 合并 ----
-  return dedupAndQuotaMerge({ historyToday, sameMonth, sameSeason, agedRandom }, maxN);
+  // ---- per-source quota 合并（不截断）----
+  // 按设计文档要求："merged.slice(0, maxN) 这一截断需要在聚类之后做，
+  // 因为聚类前 80 张可能聚成 < 20 簇"。这里把 dedupAndQuotaMerge 的
+  // maxN 放大到 4*maxN（即 4 源池总上限），让 quota 合并保留全部
+  // 去重后的候选；最终截断推迟到聚类后做。
+  //
+  // 副作用：聚类后按 weightedScore desc 全局取前 maxN，不再保证
+  // "每源在最终结果里保底 3 张"——quota 仅作为聚类前中间池的相对
+  // 顺序锚点存在。这是文档"接受 N<20、不做 K 回退"的直接推论。
+  const expandedMax = maxN * 4;
+  const merged = dedupAndQuotaMerge(
+    { historyToday, sameMonth, sameSeason, agedRandom },
+    expandedMax,
+  );
+
+  // ---- 主题去重聚类（dirname + 时间窗）----
+  // 簇数 < maxN 时直接接受 N<maxN（保护 4 源等比混采契约，不做 K 回退）
+  const clustered = clusterByDirnameAndTime(merged);
+  return clustered.slice(0, maxN);
 }
 
 /**

@@ -21,6 +21,18 @@ export interface RelatedCandidate {
   sourceType: "local" | "smb" | "webdav";
 }
 
+/** buildRelatedPool 命名参数对象 */
+export interface BuildRelatedPoolOptions {
+  /** 上限张数，默认 20 */
+  maxRelated?: number;
+  /**
+   * 优先 photoId 集合（通常来自 hero 所在簇的兄弟）。
+   * 命中这些 id 的结果会被排到结果最前（保持其内部 takenAt 升序），
+   * 其余按 takenAt 升序追加。
+   */
+  priorityIds?: Set<string>;
+}
+
 /**
  * 构造 hero 关联候选池
  *
@@ -30,13 +42,16 @@ export interface RelatedCandidate {
  * - 排除 hero 自身、排除 excludeIds（30 天去重列表）
  * - 必须已分析（INNER JOIN photoAnalyses）
  * - 按 takenAt ASC（故事按时间顺序）
- * - 上限 20 张
+ * - 上限 maxRelated 张（默认 20）
+ * - 若 options.priorityIds 提供：命中者排在结果最前（仍按 takenAt asc），
+ *   其余按 takenAt asc 追加。优先池常用于"hero 同簇兄弟优先做 members"。
  */
 export async function buildRelatedPool(
   hero: Pick<EnrichedCandidate, "photoId" | "takenAt">,
   excludeIds: Set<string>,
-  maxRelated = 20,
+  options: BuildRelatedPoolOptions = {},
 ): Promise<RelatedCandidate[]> {
+  const { maxRelated = 20, priorityIds } = options;
   if (!hero.takenAt) {
     // hero 无拍摄时间，无法确定时间窗
     return [];
@@ -89,7 +104,22 @@ export async function buildRelatedPool(
     .orderBy(sql`datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) ASC`)
     .limit(maxRelated + excludeIds.size); // 多取一些，后续过滤
 
-  const filtered = rows.filter((r) => !excludeIds.has(r.photoId)).slice(0, maxRelated);
+  const filtered = rows.filter((r) => !excludeIds.has(r.photoId));
 
-  return filtered;
+  // priorityIds 命中者前置：保持各自分组内的 takenAt 升序
+  // （SQL 已按 datetime ASC 排序，filter 不变顺序）
+  if (priorityIds && priorityIds.size > 0) {
+    const head: typeof filtered = [];
+    const tail: typeof filtered = [];
+    for (const r of filtered) {
+      if (priorityIds.has(r.photoId)) {
+        head.push(r);
+      } else {
+        tail.push(r);
+      }
+    }
+    return [...head, ...tail].slice(0, maxRelated);
+  }
+
+  return filtered.slice(0, maxRelated);
 }
