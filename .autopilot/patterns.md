@@ -1,3 +1,21 @@
+### [2026-05-10] vitest fake timer + React 19 `createRoot.render` 不兼容 — vitest.setup 需 act+flushSync polyfill
+
+<!-- tags: vitest, react-19, fake-timer, create-root, flush-sync, act, scheduler, polyfill, test-infra, bug -->
+
+**Scenario**: 红队验收测试需用 `vi.useFakeTimers()` 验证「setInterval 10s 后自动切换」类断言，组件用 `createRoot(container).render(<App />)` 真实挂载到 jsdom。问题：fake timer 模式下，`createRoot.render` 永远不 commit 到 DOM（querySelector 返回 null），且即使初次挂载成功，`vi.advanceTimersByTime(N)` 触发的 setInterval 回调内 setState 也不 flush。
+
+**Lesson**:
+React 19 `createRoot` 是 concurrent，commit 走 scheduler 的 setTimeout/postMessage 调度。`vi.useFakeTimers()` 默认拦截 setTimeout/queueMicrotask，scheduler 永远等不到时间片，commit 不发生。必须在 vitest.setup.ts 加三层 polyfill：
+1. `globalThis.IS_REACT_ACT_ENVIRONMENT = true` — 让 React 19 知道处于测试环境，进入 sync-friendly 路径
+2. `vi.mock("react-dom/client")` 包 `flushSync(() => render(...))` — 强制初次 render 同步 commit
+3. patch `vi.advanceTimersByTime` 用 `act()` 包裹 + 内部再 `flushSync(() => {})` — 让 fake timer fire 完后 pending React updates 立即 flush 到 DOM
+
+仅做 (1)+(2) 不够：初次 render OK 但 setInterval 回调内 setState 仍卡住。三个一起才能让 `advanceTimersByTime(9000)` 后 DOM 真实反映 idx 移动。
+
+**Why 这很重要**: React 18+ 的 concurrent 时代，所有"假设 createRoot.render 同步"的测试都会被 fake timer 拦截。只有显式 patch 测试基础设施才能让红队 fake-timer 用例工作。这是 vitest + React 19 默认配置的真实跳坑——文档没有，搜索结果零散。先在 setup 集中处理，比每个测试自己包 act/flushSync 更可维护。
+
+**Evidence**: `apps/web/vitest.setup.ts` 集中 polyfill 三件套；红队 `banner-carousel.acceptance.test.ts` 用例 (k) `vi.useFakeTimers() + click next + advanceTimersByTime(9000) + advanceTimersByTime(1500)` 验证自动切换重置计时——未加 polyfill 时 `nextBtn` 为 null 直接挂；三件套到位后 12/12 acceptance 全绿。同 setup 让 photo-card-onclick / lightbox-context 等已有交互测试也保持稳定（433/434 → 434/434）。
+
 ### [2026-05-10] jsdom 不实现 setPointerCapture 副作用 + `<img>` 默认 draggable 吞掉 mousedown — 浏览器交互必须 e2e
 
 <!-- tags: jsdom, pointer-events, set-pointer-capture, native-drag, img, draggable, e2e, playwright, banner-carousel, ui-interaction, bug -->
