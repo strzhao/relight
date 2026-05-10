@@ -628,3 +628,13 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 **Why 这很重要**：迁移自 PostgreSQL 的 drizzle 习惯（PG driver 支持 async tx）+ TypeScript 类型不报错 → 误以为通用 → 100% 概率运行时炸。debug 困难因为部分 SQL 已成功（DB 改了），错误冒出来是 commit 阶段非具体业务逻辑。
 
 **Evidence**: `apps/backend/src/routes/bursts.ts` PATCH `/api/bursts/:id/representative` 三步 UPDATE 包事务校验代表归属——首版 async callback 测试时 DB 改对了但接口返回 500，红队 16/24 用例 fail；改为 sync 回调 + `.run()` 后 67/67 PASS。同步修了 `apps/backend/src/jobs/analyze-photo.ts:calibrateBurstRepresentative` 同模式问题。
+
+### [2026-05-10] Next.js `useRouter()` 在 SSR / vitest renderToString 上下文抛 `invariant expected app router to be mounted`，URL 同步改用 `history.replaceState`
+
+<!-- tags: nextjs, app-router, useRouter, useSearchParams, ssr, vitest, render-to-string, invariant, history-api, bug -->
+
+**Scenario**: App Router 客户端组件想做"切换状态时同步 ?entry=N 到 URL"，本能写 `const router = useRouter(); router.replace('?entry=N')`。组件直接挂在 `app/page.tsx` 跑浏览器 hydration 时 OK，但 vitest 用 `renderToString()` 单测 SSR HTML 时 18/22 立刻挂掉，错误是 `invariant expected app router to be mounted`。原因：`useRouter()` 必须有 `<AppRouterProvider>` 上下文，而 `renderToString` 没有。同事 SSG 路径或离屏渲染也会踩。
+
+**Lesson**: URL 写入用 **`window.history.replaceState`**（先 `if (typeof window === 'undefined') return` 兜 SSR），URL 读取用 **`useSearchParams()`**（在非 AppRouter 上下文返回 null，`?.get(...)` 安全降级）。这两组合既不依赖 router context、也不破坏 hydration（`replaceState` 不会触发 Next.js 重新拉数据）。`useRouter` 只在你**真的**需要 router method（push/back/refresh）时才用，且必须保证组件挂载路径全程在 AppRouter 内。
+
+**Evidence**: 本任务 `apps/web/components/daily-hero.tsx` 首版用 `useRouter().replace()` 同步 `?entry=N`，红队 `daily-hero-entries.test.tsx` 18/22 失败（`renderToString` 路径），改用 `useSearchParams() + history.replaceState` 后 22/22 PASS，E2E `e2e/daily-entries.spec.ts` 10/10 不变。规避 try/catch 包 `useRouter` 这种"治标不治本"——hooks 不能条件调用，try/catch 也救不了 invariant 抛出。

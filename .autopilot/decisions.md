@@ -293,3 +293,25 @@
 2. 真崩溃场景下，多 60s 检测延迟比"幽灵 healthy"风险小得多
 
 **Evidence**: 设计 + 实施记录在 `.autopilot/requirements/20260506-4-都一起优化，确实都/state.md`，commit 6da89f6。配套：失败 job 也加了批量 retry 按钮（POST /api/queues/:name/retry-failed + UI），这是 worker 透明化之外另一个防"运维链路黑盒"的工具。两个能力组合：观察"worker 跑的什么代码" + "失败任务一键重试"。
+
+### [2026-05-10] 每日精选首页从「单 hero + 关联 members」升级为「20 entries 全展示 + 每条目独立系列」
+
+<!-- tags: daily-selection, multi-entries, schema-design, dual-write, daily-pick-entries, ui-redesign, design, architecture -->
+
+**Background**: 上一版做"4 源候选池 + AI 选出 1 张 hero + 1.5 阶段为 hero 选 0-8 张时间窗 members"——单 hero 故事完整，但用户每天只看到 1 个回忆主题，整体回忆感不足。诉求是"候选池 20 张照片都让用户能浏览到"。
+
+**Choice**: 候选池 final 20 张全部持久化为"今日入选条目"，每张走完整 narrate（vision）+ AI 选 members + caption 流水线；新增 `daily_pick_entries(id, daily_pick_id, rank, photo_id, title, narrative, score, members JSON, created_at)` 子表 + `UNIQUE(daily_pick_id, rank)` 约束保证 job 幂等；`daily_picks` 既有列保留并与 `entries[rank=0]` **双写同源**——既不破坏 Mac 壁纸 API 与 magazine composer，也让 30 天去重池可继续按"hero photoId"工作；前端首页改为「左侧大图（当前选中）+ 系列缩略条 + 20 缩略图栅格」+「右侧叙事」，URL `?entry=N` 同步当前焦点（用 `useSearchParams` 读 + `history.replaceState` 写，避 useRouter 在 SSR/test 抛 invariant）。
+
+**Alternatives rejected**:
+- 把 entries 加到 `daily_picks` 单表 JSON 列：违反范式 + 查询无法索引 + 旧客户端读到非预期 JSON；
+- 完全独立 `daily_top_n` 表与 `daily_picks` 平行：API 层须双查，且失去"primary entry = entries[0]"的简洁约束；
+- 仅 narrate 1 张 hero、其它 19 张只展示照片+已有 tags：成本省一半但用户期望"每张都有自己的故事"，体验断层；
+- 候选池减小到 5-6 张：违反"用户希望浏览全部候选"的诉求。
+
+**Trade-offs**:
+- AI 调用次数 1 hero × 3 调用 → ~80 调用（20 narrate + 20 select members），本地 qwen + pLimit(2) 并行下 ~10 分钟，可接受（每天定时 6:00 跑）；
+- DB 体积：每天多 ~20 KB（20 行 JSON members）；
+- API 响应体增大约 10× （~14 KB）——前端需要 lazy 缩略图 + 大图首屏 eager 兜 LCP；
+- 双写同源（dailyPicks 主字段 = entries[0]）需要在 job 内显式同步，存在漂移风险，已用红队验收测试守护；
+- 30 天去重必须 UNION 两张表（entries 各 photo_id + members.photoId），不然 19/20 entry 照片次日仍可被重复入选；
+- 类型上 `DailyPick.entries: DailyPickEntry[]` 必填，但 wallpaper composer 等读 DB 行视图的旁路用 `Omit<DailyPick, 'entries'>` 隔离避免被强制构造空数组。

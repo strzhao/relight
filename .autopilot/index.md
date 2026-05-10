@@ -60,3 +60,5 @@
 - [2026-05-08] macOS App 行为异常先比 binary mtime vs 源码 mtime — DerivedData/build/dist/Applications 三路径独立易错位 | tags: macos, xcode, debug, derived-data, stale-build, swiftui, lsuielement, scene, debugging-pattern, bug | → patterns.md
 - [2026-05-08] IntersectionObserver 监听条件渲染节点必须用 callback ref，不能用 useRef + useEffect | tags: react, intersectionobserver, callback-ref, conditional-rendering, useeffect, infinite-scroll, bug | → patterns.md
 - [2026-05-08] Playwright page.route glob 中 `?` 是单字符通配符，匹配 query string 必须用 `*` | tags: playwright, page-route, glob, minimatch, mock, query-string, e2e, bug | → patterns.md
+- [2026-05-10] 每日精选首页从「单 hero + 关联 members」升级为「20 entries 全展示 + 每条目独立系列」 | tags: daily-selection, multi-entries, schema-design, dual-write, daily-pick-entries, ui-redesign, architecture | → decisions.md
+- [2026-05-10] Next.js `useRouter()` 在 SSR / vitest renderToString 上下文抛 invariant，URL 同步改用 `history.replaceState` | tags: nextjs, app-router, useRouter, useSearchParams, ssr, vitest, render-to-string, invariant, history-api, bug | → patterns.md
