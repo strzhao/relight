@@ -5,8 +5,8 @@
  *
  * 契约规范：
  *   - `detectBursts({ storageSourceId, photoIds }): Promise<{ groupsCreated, photosGrouped }>`
- *   - 5 张 takenAt 间隔 ≤ 3s 且 pHash 相似（汉明距离 ≤ 10） → 1 个 burst（memberCount=5）
- *   - 2 张 takenAt 间隔 5s（>3s 阈值）→ 不分组
+ *   - 5 张 takenAt 间隔 ≤ 5s 且 pHash 相似（汉明距离 ≤ 10） → 1 个 burst（memberCount=5）
+ *   - 2 张 takenAt 间隔 7s（>5s 阈值）→ 不分组
  *   - 2 张 takenAt 间隔 1s 但 pHash 汉明距离 = 30（场景不同）→ 不分组
  *   - 单成员组（仅 1 张满足条件）不写入 bursts 表
  *   - 初始代表 = fileSize 最大的成员
@@ -386,13 +386,13 @@ describe("burst-detector 契约 — 验收测试（设计文档 §关键模块.2
   });
 
   // -----------------------------------------------------------------------
-  // 时间阈值：> 3s 不分组
+  // 时间阈值：> 5s 不分组
   // -----------------------------------------------------------------------
-  describe("时间阈值边界：间隔 > 3s 不分组", () => {
-    it("2 张照片间隔 5s，应不创建 burst", async () => {
+  describe("时间阈值边界：间隔 > 5s 不分组", () => {
+    it("2 张照片间隔 7s，应不创建 burst", async () => {
       const now = Date.now();
       seedPhoto({ id: "pa", takenAt: isoOffset(now, 0), phash: PHASH_A });
-      seedPhoto({ id: "pb", takenAt: isoOffset(now, 5000), phash: PHASH_A }); // 5s 间隔
+      seedPhoto({ id: "pb", takenAt: isoOffset(now, 7000), phash: PHASH_A }); // 7s 间隔
 
       const detectBursts = await importDetectBursts();
       const result = await detectBursts({ storageSourceId: SOURCE_ID, photoIds: ["pa", "pb"] });
@@ -402,10 +402,10 @@ describe("burst-detector 契约 — 验收测试（设计文档 §关键模块.2
       expect(getBursts()).toHaveLength(0);
     });
 
-    it("2 张照片恰好 3s 间隔（边界），应分组（≤ 3s）", async () => {
+    it("2 张照片恰好 5s 间隔（边界），应分组（≤ 5s）", async () => {
       const now = Date.now();
       seedPhoto({ id: "pa", takenAt: isoOffset(now, 0), phash: PHASH_A });
-      seedPhoto({ id: "pb", takenAt: isoOffset(now, 3000), phash: PHASH_A }); // 恰好 3s
+      seedPhoto({ id: "pb", takenAt: isoOffset(now, 5000), phash: PHASH_A }); // 恰好 5s
 
       const detectBursts = await importDetectBursts();
       const result = await detectBursts({ storageSourceId: SOURCE_ID, photoIds: ["pa", "pb"] });
@@ -414,10 +414,10 @@ describe("burst-detector 契约 — 验收测试（设计文档 §关键模块.2
       expect(result.photosGrouped).toBe(2);
     });
 
-    it("2 张照片间隔 3001ms（刚超阈值），应不分组", async () => {
+    it("2 张照片间隔 5001ms（刚超阈值），应不分组", async () => {
       const now = Date.now();
       seedPhoto({ id: "pa", takenAt: isoOffset(now, 0), phash: PHASH_A });
-      seedPhoto({ id: "pb", takenAt: isoOffset(now, 3001), phash: PHASH_A }); // 3.001s
+      seedPhoto({ id: "pb", takenAt: isoOffset(now, 5001), phash: PHASH_A }); // 5.001s
 
       const detectBursts = await importDetectBursts();
       const result = await detectBursts({ storageSourceId: SOURCE_ID, photoIds: ["pa", "pb"] });

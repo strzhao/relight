@@ -80,9 +80,11 @@ export async function buildRelatedPool(
       // 必须用 datetime() 包裹两侧再比较：
       // photos.taken_at 是 'YYYY-MM-DD HH:MM:SS'（空格分隔），windowStart 是 ISO（T 分隔 + Z）。
       // 直接字符串 >= 会按字典序比较，空格 < 'T'，所有 taken_at 都被错误地判为小于窗口起点。
+      // 连拍去重：只让代表进入关联池，避免 members 里堆同一组连拍。
       sql`${schema.photos.id} != ${hero.photoId}
           AND datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) >= datetime(${windowStart})
-          AND datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) <= datetime(${windowEnd})`,
+          AND datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) <= datetime(${windowEnd})
+          AND (${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`,
     )
     .orderBy(sql`datetime(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) ASC`)
     .limit(maxRelated + excludeIds.size); // 多取一些，后续过滤

@@ -122,21 +122,6 @@ function calcYearsAgo(takenAt: string | null, currentYear: number): number {
   }
 }
 
-/** 通用子查询结构 */
-interface RawCandidate {
-  photoId: string;
-  filePath: string;
-  takenAt: string | null;
-  mediaType: "image" | "video";
-  durationSec: number | null;
-  aestheticScore: number | null;
-  narrative: string | null;
-  emotionalAnalysis: unknown | null;
-  tags: unknown | null;
-  thumbnailPath: string | null;
-  sourceType: "local" | "smb" | "webdav";
-}
-
 /**
  * 构造候选池（4 源平等混采 + per-source quota）
  */
@@ -148,15 +133,9 @@ export async function buildCandidatePool(
   const currentYear = year;
   const twoYearsAgo = new Date(now.getTime() - 2 * 365.25 * 86400_000).toISOString();
 
-  // ---- 子查询辅助 ----
-  async function query(
-    whereClause: Parameters<typeof db.select>[0] extends never ? never : unknown,
-    source: CandidateSource,
-    _extraSort?: boolean,
-  ): Promise<RawCandidate[]> {
-    // 使用 drizzle 查询
-    return [];
-  }
+  // 连拍去重：同一组连拍只让代表进入候选池，避免 K=8 被一组连拍占满。
+  // 与 routes/photos.ts:39 的列表过滤保持一致。
+  const burstRepOnly = sql`(${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`;
 
   // ---- 4 个独立子查询 ----
 
@@ -185,6 +164,7 @@ export async function buildCandidatePool(
       and(
         sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}`,
         sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+        burstRepOnly,
       ),
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -216,6 +196,7 @@ export async function buildCandidatePool(
         sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${month}`,
         sql`strftime('%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) != ${day}`,
         sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+        burstRepOnly,
       ),
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -251,6 +232,7 @@ export async function buildCandidatePool(
         and(
           sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) IN (${sql.raw(monthsInClause)})`,
           sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+          burstRepOnly,
         ),
       )
       .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -279,7 +261,13 @@ export async function buildCandidatePool(
       sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
     )
     .where(
-      lt(sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`, sql`${twoYearsAgo}`),
+      and(
+        lt(
+          sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`,
+          sql`${twoYearsAgo}`,
+        ),
+        burstRepOnly,
+      ),
     )
     .orderBy(
       desc(sql`(COALESCE(${schema.photoAnalyses.aestheticScore}, 5.0) + ABS(RANDOM() % 3)) / 1.0`),

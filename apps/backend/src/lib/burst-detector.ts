@@ -1,7 +1,7 @@
 /**
  * 连拍检测器
  *
- * 识别策略：时间窗口（≤3 秒）+ dHash 汉明距离（≤10）双重确认
+ * 识别策略：时间窗口（≤5 秒）+ dHash 汉明距离（≤10）双重确认
  * 数据持久化：写 bursts 表 + 更新 photos.burst_id/is_burst_representative
  */
 import fs from "node:fs/promises";
@@ -9,8 +9,12 @@ import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { dHash, hammingDistance } from "./phash";
 
-/** 连拍时间窗口（秒），同一窗口内的相邻帧认为是连拍 */
-const BURST_TIME_WINDOW_SECONDS = 3;
+/**
+ * 连拍时间窗口（秒），同一窗口内的相邻帧认为是连拍。
+ * 从 3s 放宽到 5s 是为了覆盖单反/RAW 写卡稍慢、Live Photo
+ * 关联帧 4-5s 的"准连拍"场景；3s 之前会让这类组被错误拆散。
+ */
+const BURST_TIME_WINDOW_SECONDS = 5;
 
 /** dHash 汉明距离阈值（≤ 此值认为画面相似） */
 const BURST_HASH_THRESHOLD = 10;
@@ -77,7 +81,7 @@ class UnionFind {
  *
  * 流程：
  * 1. 查找本批 photoIds + ±60s 时间窗口内的已有照片（保证跨批次合并）
- * 2. 按 takenAt 排序，遍历相邻对做双重判断（时间 ≤3s && hamming ≤10）
+ * 2. 按 takenAt 排序，遍历相邻对做双重判断（时间 ≤5s && hamming ≤10）
  * 3. Union-Find 聚类，剔除 1 成员组
  * 4. 对每个新组：写 bursts 行 + 批量更新 photos
  * 5. 已有 burst 的组：检查是否需要合并新成员

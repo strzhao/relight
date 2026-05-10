@@ -146,7 +146,7 @@ describe("detectBursts 聚类逻辑", () => {
     };
   }
 
-  it("时间间隔 ≤3s 且 hamming ≤10 → 应聚为 1 组", async () => {
+  it("时间间隔 ≤5s 且 hamming ≤10 → 应聚为 1 组", async () => {
     // 5 张照片，连续拍摄（1s 间隔），相同 phash
     const photos = [
       makePhoto("p1", "2024-01-01T10:00:00.000Z", "0000000000000000"),

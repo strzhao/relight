@@ -12,6 +12,7 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setupTestSchema } from "../../../__tests__/helpers/test-schema";
 import * as schema from "../../../db/schema";
 
 let testSqlite: Database.Database;
@@ -27,56 +28,7 @@ vi.mock("../../../db", () => ({
 function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  sqlite.exec(`
-    CREATE TABLE storage_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT,
-      status TEXT,
-      last_error TEXT
-    );
-    CREATE TABLE photos (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL UNIQUE,
-      width INTEGER NOT NULL DEFAULT 0,
-      height INTEGER NOT NULL DEFAULT 0,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path TEXT,
-      taken_at TEXT,
-      file_mtime INTEGER,
-      created_at TEXT NOT NULL,
-      media_type TEXT NOT NULL DEFAULT 'image',
-      duration_sec REAL,
-      video_codec TEXT,
-      video_fps REAL
-    );
-    CREATE TABLE photo_analyses (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL,
-      ai_model TEXT NOT NULL,
-      narrative TEXT,
-      aesthetic_score REAL,
-      tags TEXT,
-      composition TEXT,
-      color_analysis TEXT,
-      emotional_analysis TEXT,
-      usage_suggestions TEXT,
-      prompt_version TEXT,
-      raw_response TEXT NOT NULL,
-      processed_at TEXT NOT NULL,
-      transcript TEXT,
-      transcript_segments TEXT,
-      video_pacing TEXT,
-      motion_score REAL
-    );
-    CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, created_at TEXT NOT NULL);
-    CREATE TABLE photo_tags (photo_id TEXT NOT NULL, tag_id TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 0, PRIMARY KEY (photo_id, tag_id));
-  `);
+  setupTestSchema(sqlite);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
@@ -88,14 +40,28 @@ function addSource(sqlite: Database.Database) {
     .run();
 }
 
-function addPhoto(sqlite: Database.Database, photoId: string, takenAt: string) {
+function addPhoto(
+  sqlite: Database.Database,
+  photoId: string,
+  takenAt: string,
+  burst: { burstId?: string | null; isRep?: boolean } = {},
+) {
   sqlite
     .prepare(
       `INSERT OR IGNORE INTO photos
-        (id, storage_source_id, file_path, file_hash, width, height, file_size, taken_at, created_at)
-       VALUES (?, 'src1', ?, ?, 100, 100, 1024, ?, ?)`,
+        (id, storage_source_id, file_path, file_hash, width, height, file_size, taken_at, created_at,
+         burst_id, is_burst_representative)
+       VALUES (?, 'src1', ?, ?, 100, 100, 1024, ?, ?, ?, ?)`,
     )
-    .run(photoId, `/photos/${photoId}.jpg`, `hash-${photoId}`, takenAt, takenAt);
+    .run(
+      photoId,
+      `/photos/${photoId}.jpg`,
+      `hash-${photoId}`,
+      takenAt,
+      takenAt,
+      burst.burstId ?? null,
+      burst.isRep ? 1 : 0,
+    );
 
   sqlite
     .prepare(
@@ -104,6 +70,21 @@ function addPhoto(sqlite: Database.Database, photoId: string, takenAt: string) {
        VALUES (?, ?, 'test', 7.0, '{}', ?)`,
     )
     .run(`analysis-${photoId}`, photoId, new Date().toISOString());
+}
+
+function addBurst(
+  sqlite: Database.Database,
+  burstId: string,
+  representativePhotoId: string,
+  memberCount: number,
+) {
+  sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO bursts
+        (id, storage_source_id, representative_photo_id, member_count, manual_override, created_at)
+       VALUES (?, 'src1', ?, ?, 0, ?)`,
+    )
+    .run(burstId, representativePhotoId, memberCount, new Date().toISOString());
 }
 
 describe("buildRelatedPool 集成测试", () => {
@@ -210,5 +191,31 @@ describe("buildRelatedPool 集成测试", () => {
     );
 
     expect(result.length).toBeLessThanOrEqual(5);
+  });
+
+  it("连拍去重契约：同组连拍的非代表成员不进入关联池", async () => {
+    const { buildRelatedPool } = await import("../related-pool");
+    addSource(testSqlite);
+
+    const heroTime = "2022-05-09T12:00:00Z";
+    addPhoto(testSqlite, "hero1", heroTime);
+
+    // 关联池窗内一组连拍：rep 进、non-rep 不进
+    addBurst(testSqlite, "burst-1", "rep-1", 2);
+    addPhoto(testSqlite, "rep-1", "2022-05-09T13:00:00Z", { burstId: "burst-1", isRep: true });
+    addPhoto(testSqlite, "non-rep-1", "2022-05-09T13:00:01Z", {
+      burstId: "burst-1",
+      isRep: false,
+    });
+
+    // 独立照片正常进
+    addPhoto(testSqlite, "solo-1", "2022-05-09T14:00:00Z");
+
+    const result = await buildRelatedPool({ photoId: "hero1", takenAt: heroTime }, new Set());
+    const ids = result.map((r) => r.photoId);
+
+    expect(ids).toContain("rep-1");
+    expect(ids).toContain("solo-1");
+    expect(ids).not.toContain("non-rep-1");
   });
 });

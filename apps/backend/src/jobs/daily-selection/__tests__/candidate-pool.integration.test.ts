@@ -11,6 +11,7 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setupTestSchema } from "../../../__tests__/helpers/test-schema";
 import * as schema from "../../../db/schema";
 
 // mock db 模块，让 candidate-pool 使用测试数据库
@@ -27,66 +28,7 @@ vi.mock("../../../db", () => ({
 function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  sqlite.exec(`
-    CREATE TABLE storage_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'local',
-      root_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_scan_at TEXT,
-      status TEXT,
-      last_error TEXT
-    );
-    CREATE TABLE photos (
-      id TEXT PRIMARY KEY,
-      storage_source_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      file_hash TEXT NOT NULL UNIQUE,
-      width INTEGER NOT NULL DEFAULT 0,
-      height INTEGER NOT NULL DEFAULT 0,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      thumbnail_path TEXT,
-      taken_at TEXT,
-      file_mtime INTEGER,
-      created_at TEXT NOT NULL,
-      media_type TEXT NOT NULL DEFAULT 'image',
-      duration_sec REAL,
-      video_codec TEXT,
-      video_fps REAL
-    );
-    CREATE TABLE photo_analyses (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL,
-      ai_model TEXT NOT NULL,
-      narrative TEXT,
-      aesthetic_score REAL,
-      tags TEXT,
-      composition TEXT,
-      color_analysis TEXT,
-      emotional_analysis TEXT,
-      usage_suggestions TEXT,
-      prompt_version TEXT,
-      raw_response TEXT NOT NULL,
-      processed_at TEXT NOT NULL,
-      transcript TEXT,
-      transcript_segments TEXT,
-      video_pacing TEXT,
-      motion_score REAL
-    );
-    CREATE TABLE daily_picks (
-      id TEXT PRIMARY KEY,
-      photo_id TEXT NOT NULL,
-      pick_date TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      narrative TEXT NOT NULL,
-      score REAL NOT NULL DEFAULT 0,
-      members TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, created_at TEXT NOT NULL);
-    CREATE TABLE photo_tags (photo_id TEXT NOT NULL, tag_id TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 0, PRIMARY KEY (photo_id, tag_id));
-  `);
+  setupTestSchema(sqlite);
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
@@ -104,14 +46,25 @@ function addPhoto(
   takenAt: string,
   aestheticScore: number,
   sourceId = "src1",
+  burst: { burstId?: string | null; isRep?: boolean } = {},
 ) {
   sqlite
     .prepare(
       `INSERT OR IGNORE INTO photos
-        (id, storage_source_id, file_path, file_hash, width, height, file_size, taken_at, created_at)
-       VALUES (?, ?, ?, ?, 100, 100, 1024, ?, ?)`,
+        (id, storage_source_id, file_path, file_hash, width, height, file_size, taken_at, created_at,
+         burst_id, is_burst_representative)
+       VALUES (?, ?, ?, ?, 100, 100, 1024, ?, ?, ?, ?)`,
     )
-    .run(photoId, sourceId, `/photos/${photoId}.jpg`, `hash-${photoId}`, takenAt, takenAt);
+    .run(
+      photoId,
+      sourceId,
+      `/photos/${photoId}.jpg`,
+      `hash-${photoId}`,
+      takenAt,
+      takenAt,
+      burst.burstId ?? null,
+      burst.isRep ? 1 : 0,
+    );
 
   sqlite
     .prepare(
@@ -120,6 +73,22 @@ function addPhoto(
        VALUES (?, ?, 'test', ?, '{}', ?)`,
     )
     .run(`analysis-${photoId}`, photoId, aestheticScore, new Date().toISOString());
+}
+
+function addBurst(
+  sqlite: Database.Database,
+  burstId: string,
+  representativePhotoId: string,
+  memberCount: number,
+  sourceId = "src1",
+) {
+  sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO bursts
+        (id, storage_source_id, representative_photo_id, member_count, manual_override, created_at)
+       VALUES (?, ?, ?, ?, 0, ?)`,
+    )
+    .run(burstId, sourceId, representativePhotoId, memberCount, new Date().toISOString());
 }
 
 function addDailyPick(
@@ -305,5 +274,82 @@ describe("buildCandidatePool 集成测试", () => {
 
     const ids = await getRecentPickedPhotoIds(30);
     expect(ids.has("old1")).toBe(false);
+  });
+
+  describe("连拍去重契约：同组连拍只让代表进入候选池", () => {
+    it("historyToday: 1 代表 + 2 非代表 → 候选只含代表", async () => {
+      const { buildCandidatePool } = await import("../candidate-pool");
+      addSource(testSqlite);
+      addBurst(testSqlite, "burst-1", "rep-1", 3);
+      // 注意：非代表照片评分故意更高，验证过滤优先于 score
+      addPhoto(testSqlite, "rep-1", yearsAgoISO(2), 8.0, "src1", {
+        burstId: "burst-1",
+        isRep: true,
+      });
+      addPhoto(testSqlite, "non-rep-1", yearsAgoISO(2), 9.5, "src1", {
+        burstId: "burst-1",
+        isRep: false,
+      });
+      addPhoto(testSqlite, "non-rep-2", yearsAgoISO(2), 9.0, "src1", {
+        burstId: "burst-1",
+        isRep: false,
+      });
+
+      const result = await buildCandidatePool({ excludeIds: new Set() });
+      const ids = result.map((r) => r.photoId);
+
+      expect(ids).toContain("rep-1");
+      expect(ids).not.toContain("non-rep-1");
+      expect(ids).not.toContain("non-rep-2");
+    });
+
+    it("sameMonth: 非代表连拍成员被过滤", async () => {
+      const { buildCandidatePool } = await import("../candidate-pool");
+      addSource(testSqlite);
+      addBurst(testSqlite, "burst-2", "rep-2", 2);
+      addPhoto(testSqlite, "rep-2", sameMonthOtherDayISO(2), 7.0, "src1", {
+        burstId: "burst-2",
+        isRep: true,
+      });
+      addPhoto(testSqlite, "non-rep-3", sameMonthOtherDayISO(2), 9.0, "src1", {
+        burstId: "burst-2",
+        isRep: false,
+      });
+
+      const result = await buildCandidatePool({ excludeIds: new Set() });
+      const ids = result.map((r) => r.photoId);
+
+      expect(ids).toContain("rep-2");
+      expect(ids).not.toContain("non-rep-3");
+    });
+
+    it("agedRandom: 非代表连拍成员被过滤", async () => {
+      const { buildCandidatePool } = await import("../candidate-pool");
+      addSource(testSqlite);
+      addBurst(testSqlite, "burst-3", "rep-3", 2);
+      addPhoto(testSqlite, "rep-3", agedRandomISO(5), 7.0, "src1", {
+        burstId: "burst-3",
+        isRep: true,
+      });
+      addPhoto(testSqlite, "non-rep-4", agedRandomISO(5), 9.0, "src1", {
+        burstId: "burst-3",
+        isRep: false,
+      });
+
+      const result = await buildCandidatePool({ excludeIds: new Set() });
+      const ids = result.map((r) => r.photoId);
+
+      expect(ids).toContain("rep-3");
+      expect(ids).not.toContain("non-rep-4");
+    });
+
+    it("独立照片（burst_id 为 NULL）正常进入候选池", async () => {
+      const { buildCandidatePool } = await import("../candidate-pool");
+      addSource(testSqlite);
+      addPhoto(testSqlite, "solo-1", yearsAgoISO(2), 8.0);
+
+      const result = await buildCandidatePool({ excludeIds: new Set() });
+      expect(result.map((r) => r.photoId)).toContain("solo-1");
+    });
   });
 });
