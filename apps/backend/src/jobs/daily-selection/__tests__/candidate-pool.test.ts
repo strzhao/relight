@@ -85,6 +85,9 @@ function makeCandidate(
     tags: null,
     thumbnailPath: null,
     sourceType: "local",
+    latitude: null,
+    longitude: null,
+    offsetTime: null,
   };
 }
 

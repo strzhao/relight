@@ -74,7 +74,22 @@ function createTestDb() {
       media_type TEXT NOT NULL DEFAULT 'image',
       duration_sec REAL,
       video_codec TEXT,
-      video_fps REAL
+      video_fps REAL,
+      latitude REAL,
+      longitude REAL,
+      altitude REAL,
+      gps_img_direction REAL,
+      offset_time TEXT,
+      camera_make TEXT,
+      camera_model TEXT,
+      lens_model TEXT,
+      focal_length REAL,
+      focal_length_35mm INTEGER,
+      iso INTEGER,
+      exposure_time REAL,
+      f_number REAL,
+      software TEXT,
+      exif_backfilled_at INTEGER
     );
     CREATE TABLE tags (
       id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,

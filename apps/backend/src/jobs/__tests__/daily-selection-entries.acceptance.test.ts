@@ -121,7 +121,22 @@ function createTestDb() {
       video_fps REAL,
       burst_id TEXT,
       is_burst_representative INTEGER DEFAULT 0,
-      burst_rank INTEGER
+      burst_rank INTEGER,
+      latitude REAL,
+      longitude REAL,
+      altitude REAL,
+      gps_img_direction REAL,
+      offset_time TEXT,
+      camera_make TEXT,
+      camera_model TEXT,
+      lens_model TEXT,
+      focal_length REAL,
+      focal_length_35mm INTEGER,
+      iso INTEGER,
+      exposure_time REAL,
+      f_number REAL,
+      software TEXT,
+      exif_backfilled_at INTEGER
     );
     CREATE TABLE tags (
       id TEXT PRIMARY KEY,

@@ -62,6 +62,23 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       burst_id TEXT,
       is_burst_representative INTEGER NOT NULL DEFAULT 0,
       phash TEXT,
+      -- GPS + 完整 EXIF meta（14 列，全部 nullable）
+      latitude REAL,
+      longitude REAL,
+      altitude REAL,
+      gps_img_direction REAL,
+      offset_time TEXT,
+      camera_make TEXT,
+      camera_model TEXT,
+      lens_model TEXT,
+      focal_length REAL,
+      focal_length_35mm INTEGER,
+      iso INTEGER,
+      exposure_time REAL,
+      f_number REAL,
+      software TEXT,
+      -- 回填幂等标记
+      exif_backfilled_at INTEGER,
       UNIQUE(storage_source_id, file_path)
     );
     CREATE INDEX IF NOT EXISTS idx_photos_created_at ON photos(created_at);

@@ -15,6 +15,7 @@ function makeCandidate(
   filePath: string,
   takenAt: string | null,
   weightedScore: number,
+  opts: { latitude?: number | null; longitude?: number | null; offsetTime?: string | null } = {},
 ): EnrichedCandidate {
   return {
     photoId,
@@ -31,6 +32,9 @@ function makeCandidate(
     tags: null,
     thumbnailPath: null,
     sourceType: "local",
+    latitude: opts.latitude ?? null,
+    longitude: opts.longitude ?? null,
+    offsetTime: opts.offsetTime ?? null,
   };
 }
 
