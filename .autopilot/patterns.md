@@ -652,3 +652,27 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 **Lesson**: URL 写入用 **`window.history.replaceState`**（先 `if (typeof window === 'undefined') return` 兜 SSR），URL 读取用 **`useSearchParams()`**（在非 AppRouter 上下文返回 null，`?.get(...)` 安全降级）。这两组合既不依赖 router context、也不破坏 hydration（`replaceState` 不会触发 Next.js 重新拉数据）。`useRouter` 只在你**真的**需要 router method（push/back/refresh）时才用，且必须保证组件挂载路径全程在 AppRouter 内。
 
 **Evidence**: 本任务 `apps/web/components/daily-hero.tsx` 首版用 `useRouter().replace()` 同步 `?entry=N`，红队 `daily-hero-entries.test.tsx` 18/22 失败（`renderToString` 路径），改用 `useSearchParams() + history.replaceState` 后 22/22 PASS，E2E `e2e/daily-entries.spec.ts` 10/10 不变。规避 try/catch 包 `useRouter` 这种"治标不治本"——hooks 不能条件调用，try/catch 也救不了 invariant 抛出。
+
+### [2026-05-12] HuggingFace 模型下载 URL 必须先用 /api/models/{org}/{repo}/tree/main WebFetch 验证路径，猜路径 401/404 浪费多轮调试
+
+<!-- tags: huggingface, model-download, onnx, webfetch, hf-api, url-discovery, multi-source, bug -->
+
+**Scenario**: 给项目加 ONNX 模型下载脚本，要从 HF 拉 SCRFD + ArcFace。设计文档凭印象写 URL `https://huggingface.co/yakhyo/face-reidentification/resolve/main/weights/det_2.5g.onnx`——实跑 401 Unauthorized（仓库需登录或文件已迁移）。改成多源候选 `immich-app/buffalo_l/detection.onnx` + `deepghs/insightface/buffalo_l/det_2.5g.onnx`——还是 404（路径瞎猜的）。直到用 `WebFetch https://huggingface.co/api/models/{org}/{repo}/tree/main` 才看到真实目录结构：`deepghs/insightface` 下有 `buffalo_l/` 和 `buffalo_s/` 两个子包，文件名是 `det_500m.onnx` / `det_10g.onnx` / `w600k_mbf.onnx` / `w600k_r50.onnx`——`buffalo_s` 才是 `det_500m + w600k_mbf` 这对小模型组合。
+
+**Lesson**: HF 模型路径不能猜。流程：
+1. **先 WebFetch tree API** —— `https://huggingface.co/api/models/{org}/{repo}/tree/main`（顶层）→ 看到 `detection/` `recognition/` 或 `buffalo_l/` `buffalo_s/` 等子目录后，**继续 WebFetch 子目录 tree** 直到看到真实 `.onnx` 文件名 + size
+2. **download-models.ts 用多源 array** —— `urls: string[]` 按顺序尝试，单个 404 自动尝试下一个，避免镜像维护方变动卡死；
+3. **sha256 第一次跑后立刻固化进脚本** —— 后续运行可校验未篡改（HF 即使保留 URL 也可能内容更新）；
+4. **接受设计偏离** —— 设计文档说 SCRFD-2.5G，但公开 ONNX 实际只有 buffalo_l 的 10G 和 buffalo_s 的 500M。要么改设计要么换源；本项目接受 500M 偏离并在脚本顶部完整注释 + session.ts 文件名同步。
+
+**Evidence**: `apps/backend/scripts/download-models.ts` 多次失败轨迹：(yakhyo 401) → (immich-app/buffalo_l/detection.onnx 404) → (deepghs/insightface/buffalo_l/det_2.5g.onnx 404) → WebFetch /api/models/deepghs/insightface/tree/main 看到 `buffalo_l/buffalo_s/` → WebFetch /tree/main/buffalo_s → 看到 `det_500m.onnx` + `w600k_mbf.onnx` → **改用** `https://huggingface.co/deepghs/insightface/resolve/main/buffalo_s/det_500m.onnx` 一次成功，sha256=`5e4447f5...`。整个过程"猜路径"浪费了 3 次失败 + 一次设计文档修订；用 WebFetch tree API 5 分钟就该结束。
+
+### [2026-05-12] Biome `lint/correctness/noEmptyCharacterClassInRegex` 拒绝 `[^]`，要用 `[\s\S]` 等价替代
+
+<!-- tags: biome, regex, lint, character-class, jsdom, ssr-html-match, test, bug -->
+
+**Scenario**: 红队 acceptance 测试常用 `[^]*?` 做 "任意字符（含换行）最少匹配"，匹配 SSR `renderToString` 出来的 HTML 字符串。JS regex 引擎认这写法（`[^]` = 否定空集 = 任意字符），但 Biome 1.9 报 `lint/correctness/noEmptyCharacterClassInRegex` × 多处，pre-commit hook 直接挂掉 commit。
+
+**Lesson**: Biome 把 `[^]` 当 lint error（"否定空字符类匹配任何东西，可能笔误"），等价写法 `[\s\S]` 显式表达"空白 ∪ 非空白 = 全部"。两者**正则语义完全相同**，HTML 串匹配（含换行 `<\n>`）100% 等价。红队产出测试常被这条规则拦下，应该在红队提示里强调用 `[\s\S]` 而不是 `[^]`。修复属于"等价 lint 修复"，不算改测试断言（不违反"红队铁律"）。
+
+**Evidence**: `apps/web/__tests__/photos-person-strip.acceptance.test.ts:184-187` 红队产出有 3 处 `[^]*?`，pre-commit hook 卡 commit。等价替换 `[^]` → `[\s\S]` 后 biome clean，测试 11/11 仍 PASS。两种写法生成的 NFA 完全相同，无任何运行时差别。

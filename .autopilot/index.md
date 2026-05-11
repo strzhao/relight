@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-12] 人脸识别选 ONNX Runtime + SCRFD-500M + ArcFace MBF 纯本地方案，设计偏离 2.5G → 500M（公开 ONNX 镜像无 2.5G） | tags: face-recognition, onnx, scrfd, arcface, local-inference, privacy, coreml, model-selection, design, architecture | → decisions.md
 - [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标 | tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context | → decisions.md
 - [2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12（质量优先于数量） | tags: daily-selection, candidate-pool, theme-dedup, cluster, maxN, quality-over-quantity, dirname-time-window, design | → decisions.md
 - [2026-05-10] apps/web 拆分双 tsconfig — 生产严格 + 测试松弛，恢复 noUncheckedIndexedAccess | tags: tsconfig, typescript, strict, noUncheckedIndexedAccess, test-infra, dom-api, monorepo, design | → decisions.md
@@ -21,6 +22,8 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-12] HF 模型下载 URL 必须先 WebFetch /api/models/{org}/{repo}/tree/main 验证路径，猜路径 401/404 浪费多轮 | tags: huggingface, model-download, onnx, webfetch, hf-api, url-discovery, multi-source, bug | → patterns.md
+- [2026-05-12] Biome `lint/correctness/noEmptyCharacterClassInRegex` 拒绝 `[^]`，要用 `[\s\S]` 等价替代 | tags: biome, regex, lint, character-class, jsdom, ssr-html-match, test, bug | → patterns.md
 - [2026-05-10] vitest fake timer + React 19 createRoot 不兼容 — setup 需 act+flushSync polyfill | tags: vitest, react-19, fake-timer, create-root, flush-sync, act, scheduler, polyfill, test-infra, bug | → patterns.md
 - [2026-05-10] jsdom 不实现 setPointerCapture + `<img>` 默认 draggable 吞 mousedown — UI 交互必须 e2e | tags: jsdom, pointer-events, set-pointer-capture, native-drag, img, draggable, e2e, playwright, ui-interaction, bug | → patterns.md
 - [2026-05-09] React SSR `{value} 文本` 在输出 HTML 中插入 `<!-- -->` 注释，破坏文本正则匹配 | tags: react, ssr, render-to-string, comment-marker, regex, jsx, expression-container, test, bug | → patterns.md

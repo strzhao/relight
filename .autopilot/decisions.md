@@ -363,3 +363,26 @@
 - 双写同源（dailyPicks 主字段 = entries[0]）需要在 job 内显式同步，存在漂移风险，已用红队验收测试守护；
 - 30 天去重必须 UNION 两张表（entries 各 photo_id + members.photoId），不然 19/20 entry 照片次日仍可被重复入选；
 - 类型上 `DailyPick.entries: DailyPickEntry[]` 必填，但 wallpaper composer 等读 DB 行视图的旁路用 `Omit<DailyPick, 'entries'>` 隔离避免被强制构造空数组。
+
+### [2026-05-12] 人脸识别选 ONNX Runtime + SCRFD + ArcFace 纯 Node 本地方案，设计偏离 2.5G → 500M
+
+<!-- tags: face-recognition, onnx, scrfd, arcface, local-inference, privacy, coreml, model-selection, design, architecture -->
+
+**Background**: 拾光要新增人物识别（人脸检测 + embedding + 增量聚类），约束：(1) 中文家庭/个人相册场景，**严格本地零云端**——不调 AWS Rekognition / Face++ / Azure Face；(2) 已有原生模块基础（sharp / better-sqlite3 / heic-decode），愿意再加一个；(3) 与 BullMQ `analyze-photo` 队列友好衔接，新建 `detect-faces` 队列 concurrency=2（CPU 密集，与 analyze-photo concurrency=4 隔离避免抢资源）。候选方案：face-api.js (TF.js) / Python insightface 子进程 / 复用 Qwen-VL / **onnxruntime-node + SCRFD + ArcFace**。
+
+**Choice**: 选 **onnxruntime-node + SCRFD-500M + ArcFace MobileFaceNet**，模型权重共 ~16MB，从 `deepghs/insightface/buffalo_s` 下载到 `apps/backend/assets/models/`（`.gitignore` 排除，`pnpm models:download` 脚本拉取 + sha256 固化）。macOS 启用 CoreML EP（实测 123/144 节点加速）。embedding 512 维 L2-normalized，base64 文本存 SQLite 列。聚类用增量 cosine：每张新脸只与同 storageSourceId 的现有 person centroids 做一次 cosine，threshold 0.5（ArcFace 业界经验），>= 归并 + 增量更新 centroid，否则新建 person。
+
+**Alternatives rejected**:
+- **face-api.js (TF.js)**：依赖 `@tensorflow/tfjs-node` 原生模块（~200MB）+ FaceNet 128 维精度比 ArcFace 弱，且 TF.js 与 worker_threads 隔离更难。
+- **Python insightface 子进程**：精度最高但 IPC 开销大，且要求用户装 Python + 模型 + 依赖，违反"加一个原生包"约束。已有 Whisper Python 子进程先例但那是离线批处理，不是 per-photo 实时调用。
+- **复用 Qwen-VL（现有视觉 AI）**：能描述"有几个人"但无法产生稳定 face embedding，跨照片聚类不可能。
+- **SCRFD-2.5G**（原设计选型）：精度更高（WIDER hard 77.9 vs 500M 的 68.5），但**公开 ONNX 镜像（immich-app/buffalo_l, deepghs/insightface, yakhyo/face-reidentification）实测均无 2.5G 变体**——buffalo_l 给的是 10G（16.9MB det + 174MB ResNet50，过重），buffalo_s 给 500M+MBF。500M 对家庭相册足够，未来可手动替换 10G 提升精度。
+- **YuNet + MobileFaceNet（OpenCV Zoo Apache-2.0）**：商用 license 友好，但当前是个人相册无商用诉求；保留作为未来商用切换路径文档。
+
+**Trade-offs**:
+- License 是 non-commercial research：拾光个人/家庭可接受，CLAUDE.md 明示限制；
+- SCRFD-500M 精度比 2.5G 低 ~9 pp（WIDER hard），漏检小脸 / 极端角度时偶有；最小 face bbox 边长 80px 过滤进一步降低 false positive；
+- onnxruntime-node 加载模型常驻 ~150MB RSS（per worker），concurrency=2 = ~300MB；ANE / CoreML EP 在 darwin 自动启用，CPU/性能预算可接受；
+- 跨 storageSource 不聚类：一个 NAS 一个 person 空间，不会出现"插拔 NAS 后人物错乱"，与 bursts 表设计一致。
+
+**Evidence**: 设计 + 实施记录在 `.autopilot/sessions/who/requirements/20260510-帮我深入调研下相关技/state.md`（autopilot 完整流程：design 审批 → 红蓝队对抗 → QA 2 轮 → 7 BLOCKER 全修），merge commit `62fb4eb`。真实推理验证：CoreML EP 启用日志 `[face] EPs: ["coreml","cpu"]`，detector 端到端跑 640×640 灰图返回 0 face（符合预期），SCRFD ONNX session 加载 ~200ms。
