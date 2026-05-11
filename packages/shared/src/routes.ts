@@ -55,4 +55,13 @@ export const API_ROUTES = {
     members: (id: string) => `/api/bursts/${id}/members`,
     representative: (id: string) => `/api/bursts/${id}/representative`,
   },
+  persons: {
+    list: "/api/persons",
+    detail: (id: string) => `/api/persons/${id}`,
+    update: (id: string) => `/api/persons/${id}`,
+    representative: (id: string) => `/api/persons/${id}/representative`,
+    merge: (id: string) => `/api/persons/${id}/merge`,
+    avatarUpload: (id: string) => `/api/persons/${id}/avatar`,
+    avatarImage: (id: string) => `/api/persons/${id}/avatar.jpg`,
+  },
 } as const;

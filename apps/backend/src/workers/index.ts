@@ -5,6 +5,7 @@ import Redis from "ioredis";
 import { db, schema } from "../db";
 import { analyzePhotoWorker } from "../jobs/analyze-photo";
 import { dailySelectionWorker } from "../jobs/daily-selection";
+import { detectFacesWorker } from "../jobs/detect-faces";
 import { scanStorageWorker } from "../jobs/scan-storage";
 import { buildInfo } from "../lib/build-info";
 import { config } from "../lib/config";
@@ -55,6 +56,13 @@ const analyzeWorker = new Worker("analyze-photo", analyzePhotoWorker, {
 
 const dailyWorker = new Worker("daily-selection", dailySelectionWorker, {
   connection,
+  prefix: config.bullmqPrefix,
+});
+
+// 人脸检测 Worker — concurrency=2（ONNX CPU 密集，与 analyze 抢资源时调低）
+const detectFacesWorkerInstance = new Worker("detect-faces", detectFacesWorker, {
+  connection,
+  concurrency: 2,
   prefix: config.bullmqPrefix,
 });
 
@@ -126,6 +134,7 @@ async function shutdown(signal: string): Promise<void> {
       scanWorker.close(false),
       analyzeWorker.close(false),
       dailyWorker.close(false),
+      detectFacesWorkerInstance.close(false),
       analyzeEvents.close(),
     ]);
     console.log("[workers] 所有 Worker 已关闭");
@@ -159,6 +168,13 @@ dailyWorker.on("completed", (job) => {
 });
 dailyWorker.on("failed", (job, err) => {
   console.error(`[daily-selection] 任务失败: ${job?.id}`, err.message);
+});
+
+detectFacesWorkerInstance.on("completed", (job) => {
+  console.log(`[detect-faces] 任务完成: ${job.id}`);
+});
+detectFacesWorkerInstance.on("failed", (job, err) => {
+  console.error(`[detect-faces] 任务失败: ${job?.id}`, err.message);
 });
 
 console.log(

@@ -30,4 +30,14 @@ export const config = {
   },
   /** 每日精选并行处理并发度（默认 2，可通过 DAILY_SELECTION_CONCURRENCY 环境变量调整） */
   dailySelectionConcurrency: Number.parseInt(process.env.DAILY_SELECTION_CONCURRENCY ?? "2", 10),
+  face: {
+    /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
+    displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),
+    /** cosine 相似度归并阈值（>= 此值视为同一人） */
+    clusteringThreshold: Number.parseFloat(process.env.FACE_CLUSTERING_THRESHOLD ?? "0.5"),
+    /** SCRFD 检测分数阈值 */
+    detectionThreshold: Number.parseFloat(process.env.FACE_DETECTION_THRESHOLD ?? "0.5"),
+    /** 最小人脸 bbox 边长（像素），过滤太小的脸 */
+    minFaceSize: Number.parseInt(process.env.FACE_MIN_SIZE ?? "80", 10),
+  },
 } as const;

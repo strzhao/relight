@@ -275,6 +275,65 @@ export const settings = sqliteTable("settings", {
   value: text("value").notNull(),
 });
 
+/** 人物（仿 bursts 结构）— 每个 storageSource 内独立聚类，跨源不合并 */
+export const persons = sqliteTable(
+  "persons",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    storageSourceId: text("storage_source_id")
+      .notNull()
+      .references(() => storageSources.id),
+    name: text("name"),
+    bio: text("bio"),
+    // 不加 FK 避免与 faces 循环依赖；应用层维护
+    representativeFaceId: text("representative_face_id"),
+    avatarPath: text("avatar_path"),
+    customAvatarPath: text("custom_avatar_path"),
+    // 512 维 Float32Array centroid，base64-encoded（~2732 chars）
+    centroidEmbedding: text("centroid_embedding").notNull(),
+    memberCount: integer("member_count").notNull().default(0),
+    manualOverride: integer("manual_override", { mode: "boolean" }).notNull().default(false),
+    displayable: integer("displayable", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    idx_persons_source: index("idx_persons_source").on(t.storageSourceId),
+    idx_persons_displayable: index("idx_persons_displayable").on(
+      t.storageSourceId,
+      t.displayable,
+      t.memberCount,
+    ),
+  }),
+);
+
+/** 人脸（每张人脸独立行）— bbox + 512 维 embedding */
+export const faces = sqliteTable(
+  "faces",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    photoId: text("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    personId: text("person_id"),
+    bboxX: integer("bbox_x").notNull(),
+    bboxY: integer("bbox_y").notNull(),
+    bboxW: integer("bbox_w").notNull(),
+    bboxH: integer("bbox_h").notNull(),
+    detectionScore: real("detection_score").notNull(),
+    embedding: text("embedding").notNull(),
+    detectedAt: text("detected_at").notNull(),
+  },
+  (t) => ({
+    idx_faces_photo: index("idx_faces_photo").on(t.photoId),
+    idx_faces_person: index("idx_faces_person").on(t.personId),
+  }),
+);
+
 // ===== Drizzle Relations =====
 
 export const burstsRelations = relations(bursts, ({ one, many }) => ({
@@ -361,5 +420,24 @@ export const analyzeBatchJobsRelations = relations(analyzeBatchJobs, ({ one }) =
   batch: one(analyzeBatches, {
     fields: [analyzeBatchJobs.batchId],
     references: [analyzeBatches.id],
+  }),
+}));
+
+export const personsRelations = relations(persons, ({ one, many }) => ({
+  storageSource: one(storageSources, {
+    fields: [persons.storageSourceId],
+    references: [storageSources.id],
+  }),
+  faces: many(faces),
+}));
+
+export const facesRelations = relations(faces, ({ one }) => ({
+  photo: one(photos, {
+    fields: [faces.photoId],
+    references: [photos.id],
+  }),
+  person: one(persons, {
+    fields: [faces.personId],
+    references: [persons.id],
   }),
 }));

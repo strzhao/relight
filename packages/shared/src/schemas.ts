@@ -69,6 +69,22 @@ export const setRepresentativeSchema = z.object({
   photoId: z.string().min(1),
 });
 
+/** 更新人物（name/bio）— null 或 "" 视为清空 */
+export const updatePersonSchema = z.object({
+  name: z.string().max(20).nullable().optional(),
+  bio: z.string().max(200).nullable().optional(),
+});
+
+/** 设置人物代表头像（指定 faceId） */
+export const setPersonRepresentativeSchema = z.object({
+  faceId: z.string().min(1),
+});
+
+/** 合并人物（搬迁所有 faces 到目标人物） */
+export const mergePersonSchema = z.object({
+  targetPersonId: z.string().min(1),
+});
+
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;
 export type UpdateSettings = z.infer<typeof updateSettingsSchema>;
 export type ScanNow = z.infer<typeof scanNowSchema>;
@@ -78,3 +94,6 @@ export type PhotoQuery = z.infer<typeof photoQuerySchema>;
 export type AnalyzePhotos = z.infer<typeof analyzePhotosSchema>;
 export type AnalyzeBatch = z.infer<typeof analyzeBatchSchema>;
 export type SetRepresentative = z.infer<typeof setRepresentativeSchema>;
+export type UpdatePerson = z.infer<typeof updatePersonSchema>;
+export type SetPersonRepresentative = z.infer<typeof setPersonRepresentativeSchema>;
+export type MergePerson = z.infer<typeof mergePersonSchema>;

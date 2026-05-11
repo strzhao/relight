@@ -38,6 +38,43 @@ export interface Photo {
   analyses?: PhotoAnalysis[];
 }
 
+/** 人物（人脸聚类组） */
+export interface Person {
+  id: string;
+  storageSourceId: string;
+  name: string | null;
+  bio: string | null;
+  representativeFaceId: string | null;
+  avatarPath: string | null;
+  customAvatarPath: string | null;
+  memberCount: number;
+  manualOverride: boolean;
+  displayable: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 人脸（每张人脸独立行） */
+export interface Face {
+  id: string;
+  photoId: string;
+  personId: string | null;
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  detectionScore: number;
+  detectedAt: string;
+}
+
+/** 人物详情（含成员照片 + 全部 face） */
+export interface PersonWithMembers extends Person {
+  /** 该人物所有照片，按 takenAt desc */
+  photos: Photo[];
+  /** 该人物所有人脸（含 photoId+bbox），用于"选代表头像"UI */
+  faces: Face[];
+}
+
 /** 连拍组 */
 export interface Burst {
   id: string;

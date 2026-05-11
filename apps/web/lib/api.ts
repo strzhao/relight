@@ -7,15 +7,20 @@ import type {
   DailyPick,
   FileTreeResponse,
   HealthDetails,
+  MergePerson,
   PaginatedResponse,
+  Person,
+  PersonWithMembers,
   Photo,
   PhotoAnalysisItem,
   QueueInfo,
   QueueJobDetail,
   QueuesStatus,
   ScanLog,
+  SetPersonRepresentative,
   StorageSource,
   Tag,
+  UpdatePerson,
 } from "@relight/shared";
 import { API_ROUTES } from "@relight/shared";
 
@@ -178,5 +183,42 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ photoId }),
       }),
+  },
+
+  persons: {
+    /** 列表（默认 displayable=true） */
+    list: (params?: { storageSourceId?: string; displayable?: boolean }) => {
+      const search = new URLSearchParams();
+      if (params?.storageSourceId) search.set("storageSourceId", params.storageSourceId);
+      if (params?.displayable === false) search.set("displayable", "false");
+      const qs = search.toString();
+      return fetchApi<ApiResponse<Person[]>>(
+        qs ? `${API_ROUTES.persons.list}?${qs}` : API_ROUTES.persons.list,
+      );
+    },
+    /** 详情（含成员照片 + 全部 face） */
+    detail: (id: string) => fetchApi<ApiResponse<PersonWithMembers>>(API_ROUTES.persons.detail(id)),
+    /** 更新 name / bio */
+    update: (id: string, body: UpdatePerson) =>
+      fetchApi<ApiResponse<Person>>(API_ROUTES.persons.update(id), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    /** 设置代表 face（置 manualOverride=true） */
+    setRepresentative: (id: string, body: SetPersonRepresentative) =>
+      fetchApi<ApiResponse<Person>>(API_ROUTES.persons.representative(id), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    /** 合并到目标 person */
+    merge: (id: string, body: MergePerson) =>
+      fetchApi<
+        ApiResponse<{ mergedFromId: string; targetPersonId: string; newMemberCount: number }>
+      >(API_ROUTES.persons.merge(id), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    /** 头像图片 URL（custom > auto > 404） */
+    avatarUrl: (id: string) => `${BASE_URL}${API_ROUTES.persons.avatarImage(id)}`,
   },
 };

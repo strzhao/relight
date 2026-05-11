@@ -26,3 +26,9 @@ export const dailyQueue = new Queue("daily-selection", {
   defaultJobOptions,
   prefix: config.bullmqPrefix,
 });
+
+export const detectFacesQueue = new Queue("detect-faces", {
+  connection,
+  defaultJobOptions,
+  prefix: config.bullmqPrefix,
+});

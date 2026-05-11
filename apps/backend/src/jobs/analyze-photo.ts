@@ -14,6 +14,7 @@ import { detectVideoCapability } from "../lib/video/ffmpeg";
 import { analyzeVideoForAI } from "../lib/video/index";
 import { createStorageAdapter } from "../storage";
 import { formatErrorPlaceholder, isDeterministicFormatError } from "./format-errors";
+import { detectFacesQueue } from "./queues";
 
 /** AI 视觉模型支持的图片格式（含需转换后支持的格式） */
 const AI_SUPPORTED_EXTENSIONS = new Set([
@@ -346,7 +347,20 @@ export async function analyzePhotoWorker(job: Job<AnalyzeJobData>): Promise<void
   const tagCount = tagMap.size;
   job.log(`AI 分析完成: ${tagCount} 个标签, 美学评分: ${result.aestheticScore}`);
 
-  // 6c. 连拍代表自动校准（仅当 manualOverride=false 时）
+  // 6c. 入队人脸检测（仅 image，紧跟 analyze 之后）
+  // 顺序提示（contract）：detect-faces 入队提到 calibrateBurstRepresentative 之前，
+  // 避免 burst 校准异常导致人脸识别永不入队。两者无数据依赖。
+  if (photo.mediaType === "image") {
+    try {
+      await detectFacesQueue.add("detect-faces", { photoId });
+    } catch (err) {
+      job.log(
+        `detect-faces 入队失败（已忽略）: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // 6d. 连拍代表自动校准（仅当 manualOverride=false 时）
   const freshPhoto = await db
     .select({ burstId: schema.photos.burstId })
     .from(schema.photos)

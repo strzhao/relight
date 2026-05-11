@@ -8,7 +8,8 @@ import type Database from "better-sqlite3";
  * 本 helper 让所有需要真实 SQLite 的测试用同一份 DDL，schema.ts 加列时只改这里。
  *
  * 包含表：storage_sources / bursts / photos / tags / photo_tags / photo_analyses /
- *        daily_picks / daily_pick_entries / scan_logs / analyze_batches / analyze_batch_jobs / settings
+ *        daily_picks / daily_pick_entries / scan_logs / analyze_batches / analyze_batch_jobs /
+ *        settings / persons / faces
  */
 export interface SetupOptions {
   /**
@@ -177,5 +178,39 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS persons (
+      id TEXT PRIMARY KEY,
+      storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
+      name TEXT,
+      bio TEXT,
+      representative_face_id TEXT,
+      avatar_path TEXT,
+      custom_avatar_path TEXT,
+      centroid_embedding TEXT NOT NULL,
+      member_count INTEGER NOT NULL DEFAULT 0,
+      manual_override INTEGER NOT NULL DEFAULT 0,
+      displayable INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_persons_source ON persons(storage_source_id);
+    CREATE INDEX IF NOT EXISTS idx_persons_displayable
+      ON persons(storage_source_id, displayable, member_count);
+
+    CREATE TABLE IF NOT EXISTS faces (
+      id TEXT PRIMARY KEY,
+      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      person_id TEXT,
+      bbox_x INTEGER NOT NULL,
+      bbox_y INTEGER NOT NULL,
+      bbox_w INTEGER NOT NULL,
+      bbox_h INTEGER NOT NULL,
+      detection_score REAL NOT NULL,
+      embedding TEXT NOT NULL,
+      detected_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_faces_photo ON faces(photo_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
   `);
 }

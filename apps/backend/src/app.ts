@@ -8,6 +8,7 @@ import {
   burstsRouter,
   dailyRouter,
   healthRouter,
+  personsRouter,
   photosRouter,
   queuesRouter,
   scanRouter,
@@ -55,6 +56,7 @@ export function createApp(): Hono {
   app.route("/api/storage", storageRouter);
   app.route("/api/analyze", analyzeRouter);
   app.route("/api/bursts", burstsRouter);
+  app.route("/api/persons", personsRouter);
 
   return app;
 }
