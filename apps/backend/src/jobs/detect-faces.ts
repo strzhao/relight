@@ -78,7 +78,18 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
 
   const adapter = createStorageAdapter(source.type);
   // patterns.md：网络/SMB 挂载先 readFile 入 buffer 再传 sharp
-  const buffer = await adapter.getFileBuffer(photo.filePath);
+  let buffer = await adapter.getFileBuffer(photo.filePath);
+
+  // HEIC 解码：macOS sharp libvips 默认不支持 HEIC，必须先经 heic-decode 转 JPEG
+  const { isHeicFile, isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+  if (isHeicFile(photo.filePath) || isHeicBuffer(buffer)) {
+    try {
+      buffer = await convertHeicToJpeg(buffer);
+    } catch (err) {
+      job.log(`[detect-faces] HEIC 解码失败，跳过: ${(err as Error).message}`);
+      return;
+    }
+  }
 
   // sharp 解析 metadata
   const sharpMod = await import("sharp");
@@ -323,6 +334,17 @@ async function maybeUpdateRepresentativeAndAvatar(
     } catch (err) {
       job.log(`[detect-faces] 代表照片读取失败（保留旧头像）: ${(err as Error).message}`);
       return;
+    }
+
+    // HEIC 解码（与主流程同）
+    const { isHeicFile, isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+    if (isHeicFile(repPhoto.filePath) || isHeicBuffer(repBuffer)) {
+      try {
+        repBuffer = await convertHeicToJpeg(repBuffer);
+      } catch (err) {
+        job.log(`[detect-faces] 代表 HEIC 解码失败（保留旧头像）: ${(err as Error).message}`);
+        return;
+      }
     }
 
     const sharpMod = await import("sharp");

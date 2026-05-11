@@ -52,7 +52,7 @@ async function preprocess(
   const padX = Math.floor((inputSize - newW) / 2);
   const padY = Math.floor((inputSize - newH) / 2);
 
-  const resized = await sharp(imageBuffer)
+  const resized = await sharp(imageBuffer, { failOn: "none" })
     .resize(newW, newH, { fit: "fill" })
     .extend({
       top: padY,
@@ -134,13 +134,10 @@ function decodeOutputs(
     const featArea = featSize * featSize;
     const numAnchors = featArea * ANCHORS_PER_STRIDE;
 
-    // 按 dims 找到该 stride 的 score / bbox tensor
-    const scoreTensor = tensorEntries.find(
-      ([_, t]) => t.dims.length >= 2 && t.dims[1] === numAnchors && (t.dims[2] ?? 1) === 1,
-    )?.[1];
-    const bboxTensor = tensorEntries.find(
-      ([_, t]) => t.dims.length >= 2 && t.dims[1] === numAnchors && t.dims[2] === 4,
-    )?.[1];
+    // 按 data 元素数匹配 — buffalo_s SCRFD ONNX 输出 dims 是 [numAnchors, 1] / [numAnchors, 4]
+    // 之前按 dims[1]===numAnchors 假设是 [1, A, K] 三维，实测是二维，永远 find 不到。
+    const scoreTensor = tensorEntries.find(([_, t]) => t.data.length === numAnchors)?.[1];
+    const bboxTensor = tensorEntries.find(([_, t]) => t.data.length === numAnchors * 4)?.[1];
 
     if (!scoreTensor || !bboxTensor) {
       continue; // 该 stride 输出未识别，跳过

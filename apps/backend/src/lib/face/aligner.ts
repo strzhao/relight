@@ -82,7 +82,7 @@ export async function alignFace(
 
   const region = expandBBox(bbox, imageWidth, imageHeight, expand);
 
-  const cropped = await sharp(imageBuffer)
+  const cropped = await sharp(imageBuffer, { failOn: "none" })
     .extract({ left: region.x, top: region.y, width: region.w, height: region.h })
     .resize(size, size, { fit: "fill", withoutEnlargement: false })
     .removeAlpha()
