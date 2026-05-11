@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
+import { parseExifMeta } from "../lib/exif";
 import { probeVideo } from "../lib/video/ffmpeg";
 import type { FileInfo, FileMetadata, IStorageAdapter } from "./interface";
 
@@ -32,83 +33,6 @@ const SCAN_EXTENSIONS = new Set([
   ".webm",
   ".m4v",
 ]);
-
-/** EXIF DateTimeOriginal tag */
-const TAG_DATE_TIME_ORIGINAL = 0x9003;
-
-/**
- * 在 EXIF Buffer 中定位 TIFF 头起始位置。
- * 兼容 "Exif\0\0" APP1 前缀（offset 6）和直接在 offset 0 的纯 TIFF 格式。
- */
-function findTiffStart(buf: Buffer): number {
-  if (buf.length < 4) return -1;
-  const b0 = buf[0] ?? -1;
-  const b1 = buf[1] ?? -1;
-  // Byte order markers: II (little-endian) or MM (big-endian)
-  if ((b0 === 0x49 && b1 === 0x49) || (b0 === 0x4d && b1 === 0x4d)) return 0;
-  // Try after "Exif\0\0" APP1 prefix
-  if (buf.length >= 10) {
-    const b6 = buf[6] ?? -1;
-    const b7 = buf[7] ?? -1;
-    if ((b6 === 0x49 && b7 === 0x49) || (b6 === 0x4d && b7 === 0x4d)) return 6;
-  }
-  return -1;
-}
-
-/**
- * 轻量 EXIF TIFF 解析器，提取 DateTimeOriginal (0x9003)。
- * 不依赖第三方 EXIF 库，零额外依赖。
- *
- * @param exifBuffer sharp metadata() 返回的 .exif Buffer
- * @returns "YYYY:MM:DD HH:MM:SS" 格式的日期时间字符串，解析失败返回 null
- */
-function parseExifDateTimeOriginal(exifBuffer: Buffer): string | null {
-  try {
-    const tiffStart = findTiffStart(exifBuffer);
-    if (tiffStart < 0) return null;
-
-    const buf = exifBuffer;
-    const base = tiffStart;
-
-    // Byte order: 0x49 = "II" (Intel, little-endian), 0x4D = "MM" (Motorola, big-endian)
-    const isLE = buf[base] === 0x49;
-
-    const read16 = (offset: number): number =>
-      isLE ? buf.readUInt16LE(offset) : buf.readUInt16BE(offset);
-
-    const read32 = (offset: number): number =>
-      isLE ? buf.readUInt32LE(offset) : buf.readUInt32BE(offset);
-
-    // TIFF magic number must be 0x002A
-    if (read16(base + 2) !== 0x002a) return null;
-
-    // IFD0 offset (relative to TIFF start)
-    const ifdStart = read32(base + 4) + base;
-    const entryCount = read16(ifdStart);
-
-    let entryOffset = ifdStart + 2;
-    for (let i = 0; i < entryCount; i++) {
-      const tag = read16(entryOffset);
-      if (tag === TAG_DATE_TIME_ORIGINAL) {
-        const type = read16(entryOffset + 2);
-        const count = read32(entryOffset + 4);
-
-        // ASCII string: type=2, count includes null terminator
-        if (type !== 2) return null;
-
-        // Values <= 4 bytes are stored inline at entryOffset + 8;
-        // longer values store a 4-byte offset (relative to TIFF start) at entryOffset + 8
-        const valueStart = count <= 4 ? entryOffset + 8 : read32(entryOffset + 8) + base;
-        // Trim the null terminator
-        return buf.toString("utf8", valueStart, valueStart + count - 1);
-      }
-      entryOffset += 12; // Each IFD entry is exactly 12 bytes
-    }
-  } catch {
-    // Silently ignore parse errors for robustness
-  }
-  return null;
-}
 
 export class LocalFilesystemAdapter implements IStorageAdapter {
   async listFiles(rootPath: string): Promise<FileInfo[]> {
@@ -197,18 +121,26 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
       }
     }
 
-    // 图片路径：现有 sharp 逻辑
+    // 图片路径：exifr 提取完整 EXIF + sharp 提取尺寸
     try {
-      const metadata = await sharp(filePath).metadata();
+      // 并行获取尺寸 + 完整 EXIF（exifr 内部容错，失败返回全 null）
+      const [metadata, exifMeta] = await Promise.all([
+        sharp(filePath)
+          .metadata()
+          .catch(() => ({ width: undefined, height: undefined })),
+        parseExifMeta(filePath),
+      ]);
+
       const width = metadata.width;
       const height = metadata.height;
       let takenAt: Date | undefined;
 
-      if (metadata.exif) {
-        const dateTimeStr = parseExifDateTimeOriginal(metadata.exif);
-        if (dateTimeStr) {
-          // EXIF DateTimeOriginal format: "YYYY:MM:DD HH:MM:SS"
-          takenAt = new Date(dateTimeStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3"));
+      // takenAt：优先 exifr 提取的字符串（"YYYY:MM:DD HH:MM:SS"）
+      if (exifMeta.takenAt) {
+        const dateTimeStr = exifMeta.takenAt;
+        const parsed = new Date(dateTimeStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3"));
+        if (!Number.isNaN(parsed.getTime())) {
+          takenAt = parsed;
         }
       }
 
@@ -218,9 +150,27 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
         takenAt = stat.mtime;
       }
 
-      return { width, height, takenAt };
+      return {
+        width,
+        height,
+        takenAt,
+        latitude: exifMeta.latitude,
+        longitude: exifMeta.longitude,
+        altitude: exifMeta.altitude,
+        gpsImgDirection: exifMeta.gpsImgDirection,
+        offsetTime: exifMeta.offsetTime,
+        cameraMake: exifMeta.cameraMake,
+        cameraModel: exifMeta.cameraModel,
+        lensModel: exifMeta.lensModel,
+        focalLength: exifMeta.focalLength,
+        focalLength35mm: exifMeta.focalLength35mm,
+        iso: exifMeta.iso,
+        exposureTime: exifMeta.exposureTime,
+        fNumber: exifMeta.fNumber,
+        software: exifMeta.software,
+      };
     } catch {
-      // 容错：sharp 解析失败时 fallback 到 fs.stat mtime
+      // 容错：整体失败时 fallback 到 fs.stat mtime
       try {
         const stat = await fs.stat(filePath);
         return { takenAt: stat.mtime };

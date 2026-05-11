@@ -73,6 +73,23 @@ export const photos = sqliteTable(
       .notNull()
       .default(false),
     phash: text("phash"), // 64-bit dHash 十六进制（16 chars）
+    // GPS + 完整 EXIF meta（14 列，全部 nullable）
+    latitude: real("latitude"),
+    longitude: real("longitude"),
+    altitude: real("altitude"),
+    gpsImgDirection: real("gps_img_direction"),
+    offsetTime: text("offset_time"),
+    cameraMake: text("camera_make"),
+    cameraModel: text("camera_model"),
+    lensModel: text("lens_model"),
+    focalLength: real("focal_length"),
+    focalLength35mm: integer("focal_length_35mm"),
+    iso: integer("iso"),
+    exposureTime: real("exposure_time"),
+    fNumber: real("f_number"),
+    software: text("software"),
+    // 回填幂等标记（仅回填 CLI 写，scan-storage 走新增 photo 路径不写）
+    exifBackfilledAt: integer("exif_backfilled_at"),
   },
   (t) => ({
     unq_storage_file: unique().on(t.storageSourceId, t.filePath),

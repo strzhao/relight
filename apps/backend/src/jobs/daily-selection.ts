@@ -68,12 +68,26 @@ async function processSingleEntry(
         ? `${(candidate.emotionalAnalysis as Record<string, unknown>).primary || "未知"} / ${(candidate.emotionalAnalysis as Record<string, unknown>).secondary || "未知"}`
         : "未知";
 
+    // GPS + 时区注入：latitude/longitude 保留 4 位小数，缺失时填 "未知"
+    const latStr =
+      candidate.latitude !== null && candidate.latitude !== undefined
+        ? candidate.latitude.toFixed(4)
+        : "未知";
+    const lonStr =
+      candidate.longitude !== null && candidate.longitude !== undefined
+        ? candidate.longitude.toFixed(4)
+        : "未知";
+    const tzStr = candidate.offsetTime ?? "+08:00";
+
     let userText = narratePrompts.user
       .replace("{date}", heroDate)
       .replace("{years_ago}", String(candidate.yearsAgo ?? 0))
       .replace("{tags}", heroTagsForNarrate)
       .replace("{emotions}", heroEmotions)
-      .replace("{narrative}", candidate.narrative ?? "无描述");
+      .replace("{narrative}", candidate.narrative ?? "无描述")
+      .replace("{latitude}", latStr)
+      .replace("{longitude}", lonStr)
+      .replace("{timezone}", tzStr);
 
     if (isVideo) {
       const analysisRows = await db

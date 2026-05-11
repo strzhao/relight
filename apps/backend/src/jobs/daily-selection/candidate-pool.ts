@@ -40,6 +40,12 @@ export interface EnrichedCandidate {
   thumbnailPath: string | null;
   /** 存储源类型（用于阶段 2 读文件） */
   sourceType: "local" | "smb" | "webdav";
+  /** GPS 纬度（用于 cluster GPS 谓词） */
+  latitude: number | null;
+  /** GPS 经度（用于 cluster GPS 谓词） */
+  longitude: number | null;
+  /** 时区偏移，如 "+08:00"（用于 narrate 注入） */
+  offsetTime: string | null;
 }
 
 /**
@@ -190,6 +196,9 @@ export async function buildCandidatePool(
       tags: schema.photoAnalyses.tags,
       thumbnailPath: schema.photos.thumbnailPath,
       sourceType: schema.storageSources.type,
+      latitude: schema.photos.latitude,
+      longitude: schema.photos.longitude,
+      offsetTime: schema.photos.offsetTime,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -221,6 +230,9 @@ export async function buildCandidatePool(
       tags: schema.photoAnalyses.tags,
       thumbnailPath: schema.photos.thumbnailPath,
       sourceType: schema.storageSources.type,
+      latitude: schema.photos.latitude,
+      longitude: schema.photos.longitude,
+      offsetTime: schema.photos.offsetTime,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -258,6 +270,9 @@ export async function buildCandidatePool(
         tags: schema.photoAnalyses.tags,
         thumbnailPath: schema.photos.thumbnailPath,
         sourceType: schema.storageSources.type,
+        latitude: schema.photos.latitude,
+        longitude: schema.photos.longitude,
+        offsetTime: schema.photos.offsetTime,
       })
       .from(schema.photos)
       .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -290,6 +305,9 @@ export async function buildCandidatePool(
       tags: schema.photoAnalyses.tags,
       thumbnailPath: schema.photos.thumbnailPath,
       sourceType: schema.storageSources.type,
+      latitude: schema.photos.latitude,
+      longitude: schema.photos.longitude,
+      offsetTime: schema.photos.offsetTime,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -333,6 +351,9 @@ export async function buildCandidatePool(
           tags: r.tags,
           thumbnailPath: r.thumbnailPath,
           sourceType: r.sourceType,
+          latitude: r.latitude ?? null,
+          longitude: r.longitude ?? null,
+          offsetTime: r.offsetTime ?? null,
         };
       });
   }
