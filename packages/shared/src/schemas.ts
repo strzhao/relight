@@ -69,10 +69,12 @@ export const setRepresentativeSchema = z.object({
   photoId: z.string().min(1),
 });
 
-/** 更新人物（name/bio）— null 或 "" 视为清空 */
+/** 更新人物（name/nickname/bio/hidden）— null 或 "" 视为清空 */
 export const updatePersonSchema = z.object({
   name: z.string().max(20).nullable().optional(),
+  nickname: z.string().max(20).nullable().optional(),
   bio: z.string().max(200).nullable().optional(),
+  hidden: z.boolean().optional(),
 });
 
 /** 设置人物代表头像（指定 faceId） */

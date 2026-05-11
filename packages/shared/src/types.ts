@@ -43,6 +43,7 @@ export interface Person {
   id: string;
   storageSourceId: string;
   name: string | null;
+  nickname: string | null;
   bio: string | null;
   representativeFaceId: string | null;
   avatarPath: string | null;
@@ -50,6 +51,7 @@ export interface Person {
   memberCount: number;
   manualOverride: boolean;
   displayable: boolean;
+  hidden: boolean;
   createdAt: string;
   updatedAt: string;
 }

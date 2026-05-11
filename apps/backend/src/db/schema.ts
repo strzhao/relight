@@ -286,6 +286,7 @@ export const persons = sqliteTable(
       .notNull()
       .references(() => storageSources.id),
     name: text("name"),
+    nickname: text("nickname"),
     bio: text("bio"),
     // 不加 FK 避免与 faces 循环依赖；应用层维护
     representativeFaceId: text("representative_face_id"),
@@ -296,6 +297,7 @@ export const persons = sqliteTable(
     memberCount: integer("member_count").notNull().default(0),
     manualOverride: integer("manual_override", { mode: "boolean" }).notNull().default(false),
     displayable: integer("displayable", { mode: "boolean" }).notNull().default(false),
+    hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

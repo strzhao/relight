@@ -186,11 +186,17 @@ export const api = {
   },
 
   persons: {
-    /** 列表（默认 displayable=true） */
-    list: (params?: { storageSourceId?: string; displayable?: boolean }) => {
+    /** 列表（默认 displayable=true, hidden=false） */
+    list: (params?: {
+      storageSourceId?: string;
+      displayable?: boolean;
+      hidden?: boolean | "all";
+    }) => {
       const search = new URLSearchParams();
       if (params?.storageSourceId) search.set("storageSourceId", params.storageSourceId);
       if (params?.displayable === false) search.set("displayable", "false");
+      if (params?.hidden === true) search.set("hidden", "true");
+      else if (params?.hidden === "all") search.set("hidden", "all");
       const qs = search.toString();
       return fetchApi<ApiResponse<Person[]>>(
         qs ? `${API_ROUTES.persons.list}?${qs}` : API_ROUTES.persons.list,

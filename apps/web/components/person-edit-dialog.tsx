@@ -30,6 +30,7 @@ export function PersonEditDialog({
   const [detail, setDetail] = useState<PersonWithMembers | null>(null);
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [bio, setBio] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export function PersonEditDialog({
         if (!alive) return;
         setDetail(res.data);
         setName(res.data.name ?? "");
+        setNickname(res.data.nickname ?? "");
         setBio(res.data.bio ?? "");
       })
       .catch((err: Error) => {
@@ -69,11 +71,11 @@ export function PersonEditDialog({
     try {
       const res = await api.persons.update(personId, {
         name: name === "" ? null : name,
+        nickname: nickname === "" ? null : nickname,
         bio: bio === "" ? null : bio,
       });
       onPersonUpdated?.(res.data);
-      // 同步到本地 detail
-      setDetail({ ...detail, name: res.data.name, bio: res.data.bio });
+      onClose();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -101,12 +103,33 @@ export function PersonEditDialog({
     }
   }
 
-  async function handleMerge(targetId: string) {
+  async function handleHide() {
     if (!personId) return;
     setSaving(true);
     setError(null);
     try {
-      await api.persons.merge(personId, { targetPersonId: targetId });
+      await api.persons.update(personId, { hidden: true });
+      onPersonRemoved?.(personId);
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleMerge(target: Person) {
+    if (!personId || !detail) return;
+    const sourceLabel = `${detail.name ?? `人物 #${detail.id.slice(0, 4)}`}（${detail.memberCount} 张）`;
+    const targetLabel = `${target.name ?? `人物 #${target.id.slice(0, 4)}`}（${target.memberCount} 张）`;
+    const ok = window.confirm(
+      `确定把【${sourceLabel}】合并到【${targetLabel}】？\n\n合并后两人的所有照片都归到目标人物，源人物会消失。此操作不可撤销。`,
+    );
+    if (!ok) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.persons.merge(personId, { targetPersonId: target.id });
       onPersonRemoved?.(personId);
       onClose();
     } catch (err) {
@@ -166,6 +189,20 @@ export function PersonEditDialog({
                 className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                 placeholder="未命名"
                 data-testid="person-name-input"
+              />
+            </label>
+
+            {/* 昵称 */}
+            <label className="block">
+              <span className="text-sm font-medium">昵称</span>
+              <input
+                type="text"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                maxLength={20}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                placeholder="可选，比如「奶奶」「小明」"
+                data-testid="person-nickname-input"
               />
             </label>
 
@@ -232,14 +269,25 @@ export function PersonEditDialog({
               disabled={saving}
             />
 
-            {/* 保存按钮 */}
-            <div className="flex justify-end gap-2 border-t pt-4">
-              <Button variant="ghost" onClick={onClose} disabled={saving}>
-                取消
+            {/* 保存 / 隐藏 / 取消 */}
+            <div className="flex justify-between gap-2 border-t pt-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleHide}
+                disabled={saving}
+                data-testid="person-hide-btn"
+              >
+                从头像条隐藏
               </Button>
-              <Button onClick={handleSave} disabled={saving} data-testid="person-save-btn">
-                保存
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={onClose} disabled={saving}>
+                  取消
+                </Button>
+                <Button onClick={handleSave} disabled={saving} data-testid="person-save-btn">
+                  保存
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -251,17 +299,17 @@ export function PersonEditDialog({
 interface MergeRowProps {
   currentPersonId: string;
   storageSourceId: string;
-  onMerge: (targetPersonId: string) => void;
+  onMerge: (target: Person) => void;
   disabled: boolean;
 }
 
 function MergeRow({ currentPersonId, storageSourceId, onMerge, disabled }: MergeRowProps) {
   const [candidates, setCandidates] = useState<Person[]>([]);
-  const [showSelector, setShowSelector] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!showSelector) return;
     let alive = true;
+    setLoading(true);
     api.persons
       .list({ storageSourceId })
       .then((res) => {
@@ -270,39 +318,48 @@ function MergeRow({ currentPersonId, storageSourceId, onMerge, disabled }: Merge
       })
       .catch(() => {
         if (alive) setCandidates([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
       });
     return () => {
       alive = false;
     };
-  }, [showSelector, storageSourceId, currentPersonId]);
+  }, [storageSourceId, currentPersonId]);
 
   return (
     <div className="border-t pt-4">
       <p className="mb-2 text-sm font-medium">合并到其他人物</p>
-      {!showSelector ? (
-        <Button variant="ghost" size="sm" onClick={() => setShowSelector(true)} disabled={disabled}>
-          展开候选列表
-        </Button>
-      ) : (
-        <div className="space-y-1">
-          {candidates.length === 0 && (
-            <p className="text-xs text-muted-foreground">暂无可合并的候选人物</p>
-          )}
-          {candidates.map((p) => (
-            <button
-              type="button"
-              key={p.id}
-              onClick={() => onMerge(p.id)}
-              disabled={disabled}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-secondary"
-              data-testid={`merge-target-${p.id}`}
-            >
-              <span className="font-medium">{p.name ?? `人物 #${p.id.slice(0, 4)}`}</span>
-              <span className="text-xs text-muted-foreground">{p.memberCount} 张</span>
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="max-h-64 space-y-1 overflow-y-auto">
+        {loading && <p className="px-2 text-xs text-muted-foreground">加载候选中…</p>}
+        {!loading && candidates.length === 0 && (
+          <p className="px-2 text-xs text-muted-foreground">暂无可合并的候选人物</p>
+        )}
+        {candidates.map((p) => (
+          <button
+            type="button"
+            key={p.id}
+            onClick={() => onMerge(p)}
+            disabled={disabled}
+            className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary"
+            data-testid={`merge-target-${p.id}`}
+          >
+            {p.avatarPath || p.customAvatarPath ? (
+              <img
+                src={api.persons.avatarUrl(p.id)}
+                alt={p.name ?? "未命名"}
+                className="size-9 shrink-0 rounded-full border border-border object-cover"
+              />
+            ) : (
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs text-muted-foreground">
+                ?
+              </div>
+            )}
+            <span className="font-medium">{p.name ?? `人物 #${p.id.slice(0, 4)}`}</span>
+            <span className="ml-auto text-xs text-muted-foreground">{p.memberCount} 张</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

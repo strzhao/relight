@@ -42,6 +42,7 @@ function toApiPerson(row: typeof schema.persons.$inferSelect) {
     id: row.id,
     storageSourceId: row.storageSourceId,
     name: row.name,
+    nickname: row.nickname,
     bio: row.bio,
     representativeFaceId: row.representativeFaceId,
     avatarPath: row.avatarPath,
@@ -49,6 +50,7 @@ function toApiPerson(row: typeof schema.persons.$inferSelect) {
     memberCount: row.memberCount,
     manualOverride: row.manualOverride,
     displayable: row.displayable,
+    hidden: row.hidden,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -74,12 +76,17 @@ export const personsRouter = new Hono()
     const storageSourceId = c.req.query("storageSourceId");
     const displayableParam = c.req.query("displayable") ?? "true";
     const displayableTrue = displayableParam !== "false";
+    /** hidden 过滤：默认 "false"（仅可见），"true" 只返回已隐藏，"all" 不过滤 */
+    const hiddenParam = c.req.query("hidden") ?? "false";
 
     const conditions = [] as ReturnType<typeof eq>[];
     if (storageSourceId) {
       conditions.push(eq(schema.persons.storageSourceId, storageSourceId));
     }
     conditions.push(eq(schema.persons.displayable, displayableTrue));
+    if (hiddenParam !== "all") {
+      conditions.push(eq(schema.persons.hidden, hiddenParam === "true"));
+    }
 
     const rows = await db
       .select()
@@ -161,9 +168,16 @@ export const personsRouter = new Hono()
       const v = parsed.data.name;
       update.name = v == null || v === "" ? null : v;
     }
+    if ("nickname" in parsed.data) {
+      const v = parsed.data.nickname;
+      update.nickname = v == null || v === "" ? null : v;
+    }
     if ("bio" in parsed.data) {
       const v = parsed.data.bio;
       update.bio = v == null || v === "" ? null : v;
+    }
+    if ("hidden" in parsed.data && parsed.data.hidden !== undefined) {
+      update.hidden = parsed.data.hidden;
     }
 
     await db.update(schema.persons).set(update).where(eq(schema.persons.id, id));

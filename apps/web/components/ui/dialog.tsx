@@ -40,8 +40,14 @@ function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
   return <div className={cn("flex flex-col gap-1.5", className)} {...props} />;
 }
 
-function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-lg font-semibold", className)} {...props} />;
+function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
+  return (
+    <DialogPrimitive.Title
+      data-slot="dialog-title"
+      className={cn("text-lg font-semibold", className)}
+      {...props}
+    />
+  );
 }
 
 export { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle };
