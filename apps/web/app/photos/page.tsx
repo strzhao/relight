@@ -3,6 +3,8 @@
 import { BurstSheet } from "@/components/burst-sheet";
 import { DateViewControl } from "@/components/date-view-control";
 import type { DateViewMode } from "@/components/date-view-control";
+import { PersonEditDialog } from "@/components/person-edit-dialog";
+import { PersonStrip } from "@/components/person-strip";
 import { PhotoCard } from "@/components/photo-card";
 import { PhotoSectionHeader } from "@/components/photo-section-header";
 import { Button } from "@/components/ui/button";
@@ -10,7 +12,7 @@ import { Lightbox } from "@/components/ui/lightbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePhotosInfinite } from "@/hooks/use-photos-infinite";
 import { type GroupedPhotos, groupPhotos, useVirtualGrid } from "@/hooks/use-virtual-grid";
-import type { Photo } from "@relight/shared";
+import type { Person, Photo } from "@relight/shared";
 import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -38,6 +40,10 @@ export default function PhotosPage() {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [burstSheetOpen, setBurstSheetOpen] = useState(false);
   const [burstSheetId, setBurstSheetId] = useState<string | null>(null);
+  const [personDialogOpen, setPersonDialogOpen] = useState(false);
+  const [personDialogId, setPersonDialogId] = useState<string | null>(null);
+  // 当人物头像/名称更新后，给 PersonStrip 一个信号让它重新拉数据
+  const [personRefreshTick, setPersonRefreshTick] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ResizeObserver: 响应式列数计算 + cellSize (150ms 防抖)
@@ -116,6 +122,20 @@ export default function PhotosPage() {
     },
     [burstSheetId, photos, updatePhoto],
   );
+
+  // 人物头像点击：打开编辑弹窗
+  const handlePersonClick = useCallback((person: Person) => {
+    setPersonDialogId(person.id);
+    setPersonDialogOpen(true);
+  }, []);
+
+  const handlePersonUpdated = useCallback(() => {
+    setPersonRefreshTick((n) => n + 1);
+  }, []);
+
+  const handlePersonRemoved = useCallback(() => {
+    setPersonRefreshTick((n) => n + 1);
+  }, []);
 
   // 切换视图 → 重置滚动位置
   const handleViewModeChange = useCallback((mode: DateViewMode) => {
@@ -216,6 +236,9 @@ export default function PhotosPage() {
           </Button>
         </div>
       </div>
+
+      {/* 人物头像条（人脸识别结果）— 阈值未达时自动隐身，无需手动配置 */}
+      <PersonStrip key={personRefreshTick} onPersonClick={handlePersonClick} />
 
       {/* 虚拟滚动容器 */}
       <div ref={containerRef} className="flex-1 overflow-auto px-2 py-3">
@@ -324,6 +347,15 @@ export default function PhotosPage() {
         burstId={burstSheetId}
         onClose={() => setBurstSheetOpen(false)}
         onRepresentativeChanged={handleRepresentativeChanged}
+      />
+
+      {/* 人物编辑弹窗 */}
+      <PersonEditDialog
+        open={personDialogOpen}
+        personId={personDialogId}
+        onClose={() => setPersonDialogOpen(false)}
+        onPersonUpdated={handlePersonUpdated}
+        onPersonRemoved={handlePersonRemoved}
       />
     </main>
   );

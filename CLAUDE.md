@@ -23,6 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ffmpeg ≥ 4.0（macOS: `brew install ffmpeg`）— 视频缩略图、关键帧抽取必需；缺失时视频走"占位降级"路径
 - Whisper（可选）— 视频字幕转录，默认指向 `/Users/stringzhao/workspace/martin/`，可通过 `WHISPER_PYTHON` / `WHISPER_SCRIPT` env 覆盖；未启用时视频分析跳过转录
 - 关键环境变量（见 `.env.example`）：`STORAGE_ROOT`（照片根目录）、`REDIS_URL`、`DATABASE_PATH`、`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` / `AI_VISION_MODEL`。AI 默认指向本地 `http://127.0.0.1:8001/v1`（qwen 兼容服务）
+- 人脸识别（可选）：ONNX Runtime + SCRFD-2.5G + ArcFace MobileFaceNet（共 ~16MB 模型权重）。首次启用前跑 `pnpm --filter @relight/backend models:download` 把权重下载到 `apps/backend/assets/models/`（不入版本控制）。模型 license 为学术 / non-commercial，仅适用于个人/家庭相册场景。模型缺失时 `detect-faces` worker 自动跳过，不阻塞主流程。
 
 ## 常用命令
 
@@ -45,6 +46,7 @@ pnpm --filter @relight/backend build       # tsup 打包
 pnpm --filter @relight/backend start       # 跑生产构建产物
 pnpm --filter @relight/backend tsx src/cli/backfill-media-type.ts  # 历史视频数据回填 mediaType / durationSec
 pnpm --filter @relight/backend tsx src/cli/detect-bursts.ts        # 历史照片连拍组回填（识别已有照片中的连拍关系）
+pnpm --filter @relight/backend models:download                     # 下载人脸识别 ONNX 模型权重（~16MB）
 
 # 前端专属
 pnpm --filter @relight/web dev             # 启动前端 (next dev --turbopack -p 3001)

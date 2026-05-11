@@ -43,6 +43,9 @@ playwright-report/
 apps/backend/photos/
 apps/backend/photos
 apps/backend/data/
+
+# 人脸识别 ONNX 模型权重（~16MB）：通过 pnpm models:download 下载，不入版本
+apps/backend/assets/models/*.onnx
 # 仓库根的 photos/ 是测试以错误 cwd 跑时把合成产物泄漏到这里的目录，不入版本
 /photos/
 

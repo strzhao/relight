@@ -9,3 +9,4 @@ export { queuesRouter } from "./queues";
 export { storageRouter } from "./storage";
 export { analyzeRouter } from "./analyze";
 export { burstsRouter } from "./bursts";
+export { personsRouter } from "./persons";
