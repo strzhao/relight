@@ -1,5 +1,34 @@
 # 架构决策日志
 
+### [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标
+
+<!-- tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context -->
+
+**Background**: 前一轮 daily-selection top N 主题去重（dirname+60min 链式）解决了短时差同主题，但 OUT-OF-SCOPE 留下三类：跨 dirname 同地点（朱红跨年同地）、跨时间窗同 dirname（洪崖洞跨午晚）、跨年份同地点。同时 narrate prompt 缺时区+地点，AI 写出的叙事漂浮（"那个春日午后"模板感）。photos 表只持久化 takenAt，丢弃 GPS/设备/镜头等高价值 EXIF。
+
+**Choice**:
+1. **schema**: photos 表新增 14 列（latitude/longitude/altitude/gpsImgDirection/offsetTime/cameraMake/cameraModel/lensModel/focalLength/focalLength35mm/iso/exposureTime/fNumber/software）+ 1 列 exif_backfilled_at 幂等标记。全部 nullable。
+2. **parser**: 引入 exifr 库（0.5-2.5ms/张，HEIC/RAW 原生支持）替换 local.ts 手写 TIFF 解析。强制 `reviveValues: false` 让 DateTimeOriginal 保持字符串（防 Date 对象进 SQLite 变 `[object Object]`）。
+3. **cluster 两步算法**：保留 Step 1 dirname+60min 链式扫描（语义不变），新增 Step 2 GPS pairwise union-find（簇粒度，≤500m + ≤24h），OR 合并跨 dir 同地。单簇情况退化与原算法一致。
+4. **narrate prompt**: 注入 {latitude}/{longitude}/{timezone} 三占位符 + 引导文案，AI 自主使用。实测覆盖率 68.9% GPS（4252/6175），AI 直接识别"洪崖洞"（29.56°N/106.57°E）/"苔痕深处禅房"（35.00°N/135.77°E 京都）/杭州（30.13°N/120.21°E）等地标。
+5. **回填**: backfill-exif.ts CLI，pLimit(8) 并发 + WHERE exif_backfilled_at IS NULL 幂等。
+
+**Lesson**:
+- exifr 默认 `reviveValues: true` 会把 EXIF 日期转 Date 对象——存 SQLite TEXT 列会变 `[object Object]`，**必须显式关闭**。同理 `translateValues: false` 防枚举翻译。
+- "凑够数字"的列声明（14 列）建议留出 1 列工程标记位（exif_backfilled_at），用户口径不变但工程更可靠。
+- 两步算法（保留 Step 1 + 叠加 Step 2）比"全部重写为 union-find"语义更清晰：单簇退化 == 旧版输出，渐进式增强。
+- GPS 注入比"reverse geocode 工程"价值高 — 现代 LLM 能直接从经纬度识别地标（不必引入 nominatim/cities500.txt 等离线数据集）。
+
+**Alternatives rejected**:
+- AI relabel 修复 dir（Plan C）：成本高、效果差，user 否决
+- 在线 reverse geocode（高德/Nominatim）：6175 张需 200 元或限流，且坐标外泄隐私
+- 离线 reverse geocode（cities500.txt）：~50MB 数据集 + 行政区划匹配复杂
+
+**Verification evidence**:
+- backfill 实跑：6175 张图片 / GPS 命中 4252 (68.9%) / camera_make 4685 (75.9%) / software 4739 (76.7%)
+- 单元测试：geo 20 + exif 19 + cluster-gps 23 + exif-backfill 11 = 73 it 全过
+- API 验证：2026-05-10 entries rank 8/9 narrative "洪崖洞的旧梦"/"混凝土的静默" 直接命中地标
+
 ### [2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12（质量优先于数量）
 
 <!-- tags: daily-selection, candidate-pool, theme-dedup, cluster, maxN, quality-over-quantity, dirname-time-window, design -->

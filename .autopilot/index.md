@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标 | tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context | → decisions.md
 - [2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12（质量优先于数量） | tags: daily-selection, candidate-pool, theme-dedup, cluster, maxN, quality-over-quantity, dirname-time-window, design | → decisions.md
 - [2026-05-10] apps/web 拆分双 tsconfig — 生产严格 + 测试松弛，恢复 noUncheckedIndexedAccess | tags: tsconfig, typescript, strict, noUncheckedIndexedAccess, test-infra, dom-api, monorepo, design | → decisions.md
 - [2026-05-09] 每日精选改为 4 源平等加权混采 + 久远度温和加成 + 30 天去重 + AI 二次评选关联 members | tags: daily-selection, candidate-pool, age-weight, dedup, multi-photo, ai-clustering, design, architecture | → decisions.md

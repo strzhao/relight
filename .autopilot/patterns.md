@@ -1,3 +1,17 @@
+### [2026-05-11] exifr 默认 reviveValues:true 会把 EXIF 日期转 Date 对象——存 SQLite TEXT 列变 `[object Object]`
+
+<!-- tags: exifr, exif, sqlite, date-revive, reviveValues, translateValues, type-coercion, datetime-original, bug, library-default -->
+
+**Bug**：exifr 4.x 默认 `reviveValues: true`，会自动把 EXIF DateTimeOriginal（`"2019:03:22 12:56:54"` 字面字符串）revive 成 JavaScript Date 对象。代码若按字符串写入 SQLite TEXT 列，SQLite 会调用 `toString()` 得到 `"[object Object]"` 而非时间戳，且静默成功——下游 query 全部错乱，难以排查。
+
+**修复**：调 `exifr.parse(file, { gps: true, exif: true, ifd0: true, makerNote: false, reviveValues: false, translateValues: false })`。
+- `reviveValues: false` 关闭日期反序列化（保持字符串）
+- `translateValues: false` 关闭枚举翻译（如 ExposureProgram=1 不被翻译为 "Manual"）
+
+**测试**：red team 测试加 `expect((result.takenAt as unknown) instanceof Date).toBe(false)` 作为字面断言。
+
+**Lesson**：用社区 EXIF 库时**必须**检查日期/数字字段的 revive 行为，配置写在调用处而非依赖默认值。同类陷阱：piexif/sharp metadata 的字段类型也不稳定。
+
 ### [2026-05-10] vitest fake timer + React 19 `createRoot.render` 不兼容 — vitest.setup 需 act+flushSync polyfill
 
 <!-- tags: vitest, react-19, fake-timer, create-root, flush-sync, act, scheduler, polyfill, test-infra, bug -->
