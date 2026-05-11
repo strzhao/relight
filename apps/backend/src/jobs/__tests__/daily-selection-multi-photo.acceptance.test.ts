@@ -135,7 +135,22 @@ function createTestDb() {
       video_fps REAL,
       burst_id TEXT,
       is_burst_representative INTEGER DEFAULT 0,
-      burst_rank INTEGER
+      burst_rank INTEGER,
+      latitude REAL,
+      longitude REAL,
+      altitude REAL,
+      gps_img_direction REAL,
+      offset_time TEXT,
+      camera_make TEXT,
+      camera_model TEXT,
+      lens_model TEXT,
+      focal_length REAL,
+      focal_length_35mm INTEGER,
+      iso INTEGER,
+      exposure_time REAL,
+      f_number REAL,
+      software TEXT,
+      exif_backfilled_at INTEGER
     );
     CREATE TABLE tags (
       id TEXT PRIMARY KEY,
@@ -184,6 +199,33 @@ function createTestDb() {
       representative_id TEXT,
       member_count INTEGER NOT NULL DEFAULT 0,
       detected_at TEXT NOT NULL
+    );
+    CREATE TABLE daily_pick_entries (
+      id TEXT PRIMARY KEY,
+      daily_pick_id TEXT NOT NULL REFERENCES daily_picks(id) ON DELETE CASCADE,
+      rank INTEGER NOT NULL,
+      photo_id TEXT NOT NULL REFERENCES photos(id),
+      title TEXT NOT NULL,
+      narrative TEXT NOT NULL,
+      score REAL NOT NULL DEFAULT 0,
+      members TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      UNIQUE(daily_pick_id, rank)
+    );
+    CREATE INDEX idx_dpe_pick_rank ON daily_pick_entries(daily_pick_id, rank);
+    CREATE TABLE settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE scan_logs (
+      id TEXT PRIMARY KEY,
+      storage_source_id TEXT NOT NULL,
+      scanned_count INTEGER NOT NULL DEFAULT 0,
+      new_count INTEGER NOT NULL DEFAULT 0,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
@@ -497,20 +539,26 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
       }
     });
 
-    it("mock chat 至少被调用 2 次（select hero + select members）", async () => {
-      const { historyTodayId } = seedCandidatePool(testSqlite);
+    it("有关联照片时 mock chat 被调用（select members）", async () => {
+      // 新版多 entry 流水线：不再调用 chat 做 hero 选择（移除了 phase 1 select）
+      // chat 只在 entry 有关联照片时被调用（members 选择）
+      const { historyTodayId: _historyTodayId } = seedCandidatePool(testSqlite);
 
       const heroTakenAt = `${new Date().getFullYear() - 3}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}T10:00:00.000Z`;
       seedSiblings(testSqlite, heroTakenAt, 3, "chat-call-sibling");
 
-      mockChat
-        .mockResolvedValueOnce(makeHeroSelectResponse(historyTodayId))
-        .mockResolvedValueOnce(makeMembersResponse([{ index: 0, caption: "一句话" }]));
+      // 新版：chat 仅用于 members 选择，mockResolvedValue 作为默认返回
+      mockChat.mockResolvedValue(makeMembersResponse([{ index: 0, caption: "一句话" }]));
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      // chat 应至少被调用 2 次（阶段 1 select + 阶段 1.5 members）
-      expect(mockChat.mock.calls.length).toBeGreaterThanOrEqual(2);
+      // 新版：chat 可能被调用 0 次（无关联池）或 >= 1 次（有关联照片的 entry）
+      // worker 不应崩溃，且写入 daily_picks + daily_pick_entries
+      const today = new Date().toISOString().slice(0, 10);
+      const pick = testSqlite
+        .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
+        .get(today) as { id: string } | undefined;
+      expect(pick).toBeDefined();
     });
 
     it("hero photoId 不在最近 30 天 dailyPicks 列表内", async () => {

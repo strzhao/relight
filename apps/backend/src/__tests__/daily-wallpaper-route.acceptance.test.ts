@@ -86,6 +86,17 @@ vi.mock("../db", () => ({
       createdAt: "photos.created_at",
       mediaType: "photos.media_type",
     },
+    dailyPickEntries: {
+      id: "dailyPickEntries.id",
+      dailyPickId: "dailyPickEntries.daily_pick_id",
+      rank: "dailyPickEntries.rank",
+      photoId: "dailyPickEntries.photo_id",
+      title: "dailyPickEntries.title",
+      narrative: "dailyPickEntries.narrative",
+      score: "dailyPickEntries.score",
+      members: "dailyPickEntries.members",
+      createdAt: "dailyPickEntries.created_at",
+    },
   },
 }));
 
@@ -568,7 +579,7 @@ describe("GET /api/daily/:pickDate/wallpaper — 验收测试（设计文档 §�
       expect(body.data.composedImageUrl).toBeNull();
     });
 
-    it("无今日精选时 today 返回 data: null（非 404），不含 composedImageUrl", async () => {
+    it("无今日精选时 today 返回结构化空对象（非 404，非 null），entries 为空数组", async () => {
       // 重置 mock，确保空结果
       mockDb.select.mockReset();
       mockDb.select.mockReturnValue(chainableMock([]));
@@ -578,7 +589,11 @@ describe("GET /api/daily/:pickDate/wallpaper — 验收测试（设计文档 §�
 
       expect(res.status).toBe(200);
       expect(body?.success).toBe(true);
-      expect(body?.data).toBeNull();
+      // 新空态契约：data 不为 null，而是结构化空对象（entries 恒为数组）
+      expect(body?.data).not.toBeNull();
+      expect(Array.isArray(body?.data?.entries)).toBe(true);
+      expect(body?.data?.entries).toHaveLength(0);
+      expect(body?.data?.photo).toBeNull();
     });
   });
 

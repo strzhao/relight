@@ -6,7 +6,7 @@ export interface FileInfo {
   modifiedAt: Date;
 }
 
-/** 文件元信息（图片返回 width/height/takenAt；视频额外返回 mediaType/durationSec/videoCodec/videoFps） */
+/** 文件元信息（图片返回 width/height/takenAt + EXIF 14 列；视频额外返回 mediaType/durationSec/videoCodec/videoFps） */
 export interface FileMetadata {
   width?: number;
   height?: number;
@@ -15,6 +15,21 @@ export interface FileMetadata {
   durationSec?: number;
   videoCodec?: string;
   videoFps?: number;
+  // GPS + 完整 EXIF meta（14 列，全部 optional，仅图片路径设置）
+  latitude?: number | null;
+  longitude?: number | null;
+  altitude?: number | null;
+  gpsImgDirection?: number | null;
+  offsetTime?: string | null;
+  cameraMake?: string | null;
+  cameraModel?: string | null;
+  lensModel?: string | null;
+  focalLength?: number | null;
+  focalLength35mm?: number | null;
+  iso?: number | null;
+  exposureTime?: number | null;
+  fNumber?: number | null;
+  software?: string | null;
 }
 
 /** 存储适配器接口 — 支持本地目录、SMB 挂载、WebDAV 等 */

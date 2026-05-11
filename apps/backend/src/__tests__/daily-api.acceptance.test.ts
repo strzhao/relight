@@ -152,11 +152,17 @@ describe("每日精选 API 契约 — 验收测试（设计文档 §DailyPick）
       expect(body.success).toBe(true);
     });
 
-    it("无今日精选时 data 应为 null（非 undefined，非 404）", async () => {
+    it("无今日精选时 data 应为结构化空对象（非 null，非 404），entries 为空数组", async () => {
       const { status, body } = await get("/api/daily/today");
       expect(status).toBe(200);
       expect(body.success).toBe(true);
-      expect(body.data).toBeNull();
+      // 新空态契约（T1-T6 多入选版）：data 不为 null，而是结构化空对象
+      // entries 恒为数组，前端无需处理 data===null 分支
+      expect(body.data).not.toBeNull();
+      expect(body.data).toHaveProperty("entries");
+      expect(Array.isArray(body.data.entries)).toBe(true);
+      expect(body.data.entries).toHaveLength(0);
+      expect(body.data.photo).toBeNull();
     });
 
     it("有今日精选时 data 应为 DailyPick 对象，包含所有规定字段", async () => {

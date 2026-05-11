@@ -111,7 +111,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo；扫描结束后调用 `detectBursts` 识别连拍组（时间窗口 ≤3s + dHash 汉明距离 ≤10），写入 `bursts` 表并标记每组代表
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）；分析完成后调用 `calibrateBurstRepresentative` 在组内竞争代表位（选评分最高者）
-- 精选流程 (`daily-selection.ts`): 三阶段流水线 — 阶段1 用文本模型从历史上今天的已分析照片中评选最佳（评分+标题+理由，候选池天然只见每组连拍代表）→ 阶段2 用视觉模型为胜出照片生成叙事文案 → 阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，含照片+标题+叙事文案）落盘，路径写入 `dailyPicks.composedImagePath` → 写入 dailyPicks（pickDate 唯一约束，幂等覆盖）
+- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — 从候选池选出 20 张精选照片，pLimit 并发（`DAILY_SELECTION_CONCURRENCY` 默认 2）为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段
@@ -128,7 +128,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `index.ts` — 工厂函数 `createStorageAdapter(type)`，目前仅实现 local，SMB/WebDAV 待扩展
 
 **数据库** (`src/db/`):
-- `schema.ts` — Drizzle SQLite schema: storageSources, photos（含 burstId/isBurstRepresentative/burstRank 三列）, tags, photoTags (复合主键), photoAnalyses (JSON 列存储复杂分析), dailyPicks, scanLogs, settings (key-value), **bursts**（连拍组：id, representativeId, memberCount, detectedAt）
+- `schema.ts` — Drizzle SQLite schema: storageSources, photos（含 burstId/isBurstRepresentative/burstRank 三列）, tags, photoTags (复合主键), photoAnalyses (JSON 列存储复杂分析), dailyPicks, scanLogs, settings (key-value), **bursts**（连拍组：id, representativeId, memberCount, detectedAt）, **dailyPickEntries**（每日精选条目：id, dailyPickId, rank, photoId, title, narrative, score, members JSON, createdAt；UNIQUE(dailyPickId, rank) + idx_dpe_pick_rank 索引）
 - `index.ts` — better-sqlite3 初始化，WAL 模式，外键开启
 
 **配置** (`src/lib/config.ts`): 所有环境变量集中管理，带默认值。AI 服务默认 `http://127.0.0.1:8001/v1`（本地部署的 qwen 兼容服务）。
@@ -154,7 +154,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Next.js 15 App Router，Tailwind CSS v4，组件使用 `@/components/ui/` 下的 Radix UI 封装
 - **客户端 API**: `lib/api.ts` — 浏览器端 fetch 包装，`NEXT_PUBLIC_API_URL` 指向后端
 - **服务端 API**: `lib/admin-data.ts` — RSC 中 `serverFetch<T>()`，`cache: "no-store"` 保证数据实时
-- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日精选照片+叙事文案), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
+- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日 20 张精选 entries，左大图+右叙事+底部缩略图栅格，支持 ?entry=N URL 同步/键盘 ←/→ 切换/aria-selected；entries=[] 时回退 HeroContentLegacy 旧版布局), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
 - **管理后台**: `/admin` 仪表盘 + `/admin/photos` + `/admin/queues` + `/admin/health` 子页面
 
 ### 数据流
@@ -171,16 +171,19 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                         daily-selection job (每天早 6:00 定时)
                                     ↓
-                   阶段1: 文本模型评选 (从历史上今天照片中选最佳)
+                   候选池: 4 源混采 + 跨表去重 (daily_picks ∪ daily_pick_entries.members)
                                     ↓
-                   阶段2: 视觉模型叙事 (为胜出照片生成叙事文案)
+                   pLimit 并发: 20 张 entries 各自 narrate(vision) + select members(text)
                                     ↓
-                   阶段3: Satori 合成杂志版壁纸 (5K 16:9 JPEG 落盘)
+                   db.transaction: DELETE + bulk INSERT dailyPickEntries (幂等)
+                          entries[0] 同步写 dailyPicks 主记录
+                                    ↓
+                   阶段3: Satori 合成杂志版壁纸 (5K 16:9 JPEG 落盘, 基于 entries[0])
                           composedImagePath 写入 dailyPicks
                                     ↓
-                          每日精选 → dailyPicks (pickDate 唯一)
+                   API: GET /api/daily/today → DailyPick { entries: DailyPickEntry[] }
                                     ↓
-                         前端首页 DailyHero 组件展示
+                   前端首页 DailyHero: 20 缩略图栅格 + 左大图/右叙事 + series strip
                                     ↓
               mac App: GET /api/daily/:pickDate/wallpaper?width=&height=
                        (按屏幕尺寸实时合成/缓存命中直接返回，设为系统壁纸)

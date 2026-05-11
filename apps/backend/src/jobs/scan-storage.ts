@@ -206,6 +206,21 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       durationSec: number | null;
       videoCodec: string | null;
       videoFps: number | null;
+      // GPS + 完整 EXIF meta（14 列，全部 nullable）
+      latitude: number | null;
+      longitude: number | null;
+      altitude: number | null;
+      gpsImgDirection: number | null;
+      offsetTime: string | null;
+      cameraMake: string | null;
+      cameraModel: string | null;
+      lensModel: string | null;
+      focalLength: number | null;
+      focalLength35mm: number | null;
+      iso: number | null;
+      exposureTime: number | null;
+      fNumber: number | null;
+      software: string | null;
     }
     const photoRecords: NewPhotoRecord[] = [];
 
@@ -229,6 +244,21 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           durationSec: metadata.durationSec ?? null,
           videoCodec: metadata.videoCodec ?? null,
           videoFps: metadata.videoFps ?? null,
+          // GPS + 完整 EXIF meta（14 列）
+          latitude: metadata.latitude ?? null,
+          longitude: metadata.longitude ?? null,
+          altitude: metadata.altitude ?? null,
+          gpsImgDirection: metadata.gpsImgDirection ?? null,
+          offsetTime: metadata.offsetTime ?? null,
+          cameraMake: metadata.cameraMake ?? null,
+          cameraModel: metadata.cameraModel ?? null,
+          lensModel: metadata.lensModel ?? null,
+          focalLength: metadata.focalLength ?? null,
+          focalLength35mm: metadata.focalLength35mm ?? null,
+          iso: metadata.iso ?? null,
+          exposureTime: metadata.exposureTime ?? null,
+          fNumber: metadata.fNumber ?? null,
+          software: metadata.software ?? null,
         });
       } catch (err) {
         errorCount++;

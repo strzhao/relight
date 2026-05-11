@@ -8,7 +8,7 @@ import type Database from "better-sqlite3";
  * 本 helper 让所有需要真实 SQLite 的测试用同一份 DDL，schema.ts 加列时只改这里。
  *
  * 包含表：storage_sources / bursts / photos / tags / photo_tags / photo_analyses /
- *        daily_picks / scan_logs / analyze_batches / analyze_batch_jobs / settings
+ *        daily_picks / daily_pick_entries / scan_logs / analyze_batches / analyze_batch_jobs / settings
  */
 export interface SetupOptions {
   /**
@@ -62,6 +62,23 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       burst_id TEXT,
       is_burst_representative INTEGER NOT NULL DEFAULT 0,
       phash TEXT,
+      -- GPS + 完整 EXIF meta（14 列，全部 nullable）
+      latitude REAL,
+      longitude REAL,
+      altitude REAL,
+      gps_img_direction REAL,
+      offset_time TEXT,
+      camera_make TEXT,
+      camera_model TEXT,
+      lens_model TEXT,
+      focal_length REAL,
+      focal_length_35mm INTEGER,
+      iso INTEGER,
+      exposure_time REAL,
+      f_number REAL,
+      software TEXT,
+      -- 回填幂等标记
+      exif_backfilled_at INTEGER,
       UNIQUE(storage_source_id, file_path)
     );
     CREATE INDEX IF NOT EXISTS idx_photos_created_at ON photos(created_at);
@@ -115,6 +132,20 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       members TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS daily_pick_entries (
+      id TEXT PRIMARY KEY,
+      daily_pick_id TEXT NOT NULL REFERENCES daily_picks(id) ON DELETE CASCADE,
+      rank INTEGER NOT NULL,
+      photo_id TEXT NOT NULL REFERENCES photos(id),
+      title TEXT NOT NULL,
+      narrative TEXT NOT NULL,
+      score REAL NOT NULL DEFAULT 0,
+      members TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      UNIQUE(daily_pick_id, rank)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dpe_pick_rank ON daily_pick_entries(daily_pick_id, rank);
 
     CREATE TABLE IF NOT EXISTS scan_logs (
       id TEXT PRIMARY KEY,

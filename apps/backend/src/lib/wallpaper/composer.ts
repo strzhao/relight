@@ -60,7 +60,7 @@ async function loadFonts(): Promise<FontData[]> {
 }
 
 export async function composeWallpaper(
-  pick: DailyPick,
+  pick: Omit<DailyPick, "entries">,
   photo: Photo,
   width: number,
   height: number,
@@ -123,7 +123,7 @@ export async function composeWallpaper(
 }
 
 export interface ComposeAndSaveOpts {
-  pick: DailyPick;
+  pick: Omit<DailyPick, "entries">;
   photo: Photo;
   width: number;
   height: number;

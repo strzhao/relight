@@ -2,22 +2,22 @@
  * 候选池构造：4 源平等加权混采 + 久远度加权 + 30 天去重
  *
  * 架构：
- * - 4 个独立子查询（historyToday / sameMonth / sameSeason / agedRandom），每源取 K=8 张
+ * - 4 个独立子查询（historyToday / sameMonth / sameSeason / agedRandom），每源取 K=maxN 张
  * - per-source quota：每源保底 3 张 + 剩余 8 槽按 weightedScore 抢占
  * - 合并去重后截前 20 张
+ *
+ * 注：K_PER_SOURCE 设为 maxN（而非固定 8），确保当候选只集中在 1-2 个源时
+ * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
  */
 
 import { and, desc, gte, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
+import { type ClusteredCandidate, clusterByDirnameAndTime } from "./cluster";
 
-/** 每源最大取回条数 */
-const K_PER_SOURCE = 8;
-/** 全局最大候选数 */
-const MAX_N = 20;
+/** 全局最大候选数（质量优化：从 20 降到 12，避免低分照片摊薄整体质感 + 减 40% AI narrate 调用）*/
+const MAX_N = 12;
 /** 每源保底席位 */
 const QUOTA_PER_SOURCE = 3;
-/** 抢占池席位 */
-const CONTEST_SLOTS = 8;
 
 /** 4 个候选源标识 */
 export type CandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom";
@@ -40,6 +40,12 @@ export interface EnrichedCandidate {
   thumbnailPath: string | null;
   /** 存储源类型（用于阶段 2 读文件） */
   sourceType: "local" | "smb" | "webdav";
+  /** GPS 纬度（用于 cluster GPS 谓词） */
+  latitude: number | null;
+  /** GPS 经度（用于 cluster GPS 谓词） */
+  longitude: number | null;
+  /** 时区偏移，如 "+08:00"（用于 narrate 注入） */
+  offsetTime: string | null;
 }
 
 /**
@@ -58,22 +64,51 @@ export function ageWeightMultiplier(yearsAgo: number): number {
 
 /**
  * 获取最近 daysBack 天精选过的 photoId 集合（含 hero + members）
+ *
+ * 同时扫描两个表：
+ * 1. daily_picks（旧格式：hero photoId + members JSON 列）
+ * 2. daily_pick_entries（新格式：每行一个 entry 的 photo_id + members JSON 列）
+ * 保证 19/20 entry 照片次日不会被重复入选。
  */
 export async function getRecentPickedPhotoIds(daysBack = 30): Promise<Set<string>> {
   const cutoff = new Date(Date.now() - daysBack * 86400_000).toISOString().slice(0, 10);
-  const rows = await db
+
+  // 扫描 daily_picks（旧格式）
+  const pickRows = await db
     .select({ photoId: schema.dailyPicks.photoId, members: schema.dailyPicks.members })
     .from(schema.dailyPicks)
     .where(gte(schema.dailyPicks.pickDate, cutoff));
 
   const ids = new Set<string>();
-  for (const r of rows) {
+  for (const r of pickRows) {
     ids.add(r.photoId);
     const memberList = (r.members as { photoId: string }[] | null) ?? [];
     for (const m of memberList) {
       ids.add(m.photoId);
     }
   }
+
+  // 扫描 daily_pick_entries（新格式），通过 JOIN daily_picks 过滤日期
+  const entryRows = await db
+    .select({
+      photoId: schema.dailyPickEntries.photoId,
+      members: schema.dailyPickEntries.members,
+    })
+    .from(schema.dailyPickEntries)
+    .innerJoin(
+      schema.dailyPicks,
+      sql`${schema.dailyPicks.id} = ${schema.dailyPickEntries.dailyPickId}`,
+    )
+    .where(gte(schema.dailyPicks.pickDate, cutoff));
+
+  for (const r of entryRows) {
+    ids.add(r.photoId);
+    const memberList = (r.members as { photoId: string }[] | null) ?? [];
+    for (const m of memberList) {
+      ids.add(m.photoId);
+    }
+  }
+
   return ids;
 }
 
@@ -122,41 +157,28 @@ function calcYearsAgo(takenAt: string | null, currentYear: number): number {
   }
 }
 
-/** 通用子查询结构 */
-interface RawCandidate {
-  photoId: string;
-  filePath: string;
-  takenAt: string | null;
-  mediaType: "image" | "video";
-  durationSec: number | null;
-  aestheticScore: number | null;
-  narrative: string | null;
-  emotionalAnalysis: unknown | null;
-  tags: unknown | null;
-  thumbnailPath: string | null;
-  sourceType: "local" | "smb" | "webdav";
-}
-
 /**
- * 构造候选池（4 源平等混采 + per-source quota）
+ * 构造候选池（4 源平等混采 + per-source quota + 主题去重聚类）
+ *
+ * 流程：
+ *   1. 4 源各取 K=maxN 张
+ *   2. dedupAndQuotaMerge 做去重 + per-source quota（不截断 maxN）
+ *   3. clusterByDirnameAndTime 做主题去重，每簇只保留代表
+ *   4. 截前 maxN（聚类后簇数 < maxN 时直接接受 N<20，不做 K 回退）
  */
 export async function buildCandidatePool(
   options: BuildCandidatePoolOptions = {},
-): Promise<EnrichedCandidate[]> {
+): Promise<ClusteredCandidate[]> {
   const { now = new Date(), excludeIds = new Set<string>(), maxN = MAX_N } = options;
+  // 每源取回数 = maxN，确保即使只有 1-2 个活跃源也能满足最终 maxN 张的需求
+  const K_PER_SOURCE = maxN;
   const { year, month, day, monthDay, seasonMonths } = getBeijingDateInfo(now);
   const currentYear = year;
   const twoYearsAgo = new Date(now.getTime() - 2 * 365.25 * 86400_000).toISOString();
 
-  // ---- 子查询辅助 ----
-  async function query(
-    whereClause: Parameters<typeof db.select>[0] extends never ? never : unknown,
-    source: CandidateSource,
-    _extraSort?: boolean,
-  ): Promise<RawCandidate[]> {
-    // 使用 drizzle 查询
-    return [];
-  }
+  // 连拍去重：同一组连拍只让代表进入候选池，避免 K=8 被一组连拍占满。
+  // 与 routes/photos.ts:39 的列表过滤保持一致。
+  const burstRepOnly = sql`(${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`;
 
   // ---- 4 个独立子查询 ----
 
@@ -174,6 +196,9 @@ export async function buildCandidatePool(
       tags: schema.photoAnalyses.tags,
       thumbnailPath: schema.photos.thumbnailPath,
       sourceType: schema.storageSources.type,
+      latitude: schema.photos.latitude,
+      longitude: schema.photos.longitude,
+      offsetTime: schema.photos.offsetTime,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -185,6 +210,7 @@ export async function buildCandidatePool(
       and(
         sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}`,
         sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+        burstRepOnly,
       ),
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -204,6 +230,9 @@ export async function buildCandidatePool(
       tags: schema.photoAnalyses.tags,
       thumbnailPath: schema.photos.thumbnailPath,
       sourceType: schema.storageSources.type,
+      latitude: schema.photos.latitude,
+      longitude: schema.photos.longitude,
+      offsetTime: schema.photos.offsetTime,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -216,6 +245,7 @@ export async function buildCandidatePool(
         sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${month}`,
         sql`strftime('%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) != ${day}`,
         sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+        burstRepOnly,
       ),
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -240,6 +270,9 @@ export async function buildCandidatePool(
         tags: schema.photoAnalyses.tags,
         thumbnailPath: schema.photos.thumbnailPath,
         sourceType: schema.storageSources.type,
+        latitude: schema.photos.latitude,
+        longitude: schema.photos.longitude,
+        offsetTime: schema.photos.offsetTime,
       })
       .from(schema.photos)
       .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -251,6 +284,7 @@ export async function buildCandidatePool(
         and(
           sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) IN (${sql.raw(monthsInClause)})`,
           sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+          burstRepOnly,
         ),
       )
       .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -271,6 +305,9 @@ export async function buildCandidatePool(
       tags: schema.photoAnalyses.tags,
       thumbnailPath: schema.photos.thumbnailPath,
       sourceType: schema.storageSources.type,
+      latitude: schema.photos.latitude,
+      longitude: schema.photos.longitude,
+      offsetTime: schema.photos.offsetTime,
     })
     .from(schema.photos)
     .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
@@ -279,7 +316,13 @@ export async function buildCandidatePool(
       sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
     )
     .where(
-      lt(sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`, sql`${twoYearsAgo}`),
+      and(
+        lt(
+          sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`,
+          sql`${twoYearsAgo}`,
+        ),
+        burstRepOnly,
+      ),
     )
     .orderBy(
       desc(sql`(COALESCE(${schema.photoAnalyses.aestheticScore}, 5.0) + ABS(RANDOM() % 3)) / 1.0`),
@@ -308,6 +351,9 @@ export async function buildCandidatePool(
           tags: r.tags,
           thumbnailPath: r.thumbnailPath,
           sourceType: r.sourceType,
+          latitude: r.latitude ?? null,
+          longitude: r.longitude ?? null,
+          offsetTime: r.offsetTime ?? null,
         };
       });
   }
@@ -317,15 +363,34 @@ export async function buildCandidatePool(
   const sameSeason = toEnriched(sameSeasonRows, "sameSeason");
   const agedRandom = toEnriched(agedRandomRows, "agedRandom");
 
-  // ---- per-source quota 合并 ----
-  return dedupAndQuotaMerge({ historyToday, sameMonth, sameSeason, agedRandom }, maxN);
+  // ---- per-source quota 合并（不截断）----
+  // 按设计文档要求："merged.slice(0, maxN) 这一截断需要在聚类之后做，
+  // 因为聚类前 80 张可能聚成 < 20 簇"。这里把 dedupAndQuotaMerge 的
+  // maxN 放大到 4*maxN（即 4 源池总上限），让 quota 合并保留全部
+  // 去重后的候选；最终截断推迟到聚类后做。
+  //
+  // 副作用：聚类后按 weightedScore desc 全局取前 maxN，不再保证
+  // "每源在最终结果里保底 3 张"——quota 仅作为聚类前中间池的相对
+  // 顺序锚点存在。这是文档"接受 N<20、不做 K 回退"的直接推论。
+  const expandedMax = maxN * 4;
+  const merged = dedupAndQuotaMerge(
+    { historyToday, sameMonth, sameSeason, agedRandom },
+    expandedMax,
+  );
+
+  // ---- 主题去重聚类（dirname + 时间窗）----
+  // 簇数 < maxN 时直接接受 N<maxN（保护 4 源等比混采契约，不做 K 回退）
+  const clustered = clusterByDirnameAndTime(merged);
+  return clustered.slice(0, maxN);
 }
 
 /**
  * per-source quota 合并：
  * - 每源保底 QUOTA_PER_SOURCE 张（按 weightedScore 取前 3）
- * - 剩余 CONTEST_SLOTS 槽按 weightedScore 全局抢占（来自所有源的非保底候选）
+ * - 剩余槽按 weightedScore 全局抢占（来自所有源的非保底候选），上限 = maxN
  * - 合并 → 同 photoId 去重（保留先出现者）→ 截前 maxN
+ *
+ * 注：抢占池上限设为 maxN（而非固定 8），确保活跃源少时仍能填满 maxN 个唯一候选。
  */
 export function dedupAndQuotaMerge(
   bySource: Record<CandidateSource, EnrichedCandidate[]>,
@@ -351,6 +416,8 @@ export function dedupAndQuotaMerge(
   }
 
   // 抢占池：所有源中未进入保底的候选
+  // 抢占席位 = maxN - 已有保底席位数，确保 quota + contest = maxN（保底不浪费）
+  const contestSlots = Math.max(0, maxN - quotaItems.length);
   const contestPool: EnrichedCandidate[] = [];
   for (const src of sources) {
     for (const item of bySource[src].slice(QUOTA_PER_SOURCE)) {
@@ -363,7 +430,7 @@ export function dedupAndQuotaMerge(
   const contestWinners: EnrichedCandidate[] = [];
   const contestIds = new Set<string>(quotaIds);
   for (const item of contestPool) {
-    if (contestWinners.length >= CONTEST_SLOTS) break;
+    if (contestWinners.length >= contestSlots) break;
     if (!contestIds.has(item.photoId)) {
       contestIds.add(item.photoId);
       contestWinners.push(item);

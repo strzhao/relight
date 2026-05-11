@@ -314,19 +314,47 @@ describe("LocalFilesystemAdapter — 验收测试（设计文档修复 1+2）", 
       expect(meta2.height).toBe(200);
     });
 
-    it("getMetadata 返回的对象不应包含 width/height 以外的意外字段", async () => {
+    it("getMetadata 返回的对象应包含 width/height 及 EXIF 元数据字段", async () => {
       const jpeg = await createTestImage(50, 50, "jpeg");
       const filePath = await createTempFile("meta-keys.jpg", jpeg);
       const meta = await adapter.getMetadata(filePath);
 
-      // 应仅包含 width, height, takenAt (可选)
+      // 应包含核心尺寸字段
       const keys = Object.keys(meta);
       expect(keys).toContain("width");
       expect(keys).toContain("height");
-      // takenAt 可能存在也可能不存在
+      // takenAt 可能存在也可能不存在（mtime fallback）
+      // 新增 EXIF meta 字段（14 列），测试图片可能无 GPS 数据（值为 null），但 key 应存在
+      const allowedKeys = new Set([
+        "width",
+        "height",
+        "takenAt",
+        "latitude",
+        "longitude",
+        "altitude",
+        "gpsImgDirection",
+        "offsetTime",
+        "cameraMake",
+        "cameraModel",
+        "lensModel",
+        "focalLength",
+        "focalLength35mm",
+        "iso",
+        "exposureTime",
+        "fNumber",
+        "software",
+        // 视频字段（图片路径不设置，但 interface 兼容）
+        "mediaType",
+        "durationSec",
+        "videoCodec",
+        "videoFps",
+      ]);
       for (const key of keys) {
-        expect(["width", "height", "takenAt"]).toContain(key);
+        expect(allowedKeys.has(key)).toBe(true);
       }
+      // 新增 EXIF 字段应存在于返回对象中（无 GPS 时值为 null）
+      expect(keys).toContain("latitude");
+      expect(keys).toContain("longitude");
     });
   });
 

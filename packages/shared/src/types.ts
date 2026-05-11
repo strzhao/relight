@@ -119,6 +119,17 @@ export interface DailyPickMember {
   photo?: Photo;
 }
 
+/** 每日精选单条入选记录（对应 daily_pick_entries 表行） */
+export interface DailyPickEntry {
+  rank: number;
+  photoId: string;
+  title: string;
+  narrative: string;
+  score: number;
+  photo: Photo;
+  members: (DailyPickMember & { photo: Photo })[];
+}
+
 /** 每日精选 */
 export interface DailyPick {
   id: string;
@@ -132,6 +143,12 @@ export interface DailyPick {
   photo?: Photo;
   /** 关联兄弟照片，最多 8 张，可能为空数组 */
   members: DailyPickMember[];
+  /**
+   * 今日所有入选照片（最多 20 张），按 rank ASC 排序。
+   * GET /api/daily/today 和 GET /api/daily/:pickDate 响应中始终存在（可为空数组）。
+   * 契约要求必填；非 API 路径（如 wallpaper composer）使用 Omit<DailyPick, 'entries'>。
+   */
+  entries: DailyPickEntry[];
 }
 
 /** 存储源可达性状态 */

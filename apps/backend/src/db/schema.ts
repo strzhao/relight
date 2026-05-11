@@ -1,3 +1,4 @@
+import type { DailyPickMember } from "@relight/shared";
 import { relations, sql } from "drizzle-orm";
 import {
   index,
@@ -72,6 +73,23 @@ export const photos = sqliteTable(
       .notNull()
       .default(false),
     phash: text("phash"), // 64-bit dHash 十六进制（16 chars）
+    // GPS + 完整 EXIF meta（14 列，全部 nullable）
+    latitude: real("latitude"),
+    longitude: real("longitude"),
+    altitude: real("altitude"),
+    gpsImgDirection: real("gps_img_direction"),
+    offsetTime: text("offset_time"),
+    cameraMake: text("camera_make"),
+    cameraModel: text("camera_model"),
+    lensModel: text("lens_model"),
+    focalLength: real("focal_length"),
+    focalLength35mm: integer("focal_length_35mm"),
+    iso: integer("iso"),
+    exposureTime: real("exposure_time"),
+    fNumber: real("f_number"),
+    software: text("software"),
+    // 回填幂等标记（仅回填 CLI 写，scan-storage 走新增 photo 路径不写）
+    exifBackfilledAt: integer("exif_backfilled_at"),
   },
   (t) => ({
     unq_storage_file: unique().on(t.storageSourceId, t.filePath),
@@ -185,6 +203,35 @@ export const dailyPicks = sqliteTable("daily_picks", {
   createdAt: text("created_at").notNull(),
 });
 
+/** 每日精选入选明细（一条精选 20 张） */
+export const dailyPickEntries = sqliteTable(
+  "daily_pick_entries",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    dailyPickId: text("daily_pick_id")
+      .notNull()
+      .references(() => dailyPicks.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    photoId: text("photo_id")
+      .notNull()
+      .references(() => photos.id),
+    title: text("title").notNull(),
+    narrative: text("narrative").notNull(),
+    score: real("score").notNull().default(0),
+    members: text("members", { mode: "json" })
+      .$type<DailyPickMember[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    uniqRank: unique().on(t.dailyPickId, t.rank),
+    pickIdx: index("idx_dpe_pick_rank").on(t.dailyPickId, t.rank),
+  }),
+);
+
 /** 扫描日志 */
 export const scanLogs = sqliteTable("scan_logs", {
   id: text("id")
@@ -280,9 +327,21 @@ export const photoAnalysesRelations = relations(photoAnalyses, ({ one }) => ({
   }),
 }));
 
-export const dailyPicksRelations = relations(dailyPicks, ({ one }) => ({
+export const dailyPicksRelations = relations(dailyPicks, ({ one, many }) => ({
   photo: one(photos, {
     fields: [dailyPicks.photoId],
+    references: [photos.id],
+  }),
+  entries: many(dailyPickEntries),
+}));
+
+export const dailyPickEntriesRelations = relations(dailyPickEntries, ({ one }) => ({
+  dailyPick: one(dailyPicks, {
+    fields: [dailyPickEntries.dailyPickId],
+    references: [dailyPicks.id],
+  }),
+  photo: one(photos, {
+    fields: [dailyPickEntries.photoId],
     references: [photos.id],
   }),
 }));

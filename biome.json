@@ -53,11 +53,22 @@
       }
     },
     {
-      "include": ["apps/web/components/banner-carousel.tsx"],
+      "include": ["apps/web/components/daily-hero.tsx"],
       "linter": {
         "rules": {
           "a11y": {
-            "useSemanticElements": "off"
+            "useSemanticElements": "off",
+            "useFocusableInteractive": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["apps/web/e2e/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
           }
         }
       }

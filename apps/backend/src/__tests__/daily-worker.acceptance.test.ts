@@ -145,6 +145,17 @@ const mockSchema = vi.hoisted(() => ({
     members: "dailyPicks.members",
     createdAt: "dailyPicks.created_at",
   },
+  dailyPickEntries: {
+    id: "dailyPickEntries.id",
+    dailyPickId: "dailyPickEntries.daily_pick_id",
+    rank: "dailyPickEntries.rank",
+    photoId: "dailyPickEntries.photo_id",
+    title: "dailyPickEntries.title",
+    narrative: "dailyPickEntries.narrative",
+    score: "dailyPickEntries.score",
+    members: "dailyPickEntries.members",
+    createdAt: "dailyPickEntries.created_at",
+  },
 }));
 
 vi.mock("../db", () => ({
@@ -336,19 +347,21 @@ function setupCandidates(candidates: unknown[]) {
   });
 
   mockDb.select
-    // #1: getRecentPickedPhotoIds
+    // #1: getRecentPickedPhotoIds — dailyPicks 扫描（旧格式）
     .mockReturnValueOnce(chainableMock([]))
-    // #2: historyToday → 承载所有候选
+    // #2: getRecentPickedPhotoIds — dailyPickEntries 扫描（新格式）
+    .mockReturnValueOnce(chainableMock([]))
+    // #3: historyToday → 承载所有候选
     .mockReturnValueOnce(chainableMock(dbRows))
-    // #3: sameMonth → 空
+    // #4: sameMonth → 空
     .mockReturnValueOnce(chainableMock([]))
-    // #4: sameSeason → 空（可能不被调用，取决于当前月份）
+    // #5: sameSeason → 空（可能不被调用，取决于当前月份）
     .mockReturnValueOnce(chainableMock([]))
-    // #5: agedRandom → 空
+    // #6: agedRandom → 空
     .mockReturnValueOnce(chainableMock([]))
-    // #6: buildRelatedPool（如果执行到这里）→ 空
+    // #7: buildRelatedPool（如果执行到这里）→ 空
     .mockReturnValueOnce(chainableMock([]))
-    // #7: 视频 narrate 的 analysis 查询（如果是视频 hero）→ 空
+    // #8: 视频 narrate 的 analysis 查询（如果是视频 hero）→ 空
     .mockReturnValueOnce(chainableMock([]));
 }
 
@@ -455,15 +468,15 @@ describe("每日精选 Worker — 两阶段 AI 流水线（验收测试）", () 
   // =========================================================================
 
   describe("阶段 1：AI 精选（selectPrompt）", () => {
-    it("应将候选分析摘要传给 aiClient.chat", async () => {
+    it("应为每张候选调用 aiClient.analyzePhoto（新版：并行 narrate 所有候选）", async () => {
       const candidates = makeCandidates(5);
       setupCandidates(candidates);
 
       const job = createMockJob();
       await dailySelectionWorker(job);
 
-      expect(mockAIChat).toHaveBeenCalled();
-      // chat 的 messages 应包含候选摘要信息
+      // 新版多 entry 流水线：每张候选都会调用 analyzePhoto 做 narrate
+      expect(mockAIAnalyzePhoto).toHaveBeenCalled();
     });
 
     it("AI 返回 selectedIndex 后应选中对应照片", async () => {
