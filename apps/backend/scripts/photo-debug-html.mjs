@@ -1,12 +1,12 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 /**
  * 生成 photo 调试页面：原图大图 + 所有 face bbox 框 + 序号标签 + 每个 face 当前归属信息。
  *
  * Usage: node scripts/photo-debug-html.mjs <photo_id> [out.html]
  */
 import Database from "better-sqlite3";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import sharp from "sharp";
 
 const photoId = process.argv[2];
@@ -19,40 +19,62 @@ const dbPath = process.env.DATABASE_PATH ?? "./data/relight.db";
 const apiBase = process.env.API_BASE ?? "http://localhost:3000";
 
 const db = new Database(dbPath, { readonly: true });
-const photo = db.prepare(`SELECT * FROM photos WHERE id = ?`).get(photoId);
+const photo = db.prepare("SELECT * FROM photos WHERE id = ?").get(photoId);
 if (!photo) {
   console.error(`photo ${photoId} not found`);
   process.exit(1);
 }
 
 const faces = db
-  .prepare(`SELECT id, person_id, bbox_x, bbox_y, bbox_w, bbox_h, detection_score, embedding, attributes FROM faces WHERE photo_id = ? ORDER BY bbox_x ASC, bbox_y ASC`)
+  .prepare(
+    "SELECT id, person_id, bbox_x, bbox_y, bbox_w, bbox_h, detection_score, embedding, attributes FROM faces WHERE photo_id = ? ORDER BY bbox_x ASC, bbox_y ASC",
+  )
   .all(photoId);
 
 // 属性 emoji 映射（与 face-debug-html.mjs 保持一致）
 function renderAttrBadge(attr) {
   if (!attr) return "";
   const ageBandEmoji = {
-    infant: "👶", child: "🧒", teen: "🧑", young_adult: "🙂",
-    middle_aged: "👨", senior: "👴", unknown: "❓",
+    infant: "👶",
+    child: "🧒",
+    teen: "🧑",
+    young_adult: "🙂",
+    middle_aged: "👨",
+    senior: "👴",
+    unknown: "❓",
   };
   const genderEmoji = { male: "♂️", female: "♀️", unknown: "" };
   const glassesEmoji = { none: "", normal: "👓", sunglasses: "🕶️", unknown: "" };
   const facialHairEmoji = { none: "", stubble: "🧔", beard: "🧔", moustache: "🧔", unknown: "" };
   const expressionEmoji = {
-    neutral: "😐", smile: "🙂", laugh: "😄", sad: "😢", surprised: "😲", unknown: "",
+    neutral: "😐",
+    smile: "🙂",
+    laugh: "😄",
+    sad: "😢",
+    surprised: "😲",
+    unknown: "",
   };
   const ageBandLabel = {
-    infant: "婴儿", child: "儿童", teen: "青少年", young_adult: "青年",
-    middle_aged: "中年", senior: "老年", unknown: "?",
+    infant: "婴儿",
+    child: "儿童",
+    teen: "青少年",
+    young_adult: "青年",
+    middle_aged: "中年",
+    senior: "老年",
+    unknown: "?",
   };
 
   const parts = [];
-  parts.push(`${ageBandEmoji[attr.age_band] ?? "❓"}${ageBandLabel[attr.age_band] ?? attr.age_band}`);
+  parts.push(
+    `${ageBandEmoji[attr.age_band] ?? "❓"}${ageBandLabel[attr.age_band] ?? attr.age_band}`,
+  );
   if (attr.gender && attr.gender !== "unknown") parts.push(genderEmoji[attr.gender] ?? "");
-  if (attr.glasses && attr.glasses !== "none" && attr.glasses !== "unknown") parts.push(glassesEmoji[attr.glasses] ?? "");
-  if (attr.facial_hair && attr.facial_hair !== "none" && attr.facial_hair !== "unknown") parts.push(facialHairEmoji[attr.facial_hair] ?? "");
-  if (attr.expression && attr.expression !== "unknown") parts.push(expressionEmoji[attr.expression] ?? "");
+  if (attr.glasses && attr.glasses !== "none" && attr.glasses !== "unknown")
+    parts.push(glassesEmoji[attr.glasses] ?? "");
+  if (attr.facial_hair && attr.facial_hair !== "none" && attr.facial_hair !== "unknown")
+    parts.push(facialHairEmoji[attr.facial_hair] ?? "");
+  if (attr.expression && attr.expression !== "unknown")
+    parts.push(expressionEmoji[attr.expression] ?? "");
   return parts.filter(Boolean).join(" ");
 }
 
@@ -61,14 +83,22 @@ function decodeEmbedding(b64) {
   return new Float32Array(new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4));
 }
 function cosine(a, b) {
-  let d = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] ** 2; nb += b[i] ** 2; }
+  let d = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    d += a[i] * b[i];
+    na += a[i] ** 2;
+    nb += b[i] ** 2;
+  }
   return d / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
 // 拉所有 person centroid，算每个 face 对 top-3 person 的 sim
 const persons = db
-  .prepare(`SELECT id, name, nickname, member_count, centroid_embedding FROM persons WHERE storage_source_id = ?`)
+  .prepare(
+    "SELECT id, name, nickname, member_count, centroid_embedding FROM persons WHERE storage_source_id = ?",
+  )
   .all(photo.storage_source_id);
 
 const facesEnriched = faces.map((f, i) => {
@@ -82,7 +112,11 @@ const facesEnriched = faces.map((f, i) => {
   sims.sort((a, b) => b.sim - a.sim);
   let parsedAttr = null;
   if (f.attributes) {
-    try { parsedAttr = JSON.parse(f.attributes); } catch { parsedAttr = null; }
+    try {
+      parsedAttr = JSON.parse(f.attributes);
+    } catch {
+      parsedAttr = null;
+    }
   }
   return { ...f, idx: i + 1, top: sims.slice(0, 3), parsedAttr };
 });
@@ -159,7 +193,8 @@ const html = `<!doctype html>
     <h1>photo ${photoId.slice(0, 8)} — ${faces.length} faces</h1>
     <div class="photo-meta">${photo.file_path.split("/").slice(-2).join("/")}<br>${w} × ${h} px</div>
     ${facesEnriched
-      .map((f) => `<div class="face-card">
+      .map(
+        (f) => `<div class="face-card">
       <h2><span class="num">${f.idx}</span> face ${f.id.slice(0, 8)}</h2>
       <div class="attr-bar">${renderAttrBadge(f.parsedAttr) || '<span style="color:#555">无属性</span>'}</div>
       <div class="meta">score=${f.detection_score.toFixed(2)} bbox=${Math.round(f.bbox_w)}×${Math.round(f.bbox_h)}px</div>
@@ -168,7 +203,8 @@ const html = `<!doctype html>
         <strong style="font-size:11px;color:#888">top-3 相似 person:</strong>
         ${f.top.map((p) => `<div class="${p.id === f.person_id ? "current" : ""}"><span class="name">${p.name}</span> <span class="sim">${p.sim.toFixed(3)}</span> <span style="color:#666">(${p.mc} 张)</span></div>`).join("")}
       </div>
-    </div>`)
+    </div>`,
+      )
       .join("")}
   </aside>
 </div>

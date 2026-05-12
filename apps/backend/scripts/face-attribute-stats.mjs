@@ -17,7 +17,9 @@ const db = new Database(dbPath, { readonly: true });
 const totalRow = db.prepare("SELECT COUNT(*) as cnt FROM faces").get();
 const total = totalRow.cnt;
 
-const withAttrRow = db.prepare("SELECT COUNT(*) as cnt FROM faces WHERE attributes IS NOT NULL").get();
+const withAttrRow = db
+  .prepare("SELECT COUNT(*) as cnt FROM faces WHERE attributes IS NOT NULL")
+  .get();
 const withAttr = withAttrRow.cnt;
 
 console.log("=== face-attribute-stats ===");
@@ -33,9 +35,7 @@ if (withAttr === 0) {
 }
 
 // 拉出所有属性行
-const attrRows = db
-  .prepare("SELECT attributes FROM faces WHERE attributes IS NOT NULL")
-  .all();
+const attrRows = db.prepare("SELECT attributes FROM faces WHERE attributes IS NOT NULL").all();
 
 const genderCount = {};
 const ageBandCount = {};
@@ -68,7 +68,7 @@ const genderOrder = ["male", "female", "unknown"];
 for (const g of genderOrder) {
   const cnt = genderCount[g] ?? 0;
   const pct = withAttr > 0 ? ((cnt / withAttr) * 100).toFixed(1) : "0";
-  const bar = "█".repeat(Math.round(cnt / withAttr * 30));
+  const bar = "█".repeat(Math.round((cnt / withAttr) * 30));
   console.log(`  ${g.padEnd(12)} ${String(cnt).padStart(6)} (${pct.padStart(5)}%)  ${bar}`);
 }
 
@@ -77,14 +77,19 @@ console.log("");
 console.log("=== age_band 分布 ===");
 const ageBandOrder = ["infant", "child", "teen", "young_adult", "middle_aged", "senior", "unknown"];
 const ageBandLabel = {
-  infant: "婴儿(0-2)", child: "儿童(3-12)", teen: "青少年(13-19)",
-  young_adult: "青年(20-35)", middle_aged: "中年(36-55)", senior: "老年(55+)", unknown: "未知",
+  infant: "婴儿(0-2)",
+  child: "儿童(3-12)",
+  teen: "青少年(13-19)",
+  young_adult: "青年(20-35)",
+  middle_aged: "中年(36-55)",
+  senior: "老年(55+)",
+  unknown: "未知",
 };
 for (const a of ageBandOrder) {
   const cnt = ageBandCount[a] ?? 0;
   if (cnt === 0) continue;
   const pct = withAttr > 0 ? ((cnt / withAttr) * 100).toFixed(1) : "0";
-  const bar = "█".repeat(Math.round(cnt / withAttr * 30));
+  const bar = "█".repeat(Math.round((cnt / withAttr) * 30));
   const label = ageBandLabel[a] ?? a;
   console.log(`  ${label.padEnd(14)} ${String(cnt).padStart(6)} (${pct.padStart(5)}%)  ${bar}`);
 }
@@ -92,8 +97,12 @@ for (const a of ageBandOrder) {
 console.log("");
 console.log("=== persons attribute_summary 统计 ===");
 const totalPersons = db.prepare("SELECT COUNT(*) as cnt FROM persons").get().cnt;
-const withSummary = db.prepare("SELECT COUNT(*) as cnt FROM persons WHERE attribute_summary IS NOT NULL").get().cnt;
+const withSummary = db
+  .prepare("SELECT COUNT(*) as cnt FROM persons WHERE attribute_summary IS NOT NULL")
+  .get().cnt;
 console.log(`总 person 数：${totalPersons}`);
-console.log(`有 attribute_summary：${withSummary} (${totalPersons > 0 ? ((withSummary / totalPersons) * 100).toFixed(1) : "0"}%)`);
+console.log(
+  `有 attribute_summary：${withSummary} (${totalPersons > 0 ? ((withSummary / totalPersons) * 100).toFixed(1) : "0"}%)`,
+);
 
 db.close();

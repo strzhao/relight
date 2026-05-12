@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 /**
  * 生成 person 调试页面：列出该 person 所有 face 缩略图 + bbox 红框 + 准/不准按钮。
  *
@@ -5,9 +8,6 @@
  * Default out: ./photos/.debug/person-<id8>.html
  */
 import Database from "better-sqlite3";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import sharp from "sharp";
 
 const personId = process.argv[2];
@@ -21,7 +21,7 @@ const dbPath = process.env.DATABASE_PATH ?? "./data/relight.db";
 const apiBase = process.env.API_BASE ?? "http://localhost:3000";
 
 const db = new Database(dbPath, { readonly: true });
-const person = db.prepare(`SELECT * FROM persons WHERE id = ?`).get(personId);
+const person = db.prepare("SELECT * FROM persons WHERE id = ?").get(personId);
 if (!person) {
   console.error(`person ${personId} not found`);
   process.exit(1);
@@ -71,25 +71,44 @@ for (const [pid, fp] of uniquePhotos.entries()) {
 function renderAttrBadge(attr) {
   if (!attr) return "";
   const ageBandEmoji = {
-    infant: "👶", child: "🧒", teen: "🧑", young_adult: "🙂",
-    middle_aged: "👨", senior: "👴", unknown: "❓",
+    infant: "👶",
+    child: "🧒",
+    teen: "🧑",
+    young_adult: "🙂",
+    middle_aged: "👨",
+    senior: "👴",
+    unknown: "❓",
   };
   const genderEmoji = { male: "♂️", female: "♀️", unknown: "❓" };
   const glassesEmoji = { none: "", normal: "👓", sunglasses: "🕶️", unknown: "❓" };
   const facialHairEmoji = { none: "", stubble: "🧔", beard: "🧔", moustache: "🧔", unknown: "" };
   const expressionEmoji = {
-    neutral: "😐", smile: "🙂", laugh: "😄", sad: "😢", surprised: "😲", unknown: "❓",
+    neutral: "😐",
+    smile: "🙂",
+    laugh: "😄",
+    sad: "😢",
+    surprised: "😲",
+    unknown: "❓",
   };
   const ageBandLabel = {
-    infant: "婴儿", child: "儿童", teen: "青少年", young_adult: "青年",
-    middle_aged: "中年", senior: "老年", unknown: "?年龄",
+    infant: "婴儿",
+    child: "儿童",
+    teen: "青少年",
+    young_adult: "青年",
+    middle_aged: "中年",
+    senior: "老年",
+    unknown: "?年龄",
   };
 
   const parts = [];
-  parts.push(`${ageBandEmoji[attr.age_band] ?? "❓"}${ageBandLabel[attr.age_band] ?? attr.age_band}`);
+  parts.push(
+    `${ageBandEmoji[attr.age_band] ?? "❓"}${ageBandLabel[attr.age_band] ?? attr.age_band}`,
+  );
   if (attr.gender !== "unknown") parts.push(genderEmoji[attr.gender] ?? "");
-  if (attr.glasses !== "none" && attr.glasses !== "unknown") parts.push(glassesEmoji[attr.glasses] ?? "");
-  if (attr.facial_hair !== "none" && attr.facial_hair !== "unknown") parts.push(facialHairEmoji[attr.facial_hair] ?? "");
+  if (attr.glasses !== "none" && attr.glasses !== "unknown")
+    parts.push(glassesEmoji[attr.glasses] ?? "");
+  if (attr.facial_hair !== "none" && attr.facial_hair !== "unknown")
+    parts.push(facialHairEmoji[attr.facial_hair] ?? "");
   if (attr.expression !== "unknown") parts.push(expressionEmoji[attr.expression] ?? "");
   return parts.filter(Boolean).join(" ");
 }
@@ -160,7 +179,11 @@ ${faces
     const thumbUrl = `${apiBase}/api/photos/${f.photo_id}/thumbnail`;
     let parsedAttr = null;
     if (f.attributes) {
-      try { parsedAttr = JSON.parse(f.attributes); } catch { parsedAttr = null; }
+      try {
+        parsedAttr = JSON.parse(f.attributes);
+      } catch {
+        parsedAttr = null;
+      }
     }
     const attrBadge = renderAttrBadge(parsedAttr);
     return `<div class="card" data-fid="${f.id}">

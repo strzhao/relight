@@ -10,10 +10,10 @@
  *   cd apps/backend && node scripts/rerun-faces.mjs --clear
  */
 
-import Database from "better-sqlite3";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { Queue } from "bullmq";
 
 const args = process.argv.slice(2);
@@ -41,7 +41,9 @@ const shouldClear = args.includes("--clear");
 const fullRunConfirmed = args.includes("--yes");
 
 if (limit === null && !fullRunConfirmed) {
-  console.error("[rerun-faces] ❌ 全量重跑需 --yes 显式确认（防止误触发）。用 --limit N 跑部分，或 --yes 跑全量。");
+  console.error(
+    "[rerun-faces] ❌ 全量重跑需 --yes 显式确认（防止误触发）。用 --limit N 跑部分，或 --yes 跑全量。",
+  );
   process.exit(1);
 }
 
@@ -62,7 +64,9 @@ if (shouldClear) {
   const backupPath = join(backupDir, `persons-${timestamp}.json`);
 
   const namedPersons = db
-    .prepare("SELECT id, name, nickname FROM persons WHERE name IS NOT NULL OR nickname IS NOT NULL")
+    .prepare(
+      "SELECT id, name, nickname FROM persons WHERE name IS NOT NULL OR nickname IS NOT NULL",
+    )
     .all();
 
   writeFileSync(backupPath, JSON.stringify(namedPersons, null, 2), "utf8");
@@ -96,9 +100,7 @@ if (shouldClear) {
 let photoRows;
 if (limit !== null && !Number.isNaN(limit) && limit > 0) {
   photoRows = db
-    .prepare(
-      "SELECT id FROM photos WHERE media_type = 'image' ORDER BY taken_at ASC LIMIT ?",
-    )
+    .prepare("SELECT id FROM photos WHERE media_type = 'image' ORDER BY taken_at ASC LIMIT ?")
     .all(limit);
 } else {
   photoRows = db
@@ -131,11 +133,7 @@ const batchSize = 100;
 for (let i = 0; i < photoRows.length; i++) {
   const row = photoRows[i];
   try {
-    await detectFacesQueue.add(
-      row.id,
-      { photoId: row.id },
-      { jobId: row.id },
-    );
+    await detectFacesQueue.add(row.id, { photoId: row.id }, { jobId: row.id });
     queued++;
   } catch (err) {
     console.warn(`[rerun-faces] 入队失败 photoId=${row.id}: ${err.message}`);
@@ -143,7 +141,9 @@ for (let i = 0; i < photoRows.length; i++) {
   }
 
   if ((i + 1) % batchSize === 0) {
-    console.log(`[rerun-faces] 已入队 ${i + 1}/${photoRows.length}（成功 ${queued} / 跳过 ${skipped}）`);
+    console.log(
+      `[rerun-faces] 已入队 ${i + 1}/${photoRows.length}（成功 ${queued} / 跳过 ${skipped}）`,
+    );
   }
 }
 
