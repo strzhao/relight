@@ -75,7 +75,11 @@ export class RelightAIClient {
   /**
    * 文本对话（文本模型）
    */
-  async chat(prompt: string, systemPrompt?: string): Promise<string> {
+  async chat(
+    prompt: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number },
+  ): Promise<string> {
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
     if (systemPrompt) {
@@ -86,7 +90,7 @@ export class RelightAIClient {
     const response = await client.chat.completions.create({
       model: config.ai.model,
       messages,
-      max_tokens: 4096,
+      max_tokens: options?.maxTokens ?? 4096,
       // @ts-expect-error qwen3 chat template extension
       chat_template_kwargs: { enable_thinking: false } as Record<string, unknown>,
     });

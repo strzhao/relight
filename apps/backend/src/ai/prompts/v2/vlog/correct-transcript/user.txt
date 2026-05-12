@@ -1,0 +1,13 @@
+## 视频信息
+
+- fid: {fid}
+- 拍摄时间: {time}
+- 时长: {duration}s
+- 画面摘要: {brief}
+- 视觉标签: {tags}
+
+## ASR 段落（共 {n} 段）
+
+{segments}
+
+按 system 规则输出修正后的 JSON。

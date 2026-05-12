@@ -142,11 +142,14 @@ export async function probeVideo(filePath: string): Promise<VideoProbeResult> {
  * 从视频抽取 N 帧，优先用 scene-cut 检测，不足时 fallback 时间均匀采样。
  * 返回 Buffer[]（按时间顺序，每帧 768×768 JPEG）。第 0 帧可作为 cover。
  * 临时目录在函数返回后清理。
+ *
+ * `onSceneTimes` 可选回调会在 scene-cut 分支成功后被调用一次，传入解析自
+ * ffmpeg `showinfo` 的每帧 `pts_time`（秒）。fallback 到均匀采样时不会调用。
  */
 export async function extractFrames(
   filePath: string,
   count: number,
-  opts: { sceneFirst?: boolean } = {},
+  opts: { sceneFirst?: boolean; onSceneTimes?: (times: number[]) => void } = {},
 ): Promise<Buffer[]> {
   const tmpDir = path.join(
     os.tmpdir(),
@@ -165,7 +168,13 @@ export async function extractFrames(
 
     // 先尝试 scene-cut
     if (effectiveCount > 1) {
-      frames = await extractSceneCutFrames(filePath, effectiveCount, tmpDir, durationSec);
+      frames = await extractSceneCutFrames(
+        filePath,
+        effectiveCount,
+        tmpDir,
+        durationSec,
+        opts.onSceneTimes,
+      );
     }
 
     // 不足时 fallback 到时间均匀采样
@@ -198,6 +207,7 @@ async function extractSceneCutFrames(
   count: number,
   tmpDir: string,
   durationSec: number,
+  onSceneTimes?: (times: number[]) => void,
 ): Promise<Buffer[]> {
   const outPattern = path.join(tmpDir, "scene_%04d.jpg");
   const ffmpeg = config.video.ffmpegPath;
@@ -218,6 +228,13 @@ async function extractSceneCutFrames(
     ];
 
     const proc = spawn(ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+
+    let stderrBuf = "";
+    if (onSceneTimes) {
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        stderrBuf += chunk.toString();
+      });
+    }
 
     let timer: NodeJS.Timeout | null = setTimeout(() => {
       timer = null;
@@ -242,6 +259,22 @@ async function extractSceneCutFrames(
       if (code !== 0) {
         resolve([]);
         return;
+      }
+      if (onSceneTimes) {
+        const re = /pts_time:([0-9]+(?:\.[0-9]+)?)/g;
+        const times: number[] = [];
+        let m: RegExpExecArray | null;
+        m = re.exec(stderrBuf);
+        while (m !== null) {
+          const t = Number(m[1]);
+          if (Number.isFinite(t) && t >= 0) times.push(t);
+          m = re.exec(stderrBuf);
+        }
+        try {
+          onSceneTimes(times);
+        } catch {
+          // 不影响主流程
+        }
       }
       try {
         const files = await readFrameFiles(tmpDir, "scene_");

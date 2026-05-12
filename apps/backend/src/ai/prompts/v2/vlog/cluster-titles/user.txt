@@ -1,0 +1,12 @@
+## 任务
+
+为以下时间簇命名。
+
+- 主题：{theme}
+- 簇数：{cluster_count}
+
+## 簇详情
+
+{clusters_text}
+
+按 system 中的规则输出 JSON，每个簇都要有 title 条目。

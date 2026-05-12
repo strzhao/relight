@@ -1,0 +1,25 @@
+## 任务
+
+为以下章节挑选片段。
+
+### 章节规格
+
+```json
+{chapter_json}
+```
+
+### 故事弧上下文
+
+- 整片主题：{theme}
+- Hook 策略（仅参考，第 1 章用）：{hook_strategy}
+- 整片结尾节拍：{ending_beat}
+
+### 可用素材清单
+
+{available_list}
+
+### 已在前面章节使用过的素材 ID（请避免重复）
+
+{previous_ids}
+
+请输出符合 system 中 JSON 格式的本章 clips。

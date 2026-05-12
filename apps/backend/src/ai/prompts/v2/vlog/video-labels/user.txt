@@ -1,0 +1,12 @@
+## 任务
+
+为以下视频逐一打地点/过渡标签。
+
+- 整片主题：{theme}
+- 视频总数：{video_count}（按真实拍摄时间排序）
+
+## 视频清单
+
+{videos_list}
+
+按 system 中规则输出 JSON，每个 fid 必须有 label + kind。

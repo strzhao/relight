@@ -1,0 +1,12 @@
+## 任务
+
+为以下 vlog 设计故事弧。
+
+- 主题：{theme}
+- 目标时长：{target_minutes} 分钟
+- 素材总数：{file_count}（图片 {image_count}，视频 {video_count}，去重后保留高分项）
+- 素材摘要（按时间顺序的语义聚合）：
+
+{summary}
+
+请根据上述信息输出符合 system 中 JSON 格式的故事弧。

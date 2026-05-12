@@ -1,0 +1,12 @@
+## 任务
+
+为以下 vlog 把视频素材按"地点"分组。
+
+- 主题：{theme}
+- 视频总数：{video_count}（已按拍摄时间排序）
+
+## 视频清单
+
+{videos_list}
+
+请按 system 中的规则输出 JSON。
