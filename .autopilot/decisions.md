@@ -386,3 +386,30 @@
 - 跨 storageSource 不聚类：一个 NAS 一个 person 空间，不会出现"插拔 NAS 后人物错乱"，与 bursts 表设计一致。
 
 **Evidence**: 设计 + 实施记录在 `.autopilot/sessions/who/requirements/20260510-帮我深入调研下相关技/state.md`（autopilot 完整流程：design 审批 → 红蓝队对抗 → QA 2 轮 → 7 BLOCKER 全修），merge commit `62fb4eb`。真实推理验证：CoreML EP 启用日志 `[face] EPs: ["coreml","cpu"]`，detector 端到端跑 640×640 灰图返回 0 face（符合预期），SCRFD ONNX session 加载 ~200ms。
+
+### [2026-05-13] 人脸聚类引入「qwen 语义属性 + 临界硬过滤」+ JSON 字段预留未来扩展
+
+<!-- tags: face-recognition, face-clustering, qwen-vl, semantic-attributes, hybrid-clustering, cosine-threshold, json-schema, schema-version, future-proof, design, architecture -->
+
+**Background**: 拾光人脸识别经过模型升级（buffalo_s → buffalo_l）+ SCRFD tensor 撞车修复 + EXIF rotate + 代表头像 sim 选择等多轮 hotfix 后，仍有「同一人 cosine 0.65 临界值合并不可靠」的问题：buffalo_l ArcFace 在中文家庭/亚洲面孔场景下，临界 [0.55, 0.7) 错合并率高（spot-check person #635b 准确率 2.2%）。根因是 embedding 反映几何特征但不区分语义维度（gender / age），导致父女、母子、同肤色陌生人在临界区间错合。
+
+**Choice**: 不调阈值、不上专用属性模型，而是 **复用现有 llama-server qwen-vl 实例为每张脸打 6 维语义属性**（age_band / gender / hair / glasses / facial_hair / expression），存到 `faces.attributes` JSON 列。聚类改双阈值：cosine ≥ 0.7 直接合并、< 0.55 直接不合并、**[0.55, 0.7) 临界区间用属性硬过滤**（gender 不同或 age_band 跨 2 档以上拒绝合并）。`persons.attribute_summary` 用多数票聚合 person 内所有 face 属性，临界判断时 face 与 person summary 比对。
+
+设计的「未来扩展」要点：
+- `schema_version: 1` 字段 + JSON 字符串列：未来加 `is_billboard / accessories / view_angle / text_description` 等无需 DB migration
+- 枚举值固定 + `unknown` 兜底：避免 qwen 自由发挥，下游可穷举处理
+- 默认开关 `midZoneAttrFilter`：消融实验比对开启 vs 关闭的 persons 数量差，证明硬过滤效果
+
+**Alternatives rejected**:
+- **纯调阈值 0.55 → 0.6**：相同人不同表情/角度 cosine 经常落在 0.55-0.65，调高 → 召回率掉
+- **加权评分**（cosine 0.7×权重 + 属性匹配 0.3×权重）：调参复杂，"严格硬过滤"用户更可解释（"性别不同就不合并"）
+- **独立小模型**（Florence-2 / qwen2-vl-2b）：新增 onnxruntime 会话 + 模型下载，违反"复用现有基础设施"原则。先用 qwen-vl 验证需求覆盖度，性能不够再换
+- **独立列**（gender / age_band 各一列）：未来加属性要 migration，且不确定的"未知需求"（人物画像、广告牌过滤、全文检索）字段如何穷举？JSON + schema_version 是更前瞻的选择
+
+**Trade-offs**:
+- 每张脸 ~2-3s qwen 调用 → 6175 张全量 ~ 8-10 小时（worker concurrency=2）；500 张验证集先跑
+- qwen 失败率不为零：`config.face.attributeRetries` 控制重试，仍失败 `attributes=null` 退化为纯 cosine（不阻塞 face 入库）
+- 「严格硬过滤」可能在 qwen 误判 gender 时拆同人。设计选择"宁可漏过滤不误拆"：person 样本 < 2 时不投票、双方有 unknown 不算冲突、attributes=null 退化合并
+- 「清空重建」persons / faces 接受丢失用户手动 name / nickname（用户已显式确认）
+
+**Evidence**: 设计 + 实施 + QA 完整记录在 `.autopilot/requirements/20260513-开始实现方案-C-并重跑/state.md`（autopilot：brainstorm 9 决策 → Plan Reviewer PASS → 蓝/红队对抗 → contract-checker 1 修 → QA 89/89 ✅）。merge commit `69e8764`。500 张验收由用户手动跑 `node scripts/rerun-faces.mjs --limit 500 --clear`。

@@ -676,3 +676,35 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 **Lesson**: Biome 把 `[^]` 当 lint error（"否定空字符类匹配任何东西，可能笔误"），等价写法 `[\s\S]` 显式表达"空白 ∪ 非空白 = 全部"。两者**正则语义完全相同**，HTML 串匹配（含换行 `<\n>`）100% 等价。红队产出测试常被这条规则拦下，应该在红队提示里强调用 `[\s\S]` 而不是 `[^]`。修复属于"等价 lint 修复"，不算改测试断言（不违反"红队铁律"）。
 
 **Evidence**: `apps/web/__tests__/photos-person-strip.acceptance.test.ts:184-187` 红队产出有 3 处 `[^]*?`，pre-commit hook 卡 commit。等价替换 `[^]` → `[\s\S]` 后 biome clean，测试 11/11 仍 PASS。两种写法生成的 NFA 完全相同，无任何运行时差别。
+
+### [2026-05-13] 批量危险脚本（清空/全量入队）必须 `--help` + `--yes` 二次确认
+
+<!-- tags: cli, dangerous-operation, bullmq, queue, safety, dry-run, confirmation, batch-job, bug, ops -->
+
+**Lesson**: `rerun-faces.mjs` 初版只接 `--limit N` + `--clear`，无 `--help` 处理。QA 阶段 AI 误试 `node scripts/rerun-faces.mjs --help` 查帮助，脚本把 `--help` 当无意义参数解析，**默认全量入队**：6175 张照片，已经入队 2001 张到 BullMQ 才被发现。需紧急 `pm2 stop relight-workers` + `redis-cli del bull:detect-faces:*` drain。
+
+**How to apply**: 任何"清空 DB / 批量入队 / 全量重跑 / 删除文件"的脚本（不局限于 face）必须满足：
+
+1. **`--help` / `-h` 分支显式打印用法**（在任何 DB / 文件 / 队列操作前 `process.exit(0)`）
+2. **危险默认值必须显式 `--yes` 二次确认**：无 `--limit` / 无 `--dry-run` 时，缺 `--yes` 直接拒绝退出（`process.exit(1)`）
+3. **打印 dry-run summary**：执行前先 `console.log` 即将影响的行数 / 文件数
+4. **drain 备份**：清空操作前先 `JSON.stringify` 备份命名实体（即便用户接受丢失，留 trace）
+
+**Evidence**: `apps/backend/scripts/rerun-faces.mjs:19-46` 修复后形态。误触发后排错链路：`pm2 stop relight-workers` → `redis-cli llen bull:detect-faces:wait` 确认 2001 → `for k in $(redis-cli keys 'bull:detect-faces:*'); do redis-cli del $k; done` → 验证 0 余留。教训：autopilot QA 阶段的"试跑"看似低风险，BullMQ 批量入队在 worker 在跑时是不可逆的（每个 job 跑完会删旧 face 行）。
+
+### [2026-05-13] vitest `vi.mock` 路径以测试文件位置为基准（不是实现文件）
+
+<!-- tags: vitest, vi-mock, relative-path, hoisted, module-resolution, test-infra, blue-red, bug -->
+
+**Lesson**: 蓝队实现 `apps/backend/src/lib/face/attributes.ts` 里写 `await import("../../ai/client")`，相对 attributes.ts 解析到 `apps/backend/src/ai/client` ✓。红队测试 `apps/backend/src/lib/face/__tests__/attributes.acceptance.test.ts` 想 mock 同一个模块，照搬实现的 import 字符串 `vi.mock("../../ai/client", ...)`，但**相对测试文件**解析到 `apps/backend/src/lib/ai/client`（不存在！）。结果：mock 注册到一个不存在的模块 id，实际代码 import 的 `../../ai/client` 模块没被拦截 → 真去调 llama-server → 测试 14 个 case 挂在 "expected null not to be null"。
+
+**How to apply**: 写 `vi.mock(path)` 时**路径相对的是测试文件位置**，不是被测代码位置。测试文件比实现文件深一级（如 `__tests__/foo.test.ts` 测 `foo.ts`），mock 路径要在实现的 import 字符串前面多一个 `../`。规则：
+
+| 实现文件 import | 测试文件位置 | 测试 mock 路径 |
+|---|---|---|
+| `lib/face/attributes.ts` 写 `"../../ai/client"` | `lib/face/__tests__/*.test.ts` | `"../../../ai/client"` |
+| `lib/foo.ts` 写 `"./bar"` | `lib/__tests__/foo.test.ts` | `"../bar"` |
+
+修 mock 路径错误**不属于"改红队测试让 assertion 过"**（不违反红队铁律），属于"修 mock setup 路径 bug"——assertion 没动、契约没变、只是模块 id 对齐。
+
+**Evidence**: `apps/backend/src/lib/face/__tests__/attributes.acceptance.test.ts:27` 修复前 `"../../ai/client"` → 修复后 `"../../../ai/client"`。修复前：14 cases failed；修复后：22/22 cases passed。

@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-13] 人脸聚类引入 qwen 语义属性 + 临界硬过滤 + JSON 字段预留未来扩展 | tags: face-recognition, face-clustering, qwen-vl, semantic-attributes, hybrid-clustering, cosine-threshold, json-schema, schema-version, future-proof, design, architecture | → decisions.md
 - [2026-05-12] 人脸识别选 ONNX Runtime + SCRFD-500M + ArcFace MBF 纯本地方案，设计偏离 2.5G → 500M（公开 ONNX 镜像无 2.5G） | tags: face-recognition, onnx, scrfd, arcface, local-inference, privacy, coreml, model-selection, design, architecture | → decisions.md
 - [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标 | tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context | → decisions.md
 - [2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12（质量优先于数量） | tags: daily-selection, candidate-pool, theme-dedup, cluster, maxN, quality-over-quantity, dirname-time-window, design | → decisions.md
@@ -22,6 +23,8 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-13] 批量危险脚本（清空/全量入队）必须 `--help` + `--yes` 二次确认 | tags: cli, dangerous-operation, bullmq, queue, safety, dry-run, confirmation, batch-job, bug, ops | → patterns.md
+- [2026-05-13] vitest `vi.mock` 路径以测试文件位置为基准（不是实现文件） | tags: vitest, vi-mock, relative-path, hoisted, module-resolution, test-infra, blue-red, bug | → patterns.md
 - [2026-05-12] HF 模型下载 URL 必须先 WebFetch /api/models/{org}/{repo}/tree/main 验证路径，猜路径 401/404 浪费多轮 | tags: huggingface, model-download, onnx, webfetch, hf-api, url-discovery, multi-source, bug | → patterns.md
 - [2026-05-12] Biome `lint/correctness/noEmptyCharacterClassInRegex` 拒绝 `[^]`，要用 `[\s\S]` 等价替代 | tags: biome, regex, lint, character-class, jsdom, ssr-html-match, test, bug | → patterns.md
 - [2026-05-10] vitest fake timer + React 19 createRoot 不兼容 — setup 需 act+flushSync polyfill | tags: vitest, react-19, fake-timer, create-root, flush-sync, act, scheduler, polyfill, test-infra, bug | → patterns.md
