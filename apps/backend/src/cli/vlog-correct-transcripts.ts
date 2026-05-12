@@ -140,13 +140,16 @@ async function correctSegments(
   }
   // Sanity: each corrected segment must be within ±60% character length of original
   for (let i = 0; i < segments.length; i++) {
-    const origLen = segments[i].text.trim().length;
-    const newLen = result.data.segments[i].trim().length;
+    const orig = segments[i];
+    const corrected = result.data.segments[i];
+    if (!orig || corrected === undefined) continue;
+    const origLen = orig.text.trim().length;
+    const newLen = corrected.trim().length;
     if (origLen > 0 && (newLen > origLen * 1.6 || newLen < origLen * 0.4)) {
       err(
         `[correct][${fid}] WARN: seg ${i + 1} length diverged (${origLen} → ${newLen}) — keeping original for this seg`,
       );
-      result.data.segments[i] = segments[i].text;
+      result.data.segments[i] = orig.text;
     }
   }
   return result.data.segments;
@@ -233,9 +236,10 @@ function applyCorrection(v: ManifestVideoEntry, correctedTexts: string[]): void 
   if (!v.transcript) return;
   const segs = v.transcript.segments;
   for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
     const newText = correctedTexts[i];
-    if (typeof newText === "string") {
-      segs[i].text = newText;
+    if (seg && typeof newText === "string") {
+      seg.text = newText;
       // 注意：words 数组保持不变（词级时间码不可能在 AI 纠错时维护）
       // 渲染时如用 words 做 kinetic 字幕，会与新 text 不匹配，但当前用 bottom-clean 不用 words
     }

@@ -21,6 +21,7 @@ import {
   type Selection,
   type SelectionGroup,
   type Timeline,
+  type TimelineChapter,
   type TimelineClip,
   type TranscriptSegment,
   batchManifestSchema,
@@ -456,19 +457,7 @@ async function pickHookFidsAI(
   return picks;
 }
 
-function buildHookChapter(
-  picks: HookPick[],
-  fps: number,
-): {
-  startFrame: number;
-  endFrame: number;
-  titleCard: { durationFrames: number };
-  id: string;
-  title: string;
-  subtitle?: string;
-  energyCurve: "rising";
-  clips: TimelineClip[];
-} {
+function buildHookChapter(picks: HookPick[], fps: number): TimelineChapter {
   let cursor = 0;
   const clips: TimelineClip[] = [];
   const winSec = HOOK_CLIP_FRAMES / fps;
@@ -516,31 +505,39 @@ function splitSegmentByWordGap(seg: TranscriptSegment, maxGapSec = 1.5): Transcr
   const words = seg.words ?? [];
   if (words.length < 2) return [seg];
 
-  const groups: (typeof words)[] = [[]];
+  type Word = (typeof words)[number];
+  const groups: Word[][] = [[]];
   for (let i = 0; i < words.length; i++) {
     const cur = words[i];
+    if (!cur) continue;
     const prev = words[i - 1];
     const lastGroup = groups[groups.length - 1];
     if (prev && cur.start - prev.end > maxGapSec) {
-      if (lastGroup.length > 0) groups.push([]);
+      if (lastGroup && lastGroup.length > 0) groups.push([]);
     }
-    groups[groups.length - 1].push(cur);
+    groups[groups.length - 1]?.push(cur);
   }
   if (groups.length === 1) return [seg];
 
   // Rebuild text per group by re-stringing the original chars (word.word may
   // contain leading whitespace per Whisper convention).
-  return groups
-    .filter((g) => g.length > 0)
-    .map((g) => ({
-      start: g[0].start,
-      end: g[g.length - 1].end,
+  const result: TranscriptSegment[] = [];
+  for (const g of groups) {
+    if (g.length === 0) continue;
+    const first = g[0];
+    const last = g[g.length - 1];
+    if (!first || !last) continue;
+    result.push({
+      start: first.start,
+      end: last.end,
       text: g
         .map((w) => w.word)
         .join("")
         .trim(),
       words: g,
-    }));
+    });
+  }
+  return result;
 }
 
 /**
@@ -1004,7 +1001,7 @@ async function main(): Promise<void> {
   const outroFrames = 90; // 3s
   let cursor = 0;
 
-  const timelineChapters = chapters.map((ch, idx) => {
+  const timelineChapters: TimelineChapter[] = chapters.map((ch, idx) => {
     const startFrame = cursor;
     cursor += titleCardFrames;
 

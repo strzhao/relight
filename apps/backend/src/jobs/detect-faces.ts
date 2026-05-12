@@ -30,6 +30,8 @@ import type { Job } from "bullmq";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
+import type { FaceAttributes } from "../lib/face/attributes";
+import type { PersonAttributeSummary } from "../lib/face/clustering";
 import { encodeEmbedding } from "../lib/face/embedding-codec";
 import { modelFileExists } from "../lib/face/session";
 import { createStorageAdapter } from "../storage";
@@ -185,7 +187,7 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
     });
 
     // 5b'. 方案 C：裁剪人脸 → 分析属性 → 写回 faces.attributes
-    let faceAttributes: import("../lib/face/attributes").FaceAttributes | null = null;
+    let faceAttributes: FaceAttributes | null = null;
     if (config.face.attributeAnalysisEnabled) {
       try {
         const faceCrop = await cropFaceToJpeg(
@@ -218,12 +220,10 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       .where(eq(schema.persons.storageSourceId, photo.storageSourceId));
 
     const candidates = personsRows.map((p) => {
-      let parsedSummary: import("../lib/face/clustering").PersonAttributeSummary | null = null;
+      let parsedSummary: PersonAttributeSummary | null = null;
       if (p.attributeSummary) {
         try {
-          parsedSummary = JSON.parse(p.attributeSummary) as import(
-            "../lib/face/clustering",
-          ).PersonAttributeSummary;
+          parsedSummary = JSON.parse(p.attributeSummary) as PersonAttributeSummary;
         } catch {
           parsedSummary = null;
         }
@@ -289,10 +289,10 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
           .where(eq(schema.faces.personId, matched.id));
 
         const facesWithAttr = allFaceRows.map((f) => {
-          let parsed: import("../lib/face/attributes").FaceAttributes | null = null;
+          let parsed: FaceAttributes | null = null;
           if (f.attributes) {
             try {
-              parsed = JSON.parse(f.attributes) as import("../lib/face/attributes").FaceAttributes;
+              parsed = JSON.parse(f.attributes) as FaceAttributes;
             } catch {
               parsed = null;
             }
@@ -322,7 +322,7 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       const initDisplayable = 1 >= config.face.displayThreshold;
 
       // 新 person 的初始 attribute_summary
-      let initSummary: import("../lib/face/clustering").PersonAttributeSummary | null = null;
+      let initSummary: PersonAttributeSummary | null = null;
       if (faceAttributes) {
         initSummary = updatePersonAttributeSummary([{ attributes: faceAttributes }]);
       }
