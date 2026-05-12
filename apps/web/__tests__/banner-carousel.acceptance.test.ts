@@ -57,6 +57,7 @@ const makePick = (overrides: Partial<DailyPick> = {}): DailyPick => ({
   createdAt: "2026-05-10T06:00:00Z",
   photo: makePhoto(),
   members: [],
+  entries: [],
   ...overrides,
 });
 
@@ -77,7 +78,7 @@ const makeMembers = (n: number): DailyPickMember[] =>
 
 async function ssrRender(dailyPick: DailyPick | null): Promise<string> {
   const mod = await import("@/components/daily-hero");
-  const DailyHero = mod.DailyHero ?? mod.default;
+  const DailyHero = mod.DailyHero;
   return renderToString(React.createElement(DailyHero, { dailyPick }));
 }
 
@@ -244,7 +245,7 @@ describe("BannerCarousel 验收测试（SSR）", () => {
     });
 
     const mod = await import("@/components/daily-hero");
-    const DailyHero = mod.DailyHero ?? mod.default;
+    const DailyHero = mod.DailyHero;
     const pick = makePick({ members: makeMembers(1) });
 
     // 在 jsdom 中渲染
@@ -306,7 +307,7 @@ describe("BannerCarousel 用例 k — fake timer 自动切换", () => {
 
   it("(k) hero+2 members：click next → advance 9000ms 仍在 idx=1；再 advance 1500ms 自动切到 idx=2", async () => {
     const mod = await import("@/components/daily-hero");
-    const DailyHero = mod.DailyHero ?? mod.default;
+    const DailyHero = mod.DailyHero;
 
     const pick = makePick({ members: makeMembers(2) }); // 3 slides total
     const { createRoot } = await import("react-dom/client");
