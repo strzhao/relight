@@ -25,7 +25,9 @@
       ".claude",
       "**/assets/fonts/**",
       "apps/mac/**/Assets.xcassets/**",
-      "apps/mac/build/**"
+      "apps/mac/build/**",
+      "**/test-results/**",
+      "**/photos/**"
     ]
   },
   "overrides": [
@@ -44,6 +46,16 @@
     },
     {
       "include": ["apps/web/components/ui/lightbox/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["apps/web/components/banner-carousel.tsx"],
       "linter": {
         "rules": {
           "a11y": {
