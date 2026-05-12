@@ -1,3 +1,26 @@
+/** ===== 方案 C：人脸语义属性类型 ===== */
+
+/** 人脸属性（v1，qwen 分析输出，固定枚举 + unknown 兜底） */
+export type FaceAttributes = {
+  schema_version: 1;
+  age_band: "infant" | "child" | "teen" | "young_adult" | "middle_aged" | "senior" | "unknown";
+  gender: "male" | "female" | "unknown";
+  /** covered = 帽子/头巾 */
+  hair: "long" | "short" | "bald" | "covered" | "unknown";
+  glasses: "none" | "normal" | "sunglasses" | "unknown";
+  facial_hair: "none" | "stubble" | "beard" | "moustache" | "unknown";
+  expression: "neutral" | "smile" | "laugh" | "sad" | "surprised" | "unknown";
+};
+
+/** Person 内所有 face attributes 的多数票聚合 */
+export type PersonAttributeSummary = {
+  schema_version: 1;
+  gender_mode: FaceAttributes["gender"];
+  age_band_mode: FaceAttributes["age_band"];
+  /** 统计 attributes IS NOT NULL 的脸数（非 memberCount） */
+  member_count_with_attr: number;
+};
+
 /** 标签类别 */
 export type TagCategory = "scene" | "emotion" | "people" | "color" | "event" | "object" | "style";
 
@@ -54,6 +77,8 @@ export interface Person {
   hidden: boolean;
   createdAt: string;
   updatedAt: string;
+  /** 方案 C：person 内 face attributes 的多数票聚合，可为 null */
+  attributeSummary?: PersonAttributeSummary | null;
 }
 
 /** 人脸（每张人脸独立行） */
@@ -67,6 +92,8 @@ export interface Face {
   bboxH: number;
   detectionScore: number;
   detectedAt: string;
+  /** 方案 C：qwen 语义属性，可为 null */
+  attributes?: FaceAttributes | null;
 }
 
 /** 人物详情（含成员照片 + 全部 face） */

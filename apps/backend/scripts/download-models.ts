@@ -34,18 +34,21 @@ interface ModelSpec {
 // 用 SCRFD-500M 替代 2.5G：精度略降（WIDER hard 68.5 vs 77.9），但与 MBF 配套总
 // 仅 16MB，CPU 推理快，适合家庭相册场景；用户如需更高精度可手工把 buffalo_l 的
 // det_10g.onnx 重命名为 scrfd_500m.onnx 替换。
+// 升级到 buffalo_l：SCRFD-10G (~17MB) + ArcFace R50 (~174MB)，识别准度量级提升。
+// 文件名保持原命名（scrfd_500m.onnx / arcface_mbf.onnx）让 session.ts 不变。
+// sha256 留空，第一次下载后通过日志补回（也充当版本不一致时的强制重下信号）。
 const MODELS: ModelSpec[] = [
   {
     filename: "scrfd_500m.onnx",
-    urls: ["https://huggingface.co/deepghs/insightface/resolve/main/buffalo_s/det_500m.onnx"],
-    sha256: "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a",
-    approxBytes: 2_524_817,
+    urls: ["https://huggingface.co/deepghs/insightface/resolve/main/buffalo_l/det_10g.onnx"],
+    sha256: "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+    approxBytes: 16_923_827,
   },
   {
     filename: "arcface_mbf.onnx",
-    urls: ["https://huggingface.co/deepghs/insightface/resolve/main/buffalo_s/w600k_mbf.onnx"],
-    sha256: "9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e815e5c4a02b319eb4f",
-    approxBytes: 13_616_099,
+    urls: ["https://huggingface.co/deepghs/insightface/resolve/main/buffalo_l/w600k_r50.onnx"],
+    sha256: "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
+    approxBytes: 174_383_860,
   },
 ];
 

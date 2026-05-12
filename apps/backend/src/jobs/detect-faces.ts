@@ -8,10 +8,13 @@
  * 4. detectFaces → DetectedFace[]（已过滤小脸 + NMS）
  * 5. 对每张脸：
  *    a. alignFace + embedFace → L2-normalized 512 维 embedding
- *    b. 写 face 行（含 base64 embedding，personId 暂为 null）
- *    c. 同 storageSource 拉 persons centroids → assignToPerson
+ *    b. 写 face 行（含 base64 embedding，personId 暂为 null，attributes 暂为 null）
+ *    b'. cropFaceToJpeg → analyzeFaceAttributes → UPDATE faces SET attributes（方案 C）
+ *    c. 同 storageSource 拉 persons centroids（含 attribute_summary）→ assignToPersonWithAttrFilter
  *    d. 命中 → UPDATE faces.personId + persons memberCount/centroid（同步事务）
+ *       + 重新计算 attribute_summary（重查 person 内所有 face）
  *    e. 未命中 → 新建 person（centroid=本 embedding，memberCount=1）+ UPDATE face
+ *       + 初始化 attribute_summary（若有 attributes）
  *    f. memberCount >= threshold → displayable=true
  * 6. 自动选最佳代表（manualOverride=false 时，分数最高那张），生成头像
  *
@@ -20,6 +23,7 @@
  * - 模型缺失降级 = 不阻断主流程
  * - 同步事务包合并/校准操作（drizzle async transaction 在 better-sqlite3 抛错）
  * - 只处理 image，video 跳过（视频暂不识别）
+ * - attributeAnalysisEnabled=false 时属性分析跳过，退化为纯 cosine
  */
 import * as path from "node:path";
 import type { Job } from "bullmq";
@@ -91,9 +95,20 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
     }
   }
 
-  // sharp 解析 metadata
   const sharpMod = await import("sharp");
   const sharp = sharpMod.default;
+
+  // 应用 EXIF orientation。iPhone JPEG 常见物理像素横向 + orientation=6 标"顺时针 90°"，
+  // viewer/thumbnail 显示时会自动旋转为竖向，但 sharp 默认不旋转 raw pixel。
+  // 不旋转 → detector 在横向图里检测竖向人脸 → 大量漏检 + bbox 与 thumbnail 错位。
+  try {
+    buffer = await sharp(buffer, { failOn: "none" }).rotate().toBuffer();
+  } catch (err) {
+    job.log(`[detect-faces] EXIF rotate 失败: ${(err as Error).message}`);
+    return;
+  }
+
+  // sharp 解析 metadata（拿 rotate 后的真实尺寸）
   let meta: { width?: number; height?: number };
   try {
     meta = await sharp(buffer).metadata();
@@ -122,9 +137,18 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
 
   const { alignFace } = await import("../lib/face/aligner");
   const { embedFace } = await import("../lib/face/embedder");
-  const { assignToPerson, updateCentroid } = await import("../lib/face/clustering");
+  const { assignToPersonWithAttrFilter, updateCentroid, updatePersonAttributeSummary } =
+    await import("../lib/face/clustering");
   const { decodeEmbedding } = await import("../lib/face/embedding-codec");
   const { generateAutoAvatar } = await import("../lib/face/avatar");
+  const { cropFaceToJpeg } = await import("../lib/face/crop");
+  const { analyzeFaceAttributes } = await import("../lib/face/attributes");
+
+  const clusterConfig = {
+    mergeThreshold: config.face.clusteringMergeThreshold,
+    minThreshold: config.face.clusteringMinThreshold,
+    midZoneFilter: config.face.midZoneAttrFilter,
+  };
 
   // 5. 处理每张脸
   for (const det of detected) {
@@ -145,7 +169,7 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
     const now = new Date().toISOString();
     const faceId = crypto.randomUUID();
 
-    // 5a. 写 face 行（personId 暂 null）
+    // 5b. 写 face 行（personId 暂 null，attributes 暂 null）
     await db.insert(schema.faces).values({
       id: faceId,
       photoId,
@@ -157,27 +181,73 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       detectionScore: det.score,
       embedding: encodeEmbedding(embedding),
       detectedAt: now,
+      attributes: null,
     });
 
-    // 5b. 拉同 storageSource 的 person centroids
+    // 5b'. 方案 C：裁剪人脸 → 分析属性 → 写回 faces.attributes
+    let faceAttributes: import("../lib/face/attributes").FaceAttributes | null = null;
+    if (config.face.attributeAnalysisEnabled) {
+      try {
+        const faceCrop = await cropFaceToJpeg(
+          buffer,
+          { x: det.x, y: det.y, w: det.w, h: det.h },
+          imageWidth,
+          imageHeight,
+        );
+        faceAttributes = await analyzeFaceAttributes(faceCrop);
+        if (faceAttributes) {
+          await db
+            .update(schema.faces)
+            .set({ attributes: JSON.stringify(faceAttributes) })
+            .where(eq(schema.faces.id, faceId));
+          job.log(
+            `[detect-faces] 属性分析完成: face=${faceId} gender=${faceAttributes.gender} age=${faceAttributes.age_band}`,
+          );
+        } else {
+          job.log(`[detect-faces] 属性分析返回 null（已忽略）: face=${faceId}`);
+        }
+      } catch (err) {
+        job.log(`[detect-faces] 属性分析异常（已忽略）: ${(err as Error).message}`);
+      }
+    }
+
+    // 5c. 拉同 storageSource 的 person centroids（含 attribute_summary）
     const personsRows = await db
       .select()
       .from(schema.persons)
       .where(eq(schema.persons.storageSourceId, photo.storageSourceId));
 
-    const candidates = personsRows.map((p) => ({
-      id: p.id,
-      memberCount: p.memberCount,
-      centroid: decodeEmbedding(p.centroidEmbedding),
-    }));
+    const candidates = personsRows.map((p) => {
+      let parsedSummary: import("../lib/face/clustering").PersonAttributeSummary | null = null;
+      if (p.attributeSummary) {
+        try {
+          parsedSummary = JSON.parse(p.attributeSummary) as import(
+            "../lib/face/clustering",
+          ).PersonAttributeSummary;
+        } catch {
+          parsedSummary = null;
+        }
+      }
+      return {
+        id: p.id,
+        memberCount: p.memberCount,
+        centroid: decodeEmbedding(p.centroidEmbedding),
+        attribute_summary: parsedSummary,
+      };
+    });
 
-    const result = assignToPerson(embedding, candidates, config.face.clusteringThreshold);
+    const result = assignToPersonWithAttrFilter(
+      embedding,
+      faceAttributes,
+      candidates,
+      clusterConfig,
+    );
     job.log(
-      `[detect-faces] face=${faceId} bestSim=${result.bestSim.toFixed(3)} → ${result.matchedPersonId ?? "(new)"}`,
+      `[detect-faces] face=${faceId} bestSim=${result.bestSim.toFixed(3)} rejectedByAttr=${result.rejectedByAttr} → ${result.matchedPersonId ?? "(new)"}`,
     );
 
     if (result.matchedPersonId) {
-      // 5c. 归并到现有 person
+      // 5d. 归并到现有 person
       const matched = personsRows.find((p) => p.id === result.matchedPersonId);
       if (!matched) continue;
       const newCentroid = updateCentroid(
@@ -211,6 +281,37 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
         continue;
       }
 
+      // 重算 attribute_summary（重查该 person 所有 face 的 attributes）
+      try {
+        const allFaceRows = await db
+          .select({ attributes: schema.faces.attributes })
+          .from(schema.faces)
+          .where(eq(schema.faces.personId, matched.id));
+
+        const facesWithAttr = allFaceRows.map((f) => {
+          let parsed: import("../lib/face/attributes").FaceAttributes | null = null;
+          if (f.attributes) {
+            try {
+              parsed = JSON.parse(f.attributes) as import("../lib/face/attributes").FaceAttributes;
+            } catch {
+              parsed = null;
+            }
+          }
+          return { attributes: parsed };
+        });
+
+        const newSummary = updatePersonAttributeSummary(facesWithAttr);
+        await db
+          .update(schema.persons)
+          .set({
+            attributeSummary: newSummary ? JSON.stringify(newSummary) : null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.persons.id, matched.id));
+      } catch (err) {
+        job.log(`[detect-faces] attribute_summary 重算失败（已忽略）: ${(err as Error).message}`);
+      }
+
       // 5f. 自动选代表 + 重新生成头像（manualOverride=false 时）
       if (!matched.manualOverride) {
         await maybeUpdateRepresentativeAndAvatar(matched.id, source.id, buffer, job);
@@ -219,6 +320,13 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       // 5e. 新建 person
       const newPersonId = crypto.randomUUID();
       const initDisplayable = 1 >= config.face.displayThreshold;
+
+      // 新 person 的初始 attribute_summary
+      let initSummary: import("../lib/face/clustering").PersonAttributeSummary | null = null;
+      if (faceAttributes) {
+        initSummary = updatePersonAttributeSummary([{ attributes: faceAttributes }]);
+      }
+
       // 单脸事务失败不影响后续脸（B1-4 修复）
       try {
         db.transaction((tx) => {
@@ -235,6 +343,7 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
               memberCount: 1,
               manualOverride: false,
               displayable: initDisplayable,
+              attributeSummary: initSummary ? JSON.stringify(initSummary) : null,
               createdAt: now,
               updatedAt: now,
             })
@@ -273,7 +382,10 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
 }
 
 /**
- * 自动校准代表 face：选 person 内 detectionScore 最高的 face 为代表，并重新生成头像。
+ * 自动校准代表 face：选 person 内**离 centroid 最近**（cosine sim 最高）的 face 为代表。
+ *
+ * 之前用 detectionScore 最高 → 误检的广告牌人脸 score 高时会被选为代表，与 person
+ * 其他真人脸不像。改用 sim 后选的是 person 的"原型脸"，最能代表整体特征。
  *
  * 仅在 manualOverride=false 时调用。
  */
@@ -284,21 +396,48 @@ async function maybeUpdateRepresentativeAndAvatar(
   job: Job<DetectFacesJobData>,
 ): Promise<void> {
   try {
-    // 找出该 person 下所有 face，按 detectionScore desc
     const faceRows = await db
       .select()
       .from(schema.faces)
       .where(eq(schema.faces.personId, personId));
     if (faceRows.length === 0) return;
 
+    const personRowsTmp = await db
+      .select()
+      .from(schema.persons)
+      .where(eq(schema.persons.id, personId));
+    const personTmp = personRowsTmp[0];
+    if (!personTmp) return;
+
+    const { decodeEmbedding } = await import("../lib/face/embedding-codec");
+    const centroid = decodeEmbedding(personTmp.centroidEmbedding);
+    function cosineSim(a: Float32Array, b: Float32Array): number {
+      let dot = 0;
+      let na = 0;
+      let nb = 0;
+      for (let i = 0; i < a.length; i++) {
+        const ai = a[i] ?? 0;
+        const bi = b[i] ?? 0;
+        dot += ai * bi;
+        na += ai * ai;
+        nb += bi * bi;
+      }
+      return dot / (Math.sqrt(na) * Math.sqrt(nb));
+    }
     let bestFace = faceRows[0];
-    if (!bestFace) return;
+    let bestSim = Number.NEGATIVE_INFINITY;
     for (const f of faceRows) {
-      if ((f.detectionScore ?? 0) > (bestFace?.detectionScore ?? 0)) {
+      const emb = decodeEmbedding(f.embedding);
+      const sim = cosineSim(emb, centroid);
+      if (sim > bestSim) {
+        bestSim = sim;
         bestFace = f;
       }
     }
     if (!bestFace) return;
+    job.log(
+      `[detect-faces] 代表选择 person=${personId} bestFace=${bestFace.id} sim=${bestSim.toFixed(3)}`,
+    );
 
     const personRows = await db
       .select()
@@ -348,6 +487,13 @@ async function maybeUpdateRepresentativeAndAvatar(
     }
 
     const sharpMod = await import("sharp");
+    // 应用 EXIF orientation（与主流程一致，否则头像截取会按 raw pixel 方向取错位置）
+    try {
+      repBuffer = await sharpMod.default(repBuffer, { failOn: "none" }).rotate().toBuffer();
+    } catch (err) {
+      job.log(`[detect-faces] 代表 EXIF rotate 失败: ${(err as Error).message}`);
+      return;
+    }
     const meta = await sharpMod.default(repBuffer).metadata();
     if (!meta.width || !meta.height) return;
 

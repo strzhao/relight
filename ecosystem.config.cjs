@@ -7,7 +7,7 @@ module.exports = {
       interpreter: "node",
       interpreter_args: "--import tsx",
       autorestart: true,
-      max_memory_restart: "1G",
+      max_memory_restart: "2G",
       kill_timeout: 10000,
       env: { NODE_ENV: "development" },
     },

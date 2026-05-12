@@ -1,24 +1,48 @@
 /**
- * 增量人脸聚类。
+ * 增量人脸聚类（方案 C 升级版）。
  *
  * 不同于 bursts 的 union-find（一次性批量），每张新脸只与现有 person centroids 做一次 cosine 比较：
- *   - 找到 max(cos) 的 person，若 >= threshold，归并；否则新建 person
+ *   - 找到 max(cos) 的 person，若 >= mergeThreshold，归并；否则新建 person
+ *   - 在 [minThreshold, mergeThreshold) 中间区间启用属性硬过滤
  *   - 归并后 centroid 用增量平均更新（避免每次重算 N×512 浮点累加）
  *
  * 假设 input embedding 都已 L2-normalized，cosine 退化为 dot product。
  */
 
-export interface PersonCentroid {
-  /** person id */
+import type { FaceAttributes } from "./attributes";
+
+export type AgeBand = FaceAttributes["age_band"];
+export type Gender = FaceAttributes["gender"];
+
+/** Person 内所有 face attributes 的多数票聚合 */
+export type PersonAttributeSummary = {
+  schema_version: 1;
+  gender_mode: Gender;
+  age_band_mode: AgeBand;
+  /** 统计 attributes IS NOT NULL 的脸数（非 memberCount） */
+  member_count_with_attr: number;
+};
+
+/** 候选 person（用于 assignToPersonWithAttrFilter） */
+export type PersonCandidate = {
   id: string;
-  /** centroid embedding（L2-normalized 512 维） */
   centroid: Float32Array;
-  /**
-   * 当前已归并的人脸数（用于增量平均）。
-   * 调用方未提供时假定 1（仅做 cosine 比对、不更新 centroid 时可省略）。
-   */
-  memberCount?: number;
-}
+  /** 必填字段，无属性数据时明确设为 null */
+  attribute_summary: PersonAttributeSummary | null;
+};
+
+/** 聚类配置 */
+export type ClusterConfig = {
+  /** cosine >= 此值直接合并 */
+  mergeThreshold: number;
+  /** cosine < 此值直接不合并 */
+  minThreshold: number;
+  /** 中间区间是否启用属性硬过滤 */
+  midZoneFilter: boolean;
+};
+
+/** age_band 索引顺序（用于跨档判断） */
+const AGE_ORDER: AgeBand[] = ["infant", "child", "teen", "young_adult", "middle_aged", "senior"];
 
 /** cosine similarity（假设两向量都已 L2-normalized） */
 export function cosineSim(a: Float32Array, b: Float32Array): number {
@@ -32,38 +56,157 @@ export function cosineSim(a: Float32Array, b: Float32Array): number {
   return dot;
 }
 
+/**
+ * 判断是否应合并（方案 C 硬过滤算法）。
+ *
+ * 严格按设计文档伪代码实现：
+ * - sim < minThreshold → false
+ * - sim >= mergeThreshold → true
+ * - 中间区间：midZoneFilter=false 或属性缺失或 person 样本 < 2 → true
+ * - gender 双方都非 unknown 且不同 → false
+ * - age_band 双方都已知且 |index1 - index2| >= 2 → false
+ * - 否则 → true
+ */
+export function shouldMerge(
+  faceAttr: FaceAttributes | null,
+  personSummary: PersonAttributeSummary | null,
+  sim: number,
+  config: ClusterConfig,
+): boolean {
+  if (sim < config.minThreshold) return false;
+  if (sim >= config.mergeThreshold) return true;
+
+  if (!config.midZoneFilter) return true;
+  if (!faceAttr || !personSummary) return true;
+  if (personSummary.member_count_with_attr < 2) return true;
+
+  if (
+    faceAttr.gender !== "unknown" &&
+    personSummary.gender_mode !== "unknown" &&
+    faceAttr.gender !== personSummary.gender_mode
+  ) {
+    return false;
+  }
+
+  const i1 = AGE_ORDER.indexOf(faceAttr.age_band);
+  const i2 = AGE_ORDER.indexOf(personSummary.age_band_mode);
+  if (i1 >= 0 && i2 >= 0 && Math.abs(i1 - i2) >= 2) {
+    return false;
+  }
+
+  return true;
+}
+
 export interface AssignResult {
   /** 命中的 person id；null 表示需要新建 */
   matchedPersonId: string | null;
   /** max cosine（用于日志/诊断） */
   bestSim: number;
+  /** cosine 命中但被属性硬过滤拒绝 */
+  rejectedByAttr: boolean;
 }
 
 /**
- * 把一张新脸分配到现有 persons 之一。
+ * 把一张新脸分配到现有 persons 之一（方案 C 新签名，带属性过滤）。
  *
- * @param faceEmbedding L2-normalized embedding
- * @param candidates 同 storageSource 内的现有 persons centroid 列表
- * @param threshold cosine 阈值（默认 0.5，ArcFace 业界经验值）
+ * @param embedding L2-normalized embedding
+ * @param attributes 该人脸的语义属性，null 时退化为纯 cosine
+ * @param candidates 同 storageSource 内的现有 persons（含 attribute_summary）
+ * @param config 聚类配置（双阈值 + 过滤开关）
  */
-export function assignToPerson(
-  faceEmbedding: Float32Array,
-  candidates: PersonCentroid[],
-  threshold = 0.5,
+export function assignToPersonWithAttrFilter(
+  embedding: Float32Array,
+  attributes: FaceAttributes | null,
+  candidates: PersonCandidate[],
+  config: ClusterConfig,
 ): AssignResult {
   let bestId: string | null = null;
   let bestSim = -1;
+  let bestCandidate: PersonCandidate | null = null;
+
   for (const c of candidates) {
-    const s = cosineSim(faceEmbedding, c.centroid);
+    const s = cosineSim(embedding, c.centroid);
     if (s > bestSim) {
       bestSim = s;
       bestId = c.id;
+      bestCandidate = c;
     }
   }
+
+  if (bestId === null || bestCandidate === null) {
+    return { matchedPersonId: null, bestSim, rejectedByAttr: false };
+  }
+
+  const merge = shouldMerge(attributes, bestCandidate.attribute_summary, bestSim, config);
+
+  if (!merge) {
+    const wasAboveMin = bestSim >= config.minThreshold;
+    return {
+      matchedPersonId: null,
+      bestSim,
+      rejectedByAttr: wasAboveMin,
+    };
+  }
+
   return {
-    matchedPersonId: bestSim >= threshold ? bestId : null,
+    matchedPersonId: merge ? bestId : null,
     bestSim,
+    rejectedByAttr: false,
   };
+}
+
+/**
+ * 计算 person 内所有 face attributes 的多数票聚合。
+ *
+ * unknown 不计票；平票按字母序取靠前者。
+ * 若无任何 face 有 attributes，返回 null。
+ */
+export function updatePersonAttributeSummary(
+  existingFaces: Array<{ attributes: FaceAttributes | null }>,
+): PersonAttributeSummary | null {
+  const genderCount: Record<string, number> = {};
+  const ageBandCount: Record<string, number> = {};
+  let memberCountWithAttr = 0;
+
+  for (const face of existingFaces) {
+    if (!face.attributes) continue;
+    memberCountWithAttr++;
+
+    const g = face.attributes.gender;
+    if (g !== "unknown") {
+      genderCount[g] = (genderCount[g] ?? 0) + 1;
+    }
+
+    const a = face.attributes.age_band;
+    if (a !== "unknown") {
+      ageBandCount[a] = (ageBandCount[a] ?? 0) + 1;
+    }
+  }
+
+  if (memberCountWithAttr === 0) return null;
+
+  const genderMode = pickMode(genderCount, "unknown") as Gender;
+  const ageBandMode = pickMode(ageBandCount, "unknown") as AgeBand;
+
+  return {
+    schema_version: 1,
+    gender_mode: genderMode,
+    age_band_mode: ageBandMode,
+    member_count_with_attr: memberCountWithAttr,
+  };
+}
+
+/** 从计数 map 取多数票，平票按字母序取靠前，无计票返回 fallback */
+function pickMode(counts: Record<string, number>, fallback: string): string {
+  const entries = Object.entries(counts);
+  if (entries.length === 0) return fallback;
+
+  entries.sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return a[0].localeCompare(b[0]);
+  });
+
+  return entries[0]?.[0] ?? fallback;
 }
 
 /**
@@ -96,4 +239,42 @@ export function updateCentroid(
     out[i] = (out[i] ?? 0) / norm;
   }
   return out;
+}
+
+// ===== 向后兼容 export（旧签名，不删除以免破坏现有测试） =====
+
+export interface PersonCentroid {
+  /** person id */
+  id: string;
+  /** centroid embedding（L2-normalized 512 维） */
+  centroid: Float32Array;
+  /**
+   * 当前已归并的人脸数（用于增量平均）。
+   * 调用方未提供时假定 1（仅做 cosine 比对、不更新 centroid 时可省略）。
+   */
+  memberCount?: number;
+}
+
+/**
+ * @deprecated 语义升级为双阈值方案 C，请改用 assignToPersonWithAttrFilter。
+ * 此函数保留以避免破坏现有测试，内部退化为纯 cosine（不做属性过滤）。
+ */
+export function assignToPerson(
+  faceEmbedding: Float32Array,
+  candidates: PersonCentroid[],
+  threshold = 0.5,
+): { matchedPersonId: string | null; bestSim: number } {
+  let bestId: string | null = null;
+  let bestSim = -1;
+  for (const c of candidates) {
+    const s = cosineSim(faceEmbedding, c.centroid);
+    if (s > bestSim) {
+      bestSim = s;
+      bestId = c.id;
+    }
+  }
+  return {
+    matchedPersonId: bestSim >= threshold ? bestId : null,
+    bestSim,
+  };
 }

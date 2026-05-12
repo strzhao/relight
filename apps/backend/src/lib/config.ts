@@ -33,8 +33,24 @@ export const config = {
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),
-    /** cosine 相似度归并阈值（>= 此值视为同一人） */
-    clusteringThreshold: Number.parseFloat(process.env.FACE_CLUSTERING_THRESHOLD ?? "0.5"),
+    /**
+     * @deprecated 语义变更为双阈值（方案 C）：mergeThreshold=0.7 / minThreshold=0.55。
+     * 旧字段 clusteringThreshold=0.55 对应原"唯一阈值"，现拆分为两个语义不同的阈值，
+     * 不是简单 alias，保留此注释说明语义升级。
+     */
+    clusteringThreshold: Number.parseFloat(process.env.FACE_CLUSTERING_THRESHOLD ?? "0.55"),
+    /** cosine >= 此值直接合并（方案 C 上阈值） */
+    clusteringMergeThreshold: Number.parseFloat(
+      process.env.FACE_CLUSTERING_MERGE_THRESHOLD ?? "0.7",
+    ),
+    /** cosine < 此值直接不合并（方案 C 下阈值） */
+    clusteringMinThreshold: Number.parseFloat(process.env.FACE_CLUSTERING_MIN_THRESHOLD ?? "0.55"),
+    /** 中间区间 [minThreshold, mergeThreshold) 是否启用属性硬过滤 */
+    midZoneAttrFilter: (process.env.FACE_MID_ZONE_ATTR_FILTER ?? "true") === "true",
+    /** 是否启用 qwen 属性分析（关闭时 attributes 始终为 null，退化为纯 cosine） */
+    attributeAnalysisEnabled: (process.env.FACE_ATTRIBUTE_ANALYSIS ?? "true") === "true",
+    /** 属性分析失败后的重试次数（共最多 retries+1 次调用） */
+    attributeRetries: Number.parseInt(process.env.FACE_ATTRIBUTE_RETRIES ?? "1", 10),
     /** SCRFD 检测分数阈值 */
     detectionThreshold: Number.parseFloat(process.env.FACE_DETECTION_THRESHOLD ?? "0.5"),
     /** 最小人脸 bbox 边长（像素），过滤太小的脸 */

@@ -300,6 +300,8 @@ export const persons = sqliteTable(
     hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    // 方案 C：person 内所有 face attributes 的多数票聚合，可为 NULL（JSON 字符串）
+    attributeSummary: text("attribute_summary"),
   },
   (t) => ({
     idx_persons_source: index("idx_persons_source").on(t.storageSourceId),
@@ -329,6 +331,8 @@ export const faces = sqliteTable(
     detectionScore: real("detection_score").notNull(),
     embedding: text("embedding").notNull(),
     detectedAt: text("detected_at").notNull(),
+    // 方案 C：qwen 语义属性，可为 NULL（JSON 字符串，含 schema_version=1）
+    attributes: text("attributes"),
   },
   (t) => ({
     idx_faces_photo: index("idx_faces_photo").on(t.photoId),

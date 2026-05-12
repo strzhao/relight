@@ -134,10 +134,15 @@ function decodeOutputs(
     const featArea = featSize * featSize;
     const numAnchors = featArea * ANCHORS_PER_STRIDE;
 
-    // 按 data 元素数匹配 — buffalo_s SCRFD ONNX 输出 dims 是 [numAnchors, 1] / [numAnchors, 4]
-    // 之前按 dims[1]===numAnchors 假设是 [1, A, K] 三维，实测是二维，永远 find 不到。
-    const scoreTensor = tensorEntries.find(([_, t]) => t.data.length === numAnchors)?.[1];
-    const bboxTensor = tensorEntries.find(([_, t]) => t.data.length === numAnchors * 4)?.[1];
+    // 用完整 dims [numAnchors, 1] / [numAnchors, 4] 严格匹配。
+    // ⚠️ 不能用 data.length 匹配：stride 16 bbox length (3200*4=12800) 和 stride 8 score
+    // length (12800) 完全撞车，会让 stride 16 的 bbox 错拿成 stride 8 的 score → bbox≈0 → 漏检。
+    const scoreTensor = tensorEntries.find(
+      ([_, t]) => t.dims.length === 2 && t.dims[0] === numAnchors && t.dims[1] === 1,
+    )?.[1];
+    const bboxTensor = tensorEntries.find(
+      ([_, t]) => t.dims.length === 2 && t.dims[0] === numAnchors && t.dims[1] === 4,
+    )?.[1];
 
     if (!scoreTensor || !bboxTensor) {
       continue; // 该 stride 输出未识别，跳过
