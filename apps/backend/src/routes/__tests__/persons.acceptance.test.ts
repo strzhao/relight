@@ -83,7 +83,23 @@ function createTestDb() {
       video_fps REAL,
       burst_id TEXT,
       is_burst_representative INTEGER NOT NULL DEFAULT 0,
-      phash TEXT
+      phash TEXT,
+      -- GPS + EXIF meta（schema.ts photos 表新增 14 列，全部 nullable）
+      latitude REAL,
+      longitude REAL,
+      altitude REAL,
+      gps_img_direction REAL,
+      offset_time TEXT,
+      camera_make TEXT,
+      camera_model TEXT,
+      lens_model TEXT,
+      focal_length REAL,
+      focal_length_35mm INTEGER,
+      iso INTEGER,
+      exposure_time REAL,
+      f_number REAL,
+      software TEXT,
+      exif_backfilled_at INTEGER
     );
 
     CREATE TABLE bursts (
@@ -174,6 +190,7 @@ function createTestDb() {
       id TEXT PRIMARY KEY,
       storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
       name TEXT,
+      nickname TEXT,
       bio TEXT,
       representative_face_id TEXT,
       avatar_path TEXT,
@@ -182,6 +199,8 @@ function createTestDb() {
       member_count INTEGER NOT NULL DEFAULT 0,
       manual_override INTEGER NOT NULL DEFAULT 0,
       displayable INTEGER NOT NULL DEFAULT 0,
+      hidden INTEGER NOT NULL DEFAULT 0,
+      attribute_summary TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -196,7 +215,8 @@ function createTestDb() {
       bbox_h INTEGER NOT NULL,
       detection_score REAL NOT NULL,
       embedding TEXT NOT NULL,
-      detected_at TEXT NOT NULL
+      detected_at TEXT NOT NULL,
+      attributes TEXT
     );
   `);
   return { sqlite, db: drizzle(sqlite, { schema }) };
@@ -353,13 +373,26 @@ function seedFace(opts: {
   photoId: string;
   personId?: string | null;
   detectionScore?: number;
+  bboxW?: number;
+  bboxH?: number;
+  /** 自定义 embedding（512 维 Float32Array），默认 fakeEmbeddingBase64() */
+  embedding?: Float32Array;
+  /** JSON 字符串，覆盖 attributes 列 */
+  attributesJson?: string | null;
 }): void {
+  const embStr = opts.embedding
+    ? Buffer.from(
+        opts.embedding.buffer,
+        opts.embedding.byteOffset,
+        opts.embedding.byteLength,
+      ).toString("base64")
+    : fakeEmbeddingBase64();
   testSqlite
     .prepare(
       `INSERT INTO faces
         (id, photo_id, person_id, bbox_x, bbox_y, bbox_w, bbox_h,
-         detection_score, embedding, detected_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         detection_score, embedding, detected_at, attributes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       opts.id,
@@ -367,12 +400,20 @@ function seedFace(opts: {
       opts.personId ?? null,
       10,
       20,
-      120,
-      120,
+      opts.bboxW ?? 120,
+      opts.bboxH ?? 120,
       opts.detectionScore ?? 0.95,
-      fakeEmbeddingBase64(),
+      embStr,
       nowIso(),
+      opts.attributesJson ?? null,
     );
+}
+
+/** 构造 512 维 Float32Array，主轴 unit vector（dim 0 或 1），便于断言 centroid 方向 */
+function unitVec(axis: 0 | 1 | 2): Float32Array {
+  const v = new Float32Array(512);
+  v[axis] = 1;
+  return v;
 }
 
 // =========================================================================
@@ -733,6 +774,152 @@ describe("POST /api/persons/:id/merge — 合并人物", () => {
       targetPersonId: "nonexistent",
     });
     expect([400, 404]).toContain(status);
+  });
+
+  // ===== Phase 2 三件套对齐：quality-aware centroid + attribute_summary 重算 =====
+
+  it("合并后 centroid 用 quality 加权：LOW face（detection<0.65）weight=0 不污染方向", async () => {
+    // source: 1 HIGH face (axis 0)
+    // target: 1 LOW face (axis 1, detection 0.5 → quality=low)
+    // 合并后 centroid 应只反映 HIGH 方向（axis 0），不被 LOW 拉向 axis 1
+    seedPerson({ id: "p-src", memberCount: 1, displayable: false });
+    seedPerson({ id: "p-target", memberCount: 1, displayable: false });
+    seedPhoto({ id: "ph-1" });
+    seedPhoto({ id: "ph-2" });
+    seedFace({
+      id: "f-high",
+      photoId: "ph-1",
+      personId: "p-src",
+      bboxW: 250,
+      bboxH: 250,
+      detectionScore: 0.9, // HIGH
+      embedding: unitVec(0),
+    });
+    seedFace({
+      id: "f-low",
+      photoId: "ph-2",
+      personId: "p-target",
+      bboxW: 100,
+      bboxH: 100,
+      detectionScore: 0.5, // LOW
+      embedding: unitVec(1),
+    });
+
+    const { status } = await request("POST", "/api/persons/p-src/merge", {
+      targetPersonId: "p-target",
+    });
+    expect(status).toBe(200);
+
+    const tgt = testSqlite
+      .prepare("SELECT centroid_embedding FROM persons WHERE id = ?")
+      .get("p-target") as { centroid_embedding: string };
+    const buf = Buffer.from(tgt.centroid_embedding, "base64");
+    const centroid = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+    // HIGH 主导 → axis 0 接近 1，axis 1 接近 0
+    expect(centroid[0]).toBeCloseTo(1.0, 3);
+    expect(centroid[1]).toBeCloseTo(0.0, 3);
+  });
+
+  it("合并后 attribute_summary 重算：包含 source faces 的 attributes 投票", async () => {
+    // source: 2 faces 都是 female young_adult
+    // target: 1 face male young_adult
+    // 合并后 target.attribute_summary 应该是 female 多数票（2:1）
+    seedPerson({ id: "p-src", memberCount: 2, displayable: false });
+    seedPerson({ id: "p-target", memberCount: 1, displayable: false });
+    seedPhoto({ id: "ph-1" });
+    seedPhoto({ id: "ph-2" });
+    seedPhoto({ id: "ph-3" });
+    const femaleAttr = JSON.stringify({
+      schema_version: 1,
+      age_band: "young_adult",
+      gender: "female",
+      hair: "long",
+      glasses: "none",
+      facial_hair: "none",
+      expression: "smile",
+    });
+    const maleAttr = JSON.stringify({
+      schema_version: 1,
+      age_band: "young_adult",
+      gender: "male",
+      hair: "short",
+      glasses: "none",
+      facial_hair: "none",
+      expression: "neutral",
+    });
+    seedFace({
+      id: "f-s1",
+      photoId: "ph-1",
+      personId: "p-src",
+      attributesJson: femaleAttr,
+    });
+    seedFace({
+      id: "f-s2",
+      photoId: "ph-2",
+      personId: "p-src",
+      attributesJson: femaleAttr,
+    });
+    seedFace({
+      id: "f-t1",
+      photoId: "ph-3",
+      personId: "p-target",
+      attributesJson: maleAttr,
+    });
+
+    await request("POST", "/api/persons/p-src/merge", { targetPersonId: "p-target" });
+
+    const tgt = testSqlite
+      .prepare("SELECT attribute_summary FROM persons WHERE id = ?")
+      .get("p-target") as { attribute_summary: string | null };
+    expect(tgt.attribute_summary).not.toBeNull();
+    const summary = JSON.parse(tgt.attribute_summary as string);
+    expect(summary.schema_version).toBe(1);
+    expect(summary.gender_mode).toBe("female"); // 2 female vs 1 male
+    expect(summary.age_band_mode).toBe("young_adult");
+    expect(summary.member_count_with_attr).toBe(3);
+  });
+
+  it("合并后全 LOW face → centroid 退化为等权平均（不返回 NaN/零向量）", async () => {
+    // 极端：source 和 target 都只有 LOW face
+    // 不应崩溃，centroid 退化为等权平均
+    seedPerson({ id: "p-src", memberCount: 1, displayable: false });
+    seedPerson({ id: "p-target", memberCount: 1, displayable: false });
+    seedPhoto({ id: "ph-1" });
+    seedPhoto({ id: "ph-2" });
+    seedFace({
+      id: "f-low1",
+      photoId: "ph-1",
+      personId: "p-src",
+      bboxW: 100,
+      bboxH: 100,
+      detectionScore: 0.5,
+      embedding: unitVec(0),
+    });
+    seedFace({
+      id: "f-low2",
+      photoId: "ph-2",
+      personId: "p-target",
+      bboxW: 100,
+      bboxH: 100,
+      detectionScore: 0.5,
+      embedding: unitVec(1),
+    });
+
+    const { status } = await request("POST", "/api/persons/p-src/merge", {
+      targetPersonId: "p-target",
+    });
+    expect(status).toBe(200);
+
+    const tgt = testSqlite
+      .prepare("SELECT centroid_embedding FROM persons WHERE id = ?")
+      .get("p-target") as { centroid_embedding: string };
+    const buf = Buffer.from(tgt.centroid_embedding, "base64");
+    const centroid = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+    // 等权平均后 L2 归一：axis 0 和 axis 1 各 1/√2
+    expect(centroid[0]).toBeCloseTo(1 / Math.sqrt(2), 3);
+    expect(centroid[1]).toBeCloseTo(1 / Math.sqrt(2), 3);
+    // 不会出现 NaN
+    for (const v of centroid) expect(Number.isFinite(v)).toBe(true);
   });
 });
 

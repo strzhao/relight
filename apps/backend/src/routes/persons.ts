@@ -20,7 +20,9 @@ import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
+import type { FaceAttributes } from "../lib/face/attributes";
 import { saveCustomAvatar } from "../lib/face/avatar";
+import { centroidWeightFor, qualityOf, updatePersonAttributeSummary } from "../lib/face/clustering";
 import { decodeEmbedding, encodeEmbedding } from "../lib/face/embedding-codec";
 
 /**
@@ -329,46 +331,83 @@ export const personsRouter = new Hono()
       tx.delete(schema.persons).where(eq(schema.persons.id, id)).run();
     });
 
-    // F7 修复：合并后重算 target.centroidEmbedding（数学一致性）
-    // 取 target 全部 faces 的 embedding mean → L2 normalize
-    // 失败不阻塞主合并操作（仅诊断价值，下次新脸来归并时仍会用旧 centroid 但偏差有限）
+    // 合并后重算 target.centroidEmbedding + attribute_summary（数学/语义一致性）。
+    //
+    // 升级历史：原版用所有 face 简单等权平均，但 Phase 2 三件套要求 quality-aware：
+    // - HIGH 权重 1.0，MED 权重 medQualityCentroidWeight（默认 0.5），LOW 权重 0
+    // - 等权平均会让合并后 LOW face 污染 centroid，绕过雪球保护
+    //
+    // attribute_summary 同步重算（旧版完全不动这个字段，导致多数票脱离实际 face 集合）。
+    //
+    // 失败不阻塞主合并（下次新脸归并仍能用旧 centroid/summary，偏差有限）。
     try {
       const allFaces = await db
-        .select({ embedding: schema.faces.embedding })
+        .select({
+          embedding: schema.faces.embedding,
+          attributes: schema.faces.attributes,
+          bboxW: schema.faces.bboxW,
+          bboxH: schema.faces.bboxH,
+          detectionScore: schema.faces.detectionScore,
+        })
         .from(schema.faces)
         .where(eq(schema.faces.personId, targetPersonId));
+
       if (allFaces.length > 0) {
+        // 1. quality-aware 加权 centroid（与 detect-faces.ts 三件套一致）
+        const qConfig = {
+          highBboxSize: config.face.qualityHighBboxSize,
+          highDetectionScore: config.face.qualityHighDetectionScore,
+          lowDetectionScore: config.face.qualityLowDetectionScore,
+        };
         const dim = 512;
         const sum = new Float32Array(dim);
+        let weightSum = 0;
         for (const f of allFaces) {
+          const q = qualityOf(f.detectionScore, f.bboxW, f.bboxH, qConfig);
+          const w = centroidWeightFor(q, config.face.medQualityCentroidWeight);
+          if (w === 0) continue; // LOW 不拉 centroid，避免污染
           const e = decodeEmbedding(f.embedding);
-          for (let i = 0; i < dim; i++) {
-            sum[i] = (sum[i] ?? 0) + (e[i] ?? 0);
-          }
+          for (let i = 0; i < dim; i++) sum[i] = (sum[i] ?? 0) + (e[i] ?? 0) * w;
+          weightSum += w;
         }
-        // L2 normalize
+
+        // 全部 LOW（极端情况：合并的两 cluster 都是低质 face）→ 退化为等权平均
+        if (weightSum === 0) {
+          for (const f of allFaces) {
+            const e = decodeEmbedding(f.embedding);
+            for (let i = 0; i < dim; i++) sum[i] = (sum[i] ?? 0) + (e[i] ?? 0);
+          }
+          weightSum = allFaces.length;
+        }
+
         let normSq = 0;
         for (let i = 0; i < dim; i++) {
-          const v = (sum[i] ?? 0) / allFaces.length;
+          const v = (sum[i] ?? 0) / weightSum;
           sum[i] = v;
           normSq += v * v;
         }
         const norm = Math.sqrt(normSq);
         if (norm > 0) {
-          for (let i = 0; i < dim; i++) {
-            sum[i] = (sum[i] ?? 0) / norm;
-          }
+          for (let i = 0; i < dim; i++) sum[i] = (sum[i] ?? 0) / norm;
         }
+
+        // 2. attribute_summary 重算（含 source 合并进来的 face attributes）
+        const facesWithAttrs = allFaces.map((f) => ({
+          attributes: f.attributes ? (JSON.parse(f.attributes) as FaceAttributes) : null,
+        }));
+        const newSummary = updatePersonAttributeSummary(facesWithAttrs);
+
         await db
           .update(schema.persons)
           .set({
             centroidEmbedding: encodeEmbedding(sum),
+            attributeSummary: newSummary ? JSON.stringify(newSummary) : null,
             updatedAt: new Date().toISOString(),
           })
           .where(eq(schema.persons.id, targetPersonId));
       }
     } catch {
-      // 合并已成功；centroid 重算失败不回滚（下次新脸归并仍能工作，仅相似度匹配略有偏差）
+      // 合并已成功；centroid/summary 重算失败不回滚（下次新脸归并仍能工作）
     }
 
     return c.json({
