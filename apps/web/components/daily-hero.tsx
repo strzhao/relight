@@ -403,7 +403,7 @@ function HeroContentMulti({
     >
       {/* 局部样式：交叉淡入 + tick 进度填充 */}
       <style>{`
-        .dh-stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
+        .dh-stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: stretch; justify-content: stretch; }
         .dh-image { transition: opacity 600ms cubic-bezier(.22,1,.36,1), transform 600ms cubic-bezier(.22,1,.36,1); will-change: opacity, transform; }
         .dh-caption { animation: dh-cap-in 480ms cubic-bezier(.22,1,.36,1) both; }
         @keyframes dh-cap-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }

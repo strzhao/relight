@@ -122,6 +122,8 @@ export async function composeWallpaper(
   return jpgBuffer;
 }
 
+const COMPOSER_VERSION = "v2-contain";
+
 export interface ComposeAndSaveOpts {
   pick: Omit<DailyPick, "entries">;
   photo: Photo;
@@ -136,7 +138,7 @@ export async function composeAndSave(opts: ComposeAndSaveOpts): Promise<string> 
   const composedDir = path.join(config.storageRoot, "daily-composed");
   await mkdir(composedDir, { recursive: true });
 
-  const fileKey = cacheKey ?? `${width}x${height}`;
+  const fileKey = `${COMPOSER_VERSION}-${cacheKey ?? `${width}x${height}`}`;
   const fileName = `${pick.pickDate}_${fileKey}.jpg`;
   const filePath = path.join(composedDir, fileName);
 
@@ -152,5 +154,9 @@ export async function composeAndSave(opts: ComposeAndSaveOpts): Promise<string> 
 }
 
 export function composedCachePath(pickDate: string, width: number, height: number): string {
-  return path.join(config.storageRoot, "daily-composed", `${pickDate}_${width}x${height}.jpg`);
+  return path.join(
+    config.storageRoot,
+    "daily-composed",
+    `${pickDate}_${COMPOSER_VERSION}-${width}x${height}.jpg`,
+  );
 }
