@@ -39,14 +39,35 @@ export const config = {
      * 不是简单 alias，保留此注释说明语义升级。
      */
     clusteringThreshold: Number.parseFloat(process.env.FACE_CLUSTERING_THRESHOLD ?? "0.55"),
-    /** cosine >= 此值直接合并（方案 C 上阈值） */
+    /**
+     * cosine >= 此值才完全跳过属性硬过滤直接合并。
+     * 升级历史：0.7 → 0.85（patterns.md「centroid 雪球 + 垃圾桶 cluster」修复）。
+     * 0.7 太宽松，让 cosine 0.7-0.85 的杂质（同色短发青年男女）绕过属性硬过滤进入大 cluster。
+     */
     clusteringMergeThreshold: Number.parseFloat(
-      process.env.FACE_CLUSTERING_MERGE_THRESHOLD ?? "0.7",
+      process.env.FACE_CLUSTERING_MERGE_THRESHOLD ?? "0.85",
     ),
     /** cosine < 此值直接不合并（方案 C 下阈值） */
     clusteringMinThreshold: Number.parseFloat(process.env.FACE_CLUSTERING_MIN_THRESHOLD ?? "0.55"),
-    /** 中间区间 [minThreshold, mergeThreshold) 是否启用属性硬过滤 */
+    /** [minThreshold, mergeThreshold) 区间是否启用属性硬过滤（true=全程过滤，0.85 后才直接合） */
     midZoneAttrFilter: (process.env.FACE_MID_ZONE_ATTR_FILTER ?? "true") === "true",
+    /** Quality-aware 聚类：MED face 拉动 centroid 的权重（HIGH=1.0，LOW=0 不拉） */
+    medQualityCentroidWeight: Number.parseFloat(
+      process.env.FACE_MED_QUALITY_CENTROID_WEIGHT ?? "0.5",
+    ),
+    /**
+     * Quality 阈值（bbox 尺寸 + detection_score 反推 quality 三级）：
+     * - HIGH: bbox_w >= highBboxSize 且 detection_score >= highDetectionScore
+     * - LOW: detection_score < lowDetectionScore（不论 bbox）
+     * - MED: 其余
+     */
+    qualityHighBboxSize: Number.parseInt(process.env.FACE_QUALITY_HIGH_BBOX_SIZE ?? "200", 10),
+    qualityHighDetectionScore: Number.parseFloat(
+      process.env.FACE_QUALITY_HIGH_DETECTION_SCORE ?? "0.8",
+    ),
+    qualityLowDetectionScore: Number.parseFloat(
+      process.env.FACE_QUALITY_LOW_DETECTION_SCORE ?? "0.65",
+    ),
     /** 是否启用 qwen 属性分析（关闭时 attributes 始终为 null，退化为纯 cosine） */
     attributeAnalysisEnabled: (process.env.FACE_ATTRIBUTE_ANALYSIS ?? "true") === "true",
     /** 属性分析失败后的重试次数（共最多 retries+1 次调用） */

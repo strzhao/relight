@@ -139,8 +139,14 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
 
   const { alignFace } = await import("../lib/face/aligner");
   const { embedFace } = await import("../lib/face/embedder");
-  const { assignToPersonWithAttrFilter, updateCentroid, updatePersonAttributeSummary } =
-    await import("../lib/face/clustering");
+  const {
+    assignToPersonWithAttrFilter,
+    updateCentroidWeighted,
+    updatePersonAttributeSummary,
+    qualityOf,
+    centroidWeightFor,
+    clusterConfigForQuality,
+  } = await import("../lib/face/clustering");
   const { decodeEmbedding } = await import("../lib/face/embedding-codec");
   const { generateAutoAvatar } = await import("../lib/face/avatar");
   const { cropFaceToJpeg } = await import("../lib/face/crop");
@@ -150,6 +156,11 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
     mergeThreshold: config.face.clusteringMergeThreshold,
     minThreshold: config.face.clusteringMinThreshold,
     midZoneFilter: config.face.midZoneAttrFilter,
+  };
+  const qualityConfig = {
+    highBboxSize: config.face.qualityHighBboxSize,
+    highDetectionScore: config.face.qualityHighDetectionScore,
+    lowDetectionScore: config.face.qualityLowDetectionScore,
   };
 
   // 5. 处理每张脸
@@ -236,24 +247,30 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       };
     });
 
+    // Quality-aware：LOW face 用更严阈值，避免污染大 cluster（patterns.md 雪球陷阱）
+    const quality = qualityOf(det.score, det.w, det.h, qualityConfig);
+    const effectiveConfig = clusterConfigForQuality(clusterConfig, quality);
     const result = assignToPersonWithAttrFilter(
       embedding,
       faceAttributes,
       candidates,
-      clusterConfig,
+      effectiveConfig,
     );
+    const centroidWeight = centroidWeightFor(quality, config.face.medQualityCentroidWeight);
     job.log(
-      `[detect-faces] face=${faceId} bestSim=${result.bestSim.toFixed(3)} rejectedByAttr=${result.rejectedByAttr} → ${result.matchedPersonId ?? "(new)"}`,
+      `[detect-faces] face=${faceId} quality=${quality} weight=${centroidWeight} bestSim=${result.bestSim.toFixed(3)} rejectedByAttr=${result.rejectedByAttr} → ${result.matchedPersonId ?? "(new)"}`,
     );
 
     if (result.matchedPersonId) {
       // 5d. 归并到现有 person
       const matched = personsRows.find((p) => p.id === result.matchedPersonId);
       if (!matched) continue;
-      const newCentroid = updateCentroid(
+      // Quality-aware：HIGH 全权重，MED 折半，LOW 完全不拉 centroid（避免雪球污染）
+      const newCentroid = updateCentroidWeighted(
         decodeEmbedding(matched.centroidEmbedding),
-        matched.memberCount,
+        matched.memberCount, // 用 memberCount 作为旧权重和的近似（简化，避免新增 weightSum 列）
         embedding,
+        centroidWeight,
       );
       const newCount = matched.memberCount + 1;
       const shouldDisplay = newCount >= config.face.displayThreshold;

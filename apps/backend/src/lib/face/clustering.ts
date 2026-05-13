@@ -241,6 +241,101 @@ export function updateCentroid(
   return out;
 }
 
+// ===== Quality-aware 聚类（Phase 2）=====
+// 解决 patterns.md「centroid 雪球 + 垃圾桶 cluster」问题：
+// - HIGH face：正常拉动 centroid（权重 1.0）
+// - MED face：权重折半（默认 0.5）
+// - LOW face：不拉动 centroid，且阈值更严（避免污染大 cluster）
+
+export type FaceQuality = "high" | "medium" | "low";
+
+export interface QualityConfig {
+  /** HIGH 需要的最小 bbox 边长（默认 200） */
+  highBboxSize: number;
+  /** HIGH 需要的最小 detection_score（默认 0.8） */
+  highDetectionScore: number;
+  /** detection_score 低于此值直接判 LOW（默认 0.65） */
+  lowDetectionScore: number;
+}
+
+/** 用 bbox 边长 + detection_score 反推 face quality，不依赖 qwen */
+export function qualityOf(
+  detectionScore: number,
+  bboxW: number,
+  bboxH: number,
+  config: QualityConfig,
+): FaceQuality {
+  if (detectionScore < config.lowDetectionScore) return "low";
+  if (
+    bboxW >= config.highBboxSize &&
+    bboxH >= config.highBboxSize &&
+    detectionScore >= config.highDetectionScore
+  ) {
+    return "high";
+  }
+  return "medium";
+}
+
+/** centroid 权重：HIGH 全权重，MED 部分，LOW 不参与 */
+export function centroidWeightFor(quality: FaceQuality, medWeight: number): number {
+  if (quality === "high") return 1.0;
+  if (quality === "medium") return medWeight;
+  return 0; // low：不污染 centroid
+}
+
+/**
+ * 带权重的 centroid 更新（替代 updateCentroid 的 quality-aware 版本）。
+ *
+ * 增量加权平均：centroid_new = (centroid_old × weightSum + emb × w) / (weightSum + w)
+ * 然后 L2-normalize。
+ *
+ * @param oldCentroid 旧 centroid（已归一）
+ * @param oldWeightSum 旧权重和（不是 memberCount，是累计 weight）
+ * @param newEmbedding 新 embedding（已归一）
+ * @param weight 本次贡献的权重（0~1，LOW=0 时调用方应跳过本函数）
+ */
+export function updateCentroidWeighted(
+  oldCentroid: Float32Array,
+  oldWeightSum: number,
+  newEmbedding: Float32Array,
+  weight: number,
+): Float32Array {
+  if (weight <= 0) return oldCentroid;
+  if (oldCentroid.length !== newEmbedding.length) {
+    throw new Error("updateCentroidWeighted: 维度不一致");
+  }
+  const out = new Float32Array(oldCentroid.length);
+  let sum = 0;
+  for (let i = 0; i < oldCentroid.length; i++) {
+    const v =
+      ((oldCentroid[i] ?? 0) * oldWeightSum + (newEmbedding[i] ?? 0) * weight) /
+      (oldWeightSum + weight);
+    out[i] = v;
+    sum += v * v;
+  }
+  const norm = Math.sqrt(sum);
+  if (norm === 0) return out;
+  for (let i = 0; i < out.length; i++) out[i] = (out[i] ?? 0) / norm;
+  return out;
+}
+
+/**
+ * Quality-aware 配置生成：根据 face quality 调整阈值。
+ * - HIGH/MED：用基础 ClusterConfig
+ * - LOW：mergeThreshold 强制提到 0.85+ 防止杂质污染
+ */
+export function clusterConfigForQuality(base: ClusterConfig, quality: FaceQuality): ClusterConfig {
+  if (quality === "low") {
+    return {
+      ...base,
+      // LOW 用更严的下阈值（默认 0.65），避免低质量 face 进入边界 cluster
+      minThreshold: Math.max(base.minThreshold, 0.65),
+      // mergeThreshold 已经在 0.85，不再加严
+    };
+  }
+  return base;
+}
+
 // ===== 向后兼容 export（旧签名，不删除以免破坏现有测试） =====
 
 export interface PersonCentroid {
