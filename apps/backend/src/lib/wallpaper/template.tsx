@@ -89,6 +89,7 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
           width: photoAreaWidth,
           height: photoAreaHeight,
           overflow: "hidden",
+          backgroundColor: COLOR_BACKGROUND,
           flexShrink: 0,
           flexGrow: 0,
         }}
@@ -102,7 +103,7 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
             style={{
               width: photoAreaWidth,
               height: photoAreaHeight,
-              objectFit: "cover",
+              objectFit: "contain",
               display: "block",
             }}
           />
