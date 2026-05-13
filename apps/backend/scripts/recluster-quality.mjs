@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 /**
  * recluster-quality.mjs — Phase 1 离线 quality-aware 重聚类
  *
@@ -17,7 +18,6 @@
  *   cd apps/backend && node scripts/recluster-quality.mjs [--dry-run]
  */
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -79,8 +79,7 @@ function summarize(facesAttrs) {
     if (!a) continue;
     withAttr++;
     if (a.gender && a.gender !== "unknown") gCount[a.gender] = (gCount[a.gender] || 0) + 1;
-    if (a.age_band && a.age_band !== "unknown")
-      aCount[a.age_band] = (aCount[a.age_band] || 0) + 1;
+    if (a.age_band && a.age_band !== "unknown") aCount[a.age_band] = (aCount[a.age_band] || 0) + 1;
   }
   const mode = (counts) => {
     const entries = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -142,7 +141,7 @@ console.log(`[recluster] 共 ${faces.length} 张 face`);
 for (const f of faces) f.quality = qualityOf(f);
 const qDist = { high: 0, medium: 0, low: 0 };
 for (const f of faces) qDist[f.quality]++;
-console.log(`[recluster] quality 分布:`, qDist);
+console.log("[recluster] quality 分布:", qDist);
 
 // HIGH > MED > LOW，组内 taken_at ASC
 const qRank = { high: 0, medium: 1, low: 2 };
@@ -194,7 +193,7 @@ for (const face of faces) {
   tBucket[face.quality]++;
 
   // 找最相似 person
-  let bestSim = -Infinity;
+  let bestSim = Number.NEGATIVE_INFINITY;
   let bestP = null;
   for (const p of persons) {
     const sim = cosine(face.embedding, p.centroid);
@@ -256,7 +255,20 @@ console.log(
 const sizeDist = {};
 for (const p of persons) {
   const mc = p.faceIds.length;
-  const bucket = mc >= 100 ? "100+" : mc >= 50 ? "50-99" : mc >= 20 ? "20-49" : mc >= 10 ? "10-19" : mc >= 5 ? "5-9" : mc >= 2 ? "2-4" : "1";
+  const bucket =
+    mc >= 100
+      ? "100+"
+      : mc >= 50
+        ? "50-99"
+        : mc >= 20
+          ? "20-49"
+          : mc >= 10
+            ? "10-19"
+            : mc >= 5
+              ? "5-9"
+              : mc >= 2
+                ? "2-4"
+                : "1";
   sizeDist[bucket] = (sizeDist[bucket] || 0) + 1;
 }
 console.log("\n[recluster] member_count 分布:", sizeDist);
@@ -273,7 +285,7 @@ const now = new Date().toISOString();
 
 // 拿 storage_source_id（用第一张 photo 的）
 const storageSourceId = db
-  .prepare(`SELECT storage_source_id FROM photos LIMIT 1`)
+  .prepare("SELECT storage_source_id FROM photos LIMIT 1")
   .get()?.storage_source_id;
 if (!storageSourceId) {
   console.error("[recluster] 无法获取 storage_source_id");
@@ -281,8 +293,8 @@ if (!storageSourceId) {
 }
 
 const tx = db.transaction(() => {
-  db.prepare(`DELETE FROM persons`).run();
-  db.prepare(`UPDATE faces SET person_id = NULL`).run();
+  db.prepare("DELETE FROM persons").run();
+  db.prepare("UPDATE faces SET person_id = NULL").run();
 
   const insertPerson = db.prepare(`
     INSERT INTO persons (id, storage_source_id, centroid_embedding, member_count,
@@ -290,7 +302,7 @@ const tx = db.transaction(() => {
                          attribute_summary)
     VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?, ?)
   `);
-  const updateFace = db.prepare(`UPDATE faces SET person_id = ? WHERE id = ?`);
+  const updateFace = db.prepare("UPDATE faces SET person_id = ? WHERE id = ?");
 
   for (const p of persons) {
     const summary = summarize(p.faceAttrs);

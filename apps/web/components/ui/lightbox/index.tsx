@@ -36,6 +36,7 @@ function LightboxInner() {
   return (
     <div
       className="fixed inset-0 z-[100] bg-black/95"
+      // biome-ignore lint/a11y/useSemanticElements: 自定义全屏 lightbox，<dialog> 原生 backdrop 行为与设计不符
       role="dialog"
       aria-modal="true"
       aria-label="照片查看器"

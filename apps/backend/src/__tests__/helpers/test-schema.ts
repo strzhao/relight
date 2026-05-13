@@ -183,6 +183,7 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       id TEXT PRIMARY KEY,
       storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
       name TEXT,
+      nickname TEXT,
       bio TEXT,
       representative_face_id TEXT,
       avatar_path TEXT,
@@ -191,8 +192,10 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       member_count INTEGER NOT NULL DEFAULT 0,
       manual_override INTEGER NOT NULL DEFAULT 0,
       displayable INTEGER NOT NULL DEFAULT 0,
+      hidden INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      attribute_summary TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_persons_source ON persons(storage_source_id);
     CREATE INDEX IF NOT EXISTS idx_persons_displayable
@@ -208,7 +211,8 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       bbox_h INTEGER NOT NULL,
       detection_score REAL NOT NULL,
       embedding TEXT NOT NULL,
-      detected_at TEXT NOT NULL
+      detected_at TEXT NOT NULL,
+      attributes TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_faces_photo ON faces(photo_id);
     CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);

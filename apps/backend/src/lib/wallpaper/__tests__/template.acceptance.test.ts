@@ -24,8 +24,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import sharp from "sharp";
 import satori from "satori";
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
 // ============================================================================
@@ -257,7 +257,9 @@ describe("dailyHeroJSX — Satori SVG 渲染 contain（不裁剪）契约", () =
     expect(containOk).toBe(true);
 
     // 防回归：无 cover 裁剪行为
-    const coverFound = imageRects.some((r) => (r.x < -10 || r.y < -10) && (r.w > WIDTH || r.h > HEIGHT));
+    const coverFound = imageRects.some(
+      (r) => (r.x < -10 || r.y < -10) && (r.w > WIDTH || r.h > HEIGHT),
+    );
     expect(coverFound).toBe(false);
   });
 

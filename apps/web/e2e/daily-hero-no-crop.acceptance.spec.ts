@@ -59,11 +59,7 @@ async function fetchEntriesCount(baseURL: string): Promise<number> {
 async function measureRects(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
     // 尝试多种选择器定位 stage
-    const stageSelectors = [
-      '[data-testid="dh-stage"]',
-      ".dh-stage",
-      '[class*="dh-stage"]',
-    ];
+    const stageSelectors = ['[data-testid="dh-stage"]', ".dh-stage", '[class*="dh-stage"]'];
 
     let stageEl: Element | null = null;
     for (const sel of stageSelectors) {
@@ -148,26 +144,28 @@ async function waitForHeroReady(page: import("@playwright/test").Page) {
   );
 
   // 额外等待图片 load 事件（避免尺寸为 0 的占位状态）
-  await page.waitForFunction(
-    () => {
-      const stageSelectors = ['[data-testid="dh-stage"]', ".dh-stage", '[class*="dh-stage"]'];
-      for (const sel of stageSelectors) {
-        const stage = document.querySelector(sel);
-        if (stage) {
-          const imgs = stage.querySelectorAll("img");
-          // 至少有一张图片 naturalWidth > 0 或 complete=true
-          for (const img of imgs) {
-            if ((img as HTMLImageElement).complete) return true;
+  await page
+    .waitForFunction(
+      () => {
+        const stageSelectors = ['[data-testid="dh-stage"]', ".dh-stage", '[class*="dh-stage"]'];
+        for (const sel of stageSelectors) {
+          const stage = document.querySelector(sel);
+          if (stage) {
+            const imgs = stage.querySelectorAll("img");
+            // 至少有一张图片 naturalWidth > 0 或 complete=true
+            for (const img of imgs) {
+              if ((img as HTMLImageElement).complete) return true;
+            }
           }
         }
-      }
-      return false;
-    },
-    { timeout: 5000 },
-  ).catch(() => {
-    // 图片可能因为跨域等原因 naturalWidth=0，但 complete=false；
-    // 不阻断测试，继续用可见尺寸断言
-  });
+        return false;
+      },
+      { timeout: 5000 },
+    )
+    .catch(() => {
+      // 图片可能因为跨域等原因 naturalWidth=0，但 complete=false；
+      // 不阻断测试，继续用可见尺寸断言
+    });
 }
 
 // ============================================================================
@@ -185,7 +183,9 @@ test.describe("DailyHero 图片不裁剪 — 桌面 1440×900", () => {
     const count = await fetchEntriesCount(baseURL ?? "http://localhost:5407");
     if (count < 1) {
       // 今日无精选内容，后端数据问题 — 明确失败
-      throw new Error(`今日精选 entries 数量为 ${count}，无法测试 entry=0。请确认后端已运行 daily-selection job。`);
+      throw new Error(
+        `今日精选 entries 数量为 ${count}，无法测试 entry=0。请确认后端已运行 daily-selection job。`,
+      );
     }
 
     await page.goto("/");
@@ -248,7 +248,10 @@ test.describe("DailyHero 图片不裁剪 — 桌面 1440×900", () => {
    * 设计文档："当原图 aspect ≠ stage aspect 时至少一边严格相等（contain 行为）"
    * 此断言与 (a) 配对：如果两边都远小于 stage，说明图片未正确 contain（或未渲染）
    */
-  test("(a-contain) entry=0 contain 行为：img 至少一边 ≥ stage 对应边 × 0.99", async ({ page, baseURL }) => {
+  test("(a-contain) entry=0 contain 行为：img 至少一边 ≥ stage 对应边 × 0.99", async ({
+    page,
+    baseURL,
+  }) => {
     const count = await fetchEntriesCount(baseURL ?? "http://localhost:5407");
     if (count < 1) {
       throw new Error(`今日精选 entries 数量为 ${count}，无法测试 entry=0 contain 行为。`);
@@ -272,8 +275,7 @@ test.describe("DailyHero 图片不裁剪 — 桌面 1440×900", () => {
 
     expect(
       widthFillsStage || heightFillsStage,
-      `contain 行为失效：img(${img.width.toFixed(1)}×${img.height.toFixed(1)}) 两边都远小于 stage(${stage.width.toFixed(1)}×${stage.height.toFixed(1)})。` +
-        "图片应 contain 到至少占满一边。",
+      `contain 行为失效：img(${img.width.toFixed(1)}×${img.height.toFixed(1)}) 两边都远小于 stage(${stage.width.toFixed(1)}×${stage.height.toFixed(1)})。图片应 contain 到至少占满一边。`,
     ).toBe(true);
   });
 });
@@ -301,7 +303,9 @@ test.describe("DailyHero 图片不裁剪 — 移动 375×812", () => {
 
     if ("error" in rects) {
       // 移动端可能有不同的布局（如 stage 不渲染），提供清晰错误信息
-      throw new Error(`移动端 measureRects 失败：${rects.error}。如果移动端布局无 dh-stage，请更新选择器。`);
+      throw new Error(
+        `移动端 measureRects 失败：${rects.error}。如果移动端布局无 dh-stage，请更新选择器。`,
+      );
     }
 
     assertNoCrop(rects, "mobile entry=0");

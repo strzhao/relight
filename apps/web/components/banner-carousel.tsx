@@ -383,6 +383,7 @@ export default function BannerCarousel({ slides }: BannerCarouselProps) {
             <div
               key={slide.photo.id}
               data-testid="banner-slide"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA carousel pattern 用 role=group + aria-roledescription="slide"，没有原生 HTML 元素能等价表达
               role="group"
               aria-roledescription="slide"
               aria-label={`第 ${i + 1} 张，共 ${total} 张`}

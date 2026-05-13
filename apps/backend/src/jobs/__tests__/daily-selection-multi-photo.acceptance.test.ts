@@ -340,18 +340,29 @@ function seedSiblings(
  * sameSeason:   同季节不同月
  * agedRandom:   2年以上久远照片
  */
+/**
+ * 北京时间日期（YYYY-MM-DD），与 job formatPickDate 行为一致。
+ * job/candidate-pool 用 BJ 月日做 strftime 匹配，测试 seed/断言必须同时区
+ * 否则 CI（UTC runner）上跨日时会出现 candidates=0 + 断言查 UTC 错日。
+ */
+function bjDate(offsetDays = 0): string {
+  return new Date(Date.now() + 8 * 3600_000 + offsetDays * 86400_000).toISOString().slice(0, 10);
+}
+
 function seedCandidatePool(sqlite: Database.Database): {
   historyTodayId: string;
   sameMonthId: string;
   sameSeasonId: string;
   agedRandomId: string;
 } {
-  const today = new Date();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+  const todayStr = bjDate();
+  const todayYear = Number.parseInt(todayStr.slice(0, 4), 10);
+  const month = todayStr.slice(5, 7);
+  const day = todayStr.slice(8, 10);
+  const dayNum = Number.parseInt(day, 10);
 
   // historyToday: 3 年前今天
-  const historyYear = today.getFullYear() - 3;
+  const historyYear = todayYear - 3;
   const historyTodayId = "candidate-history-today";
   seedPhoto(sqlite, {
     photoId: historyTodayId,
@@ -361,8 +372,8 @@ function seedCandidatePool(sqlite: Database.Database): {
 
   // sameMonth: 同月不同日（今年，取本月 1 日，如果今天是 1 日则取 2 日）
   const sameMonthId = "candidate-same-month";
-  const altDay = today.getDate() === 1 ? "02" : "01";
-  const prevYear = today.getFullYear() - 1;
+  const altDay = dayNum === 1 ? "02" : "01";
+  const prevYear = todayYear - 1;
   seedPhoto(sqlite, {
     photoId: sameMonthId,
     takenAt: `${prevYear}-${month}-${altDay}T10:00:00.000Z`,
@@ -371,7 +382,7 @@ function seedCandidatePool(sqlite: Database.Database): {
 
   // sameSeason: 同季节不同月 — 找同季节中另一个月
   // 春=3-5, 夏=6-8, 秋=9-11, 冬=12-2
-  const curMonth = today.getMonth() + 1; // 1-12
+  const curMonth = Number.parseInt(month, 10); // 1-12
   let seasonAltMonth = curMonth;
   if (curMonth >= 3 && curMonth <= 5) {
     // 春，用 4 月如果当前不是 4 月，否则用 5 月
@@ -393,7 +404,7 @@ function seedCandidatePool(sqlite: Database.Database): {
   });
 
   // agedRandom: 5 年前的老照片
-  const agedYear = today.getFullYear() - 5;
+  const agedYear = todayYear - 5;
   const agedRandomId = "candidate-aged-random";
   seedPhoto(sqlite, {
     photoId: agedRandomId,
@@ -487,7 +498,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT photo_id, pick_date, members FROM daily_picks WHERE pick_date = ?")
         .get(today) as { photo_id: string; pick_date: string; members: string } | undefined;
@@ -518,7 +529,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT members FROM daily_picks WHERE pick_date = ?")
         .get(today) as { members: string } | undefined;
@@ -554,7 +565,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       // 新版：chat 可能被调用 0 次（无关联池）或 >= 1 次（有关联照片的 entry）
       // worker 不应崩溃，且写入 daily_picks + daily_pick_entries
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -571,7 +582,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT photo_id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { photo_id: string } | undefined;
@@ -579,7 +590,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
       if (!row) return;
 
       // 验证 hero photo_id 不在近 30 天的精选列表里
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+      const thirtyDaysAgo = bjDate(-30);
       const recentPicks = testSqlite
         .prepare("SELECT photo_id FROM daily_picks WHERE pick_date >= ? AND pick_date != ?")
         .all(thirtyDaysAgo, today) as { photo_id: string }[];
@@ -598,7 +609,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
       const { historyTodayId, sameMonthId } = seedCandidatePool(testSqlite);
 
       // 插入一条 7 天前的精选，photoId = historyTodayId
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+      const sevenDaysAgo = bjDate(-7);
       testSqlite
         .prepare(
           `INSERT INTO daily_picks (id, photo_id, pick_date, title, narrative, score, created_at, members)
@@ -613,7 +624,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT photo_id, members FROM daily_picks WHERE pick_date = ?")
         .get(today) as { photo_id: string; members: string } | undefined;
@@ -633,7 +644,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
       const { historyTodayId, sameMonthId, sameSeasonId } = seedCandidatePool(testSqlite);
 
       // sameMonthId 是 7 天前精选过的
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+      const sevenDaysAgo = bjDate(-7);
       testSqlite
         .prepare(
           `INSERT INTO daily_picks (id, photo_id, pick_date, title, narrative, score, created_at, members)
@@ -680,7 +691,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT members FROM daily_picks WHERE pick_date = ?")
         .get(today) as { members: string } | undefined;
@@ -712,7 +723,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT members FROM daily_picks WHERE pick_date = ?")
         .get(today) as { members: string } | undefined;
@@ -734,10 +745,10 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
     it("视频 hero 时 worker 不抛异常，members 写入 []", async () => {
       // 只插入一张视频候选，确保 AI select 选它
       const videoId = "video-hero-001";
-      const today = new Date();
-      const prevYear = today.getFullYear() - 2;
-      const month = String(today.getMonth() + 1).padStart(2, "0");
-      const day = String(today.getDate()).padStart(2, "0");
+      const todayStr = bjDate();
+      const prevYear = Number.parseInt(todayStr.slice(0, 4), 10) - 2;
+      const month = todayStr.slice(5, 7);
+      const day = todayStr.slice(8, 10);
 
       seedPhoto(testSqlite, {
         photoId: videoId,
@@ -754,7 +765,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const pickDate = today.toISOString().slice(0, 10);
+      const pickDate = bjDate();
       const row = testSqlite
         .prepare("SELECT photo_id, members FROM daily_picks WHERE pick_date = ?")
         .get(pickDate) as { photo_id: string; members: string } | undefined;
@@ -769,10 +780,10 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
     it("视频 hero 时不应构造 related-pool（阶段 1.5 chat 调用次数应为 1，仅 select）", async () => {
       const videoId = "video-hero-no-related";
-      const today = new Date();
-      const prevYear = today.getFullYear() - 2;
-      const month = String(today.getMonth() + 1).padStart(2, "0");
-      const day = String(today.getDate()).padStart(2, "0");
+      const todayStr2 = bjDate();
+      const prevYear = Number.parseInt(todayStr2.slice(0, 4), 10) - 2;
+      const month = todayStr2.slice(5, 7);
+      const day = todayStr2.slice(8, 10);
 
       seedPhoto(testSqlite, {
         photoId: videoId,
@@ -818,7 +829,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT photo_id, members FROM daily_picks WHERE pick_date = ?")
         .get(today) as { photo_id: string; members: string } | undefined;
@@ -843,7 +854,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite
         .prepare("SELECT narrative, title FROM daily_picks WHERE pick_date = ?")
         .get(today) as { narrative: string; title: string } | undefined;
@@ -866,7 +877,7 @@ describe("daily-selection 多图精选 — 验收测试 (T15)", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const row = testSqlite.prepare("SELECT id FROM daily_picks WHERE pick_date = ?").get(today);
 
       // 候选池为空时不应写入任何记录

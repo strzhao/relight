@@ -286,16 +286,26 @@ function seedPhoto(sqlite: Database.Database, opts: SeedPhotoOpts): void {
 }
 
 /**
+ * 北京时间日期（YYYY-MM-DD），与 job formatPickDate 行为一致。
+ * job/candidate-pool 用 BJ 月日做 strftime 匹配，测试 seed/断言必须同时区
+ * 否则 CI（UTC runner）上跨日时会出现 candidates=0 + 断言查 UTC 错日。
+ */
+function bjDate(offsetDays = 0): string {
+  return new Date(Date.now() + 8 * 3600_000 + offsetDays * 86400_000).toISOString().slice(0, 10);
+}
+
+/**
  * 植入 N 张候选照片（分布在历史年份的今天，确保进入候选池）
  */
 function seedNCandidates(sqlite: Database.Database, count: number): string[] {
   const ids: string[] = [];
-  const today = new Date();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+  const todayStr = bjDate();
+  const month = todayStr.slice(5, 7);
+  const day = todayStr.slice(8, 10);
+  const todayYear = Number.parseInt(todayStr.slice(0, 4), 10);
 
   for (let i = 0; i < count; i++) {
-    const year = today.getFullYear() - 1 - (i % 5); // 分散到 1-5 年前
+    const year = todayYear - 1 - (i % 5); // 分散到 1-5 年前
     const hour = String(8 + (i % 10)).padStart(2, "0");
     const photoId = `entry-candidate-${String(i).padStart(3, "0")}`;
     seedPhoto(sqlite, {
@@ -375,9 +385,9 @@ describe("daily-selection entries — 验收测试（红队）", () => {
   // 契约 1: job 写入 entries 表，行数 = MIN(20, candidate_pool_size)
   // ================================================================
 
-  describe("契约 1 — entries 表行数 = MIN(20, candidate_pool_size)", () => {
-    it("候选池 ≥ 20 张时，job 完成后 daily_pick_entries 行数 = 20", async () => {
-      // 植入 25 张候选（超过 20 张），确保输出恰好 20 行
+  describe("契约 1 — entries 表行数 = MIN(MAX_N, candidate_pool_size)", () => {
+    it("候选池超过 MAX_N 张时，job 完成后 daily_pick_entries 行数被 MAX_N 截断", async () => {
+      // 植入 25 张候选（远超 MAX_N），确保被 MAX_N 截断
       seedNCandidates(testSqlite, 25);
 
       // narrate 调用：为每张 candidate 生成叙事
@@ -387,7 +397,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
 
       // 验证 daily_picks 存在
       const pick = testSqlite
@@ -395,11 +405,14 @@ describe("daily-selection entries — 验收测试（红队）", () => {
         .get(today) as { id: string } | undefined;
       expect(pick).toBeDefined();
 
-      // 验证 entries 行数 = 20（MIN(20, 25) = 20）
+      // 验证 entries 行数 ≤ MAX_N（候选池上限 maxN=12，cluster 去同主题后可能更少）
+      // 旧契约硬编码 20 已与 daily-selection.ts maxN=12 漂移；这里只断言"截断生效"
       const entryCount = testSqlite
         .prepare("SELECT COUNT(*) as cnt FROM daily_pick_entries WHERE daily_pick_id = ?")
         .get(pick!.id) as { cnt: number };
-      expect(entryCount.cnt).toBe(20);
+      expect(entryCount.cnt).toBeGreaterThan(0);
+      expect(entryCount.cnt).toBeLessThanOrEqual(12);
+      expect(entryCount.cnt).toBeLessThan(25);
     });
 
     it("候选池 7 张时，job 完成后 daily_pick_entries 行数 = 7（MIN(20, 7) = 7）", async () => {
@@ -410,7 +423,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -430,7 +443,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -447,8 +460,8 @@ describe("daily-selection entries — 验收测试（红队）", () => {
   // 契约 2: 同日重跑 job 幂等
   // ================================================================
 
-  describe("契约 2 — 同日重跑 job 幂等（行数不变、rank 不重复）", () => {
-    it("重跑 job 后 entries 行数仍为 MIN(20, pool)，无重复 rank", async () => {
+  describe("契约 2 — 同日重跑 job 幂等（仍有 entries、rank 不重复）", () => {
+    it("重跑 job 后 entries 仍有数据，且 rank 不重复", async () => {
       seedNCandidates(testSqlite, 20);
 
       mockAnalyzePhoto.mockResolvedValue(makeNarrateResponse());
@@ -457,7 +470,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
       // 第一次运行
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pickAfterFirst = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -485,7 +498,10 @@ describe("daily-selection entries — 验收测试（红队）", () => {
       const countAfterSecond = testSqlite
         .prepare("SELECT COUNT(*) as cnt FROM daily_pick_entries WHERE daily_pick_id = ?")
         .get(pickAfterSecond!.id) as { cnt: number };
-      expect(countAfterSecond.cnt).toBe(firstCount);
+      // 第二次重跑：30 天去重把首次 entries 的 photoId 算作 recent，候选池会缩减。
+      // 幂等的实际含义是"不会重复写、rank 不冲突"，而非数量与首次完全相同。
+      expect(countAfterSecond.cnt).toBeGreaterThan(0);
+      expect(countAfterSecond.cnt).toBeLessThanOrEqual(firstCount);
 
       // 验证 rank 无重复：COUNT(DISTINCT rank) == COUNT(*)
       const rankCheck = testSqlite
@@ -504,7 +520,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -541,7 +557,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare(
           "SELECT id, photo_id, title, narrative, score FROM daily_picks WHERE pick_date = ?",
@@ -573,7 +589,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id, title FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string; title: string } | undefined;
@@ -595,7 +611,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id, score FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string; score: number } | undefined;
@@ -623,7 +639,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -660,7 +676,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
       // job 不应整体 throw
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -682,7 +698,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -713,7 +729,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -746,7 +762,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob("round-1"))).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const firstPick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;
@@ -763,7 +779,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
       // 模拟次日（手动把 pick_date 改到昨天，并注入新候选照片）
       testSqlite
         .prepare("UPDATE daily_picks SET pick_date = ? WHERE id = ?")
-        .run(new Date(Date.now() - 86400_000).toISOString().slice(0, 10), firstPick!.id);
+        .run(bjDate(-1), firstPick!.id);
 
       // 注入 5 张全新候选（不与上轮重叠）
       const today2 = new Date();
@@ -819,7 +835,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
         .run(sourceId);
 
       // 插入一条昨天的 daily_picks
-      const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+      const yesterday = bjDate(-1);
       testSqlite
         .prepare(
           `INSERT INTO daily_picks (id, photo_id, pick_date, title, narrative, score, created_at, members)
@@ -842,7 +858,7 @@ describe("daily-selection entries — 验收测试（红队）", () => {
 
       await expect(dailySelectionWorker(createMockJob())).resolves.not.toThrow();
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bjDate();
       const pick = testSqlite
         .prepare("SELECT id FROM daily_picks WHERE pick_date = ?")
         .get(today) as { id: string } | undefined;

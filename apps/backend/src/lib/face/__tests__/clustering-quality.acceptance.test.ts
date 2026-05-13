@@ -75,7 +75,7 @@ describe("updateCentroidWeighted", () => {
     for (const v of arr) s += v * v;
     const n = Math.sqrt(s);
     if (n === 0) return arr;
-    for (let i = 0; i < arr.length; i++) arr[i] = arr[i] / n;
+    for (let i = 0; i < arr.length; i++) arr[i] = (arr[i] ?? 0) / n;
     return arr;
   }
 

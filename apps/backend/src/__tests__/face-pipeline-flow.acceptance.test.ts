@@ -104,14 +104,16 @@ function createTestDb() {
     CREATE TABLE persons (
       id TEXT PRIMARY KEY,
       storage_source_id TEXT NOT NULL REFERENCES storage_sources(id),
-      name TEXT, bio TEXT,
+      name TEXT, nickname TEXT, bio TEXT,
       representative_face_id TEXT,
       avatar_path TEXT, custom_avatar_path TEXT,
       centroid_embedding TEXT NOT NULL,
       member_count INTEGER NOT NULL DEFAULT 0,
       manual_override INTEGER NOT NULL DEFAULT 0,
       displayable INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      hidden INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      attribute_summary TEXT
     );
     CREATE TABLE faces (
       id TEXT PRIMARY KEY,
@@ -121,7 +123,8 @@ function createTestDb() {
       bbox_w INTEGER NOT NULL, bbox_h INTEGER NOT NULL,
       detection_score REAL NOT NULL,
       embedding TEXT NOT NULL,
-      detected_at TEXT NOT NULL
+      detected_at TEXT NOT NULL,
+      attributes TEXT
     );
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);

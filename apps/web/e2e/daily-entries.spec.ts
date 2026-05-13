@@ -92,7 +92,8 @@ function make20EntriesApiResponse() {
     return makeEntry(i, 0);
   });
 
-  const entry0 = entries[0]!;
+  const entry0 = entries[0];
+  if (!entry0) throw new Error("entries[0] missing");
 
   const data = {
     id: "e2e-daily-pick-001",
