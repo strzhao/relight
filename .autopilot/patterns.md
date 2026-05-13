@@ -1,3 +1,31 @@
+### [2026-05-14] flex item `align-items: center` + 子元素 `aspectRatio` + `max-h-full` = 祖先 overflow-hidden 隐式裁剪
+
+<!-- tags: flexbox, css, align-items, aspect-ratio, max-height, overflow-hidden, frontend, daily-hero, bug, layout -->
+
+**Bug 模式**：父 flex 容器写 `align-items: center`（看似无害的居中），flex item（如 `<figure>`）不沿 cross-axis stretch。该 item 内部的 `<img style.aspectRatio = "W/H">` 给 item 提供了 **intrinsic 内容尺寸**，item 高度收缩到内容高度（=图片自身高度）。img 的 `max-h-full max-w-full` 的 `100%` 退化为 item 自身的 content height，**约束失效**。结果：item 超出 stage（容器）高度，被祖先 `overflow-hidden` 静默切掉。
+
+**Symptom**：用户视觉看到"图片上下/左右被切了内容"，但 CSS 写的是 `object-contain` 应该不裁。Playwright `getBoundingClientRect()` 实测能看到 `figure.height > stage.height` 的溢出。
+
+**Fix**：把 `.dh-stage` 父容器的 `align-items: center` 改成 `align-items: stretch`（CSS 默认值，但 center 显式覆盖了它）。stretch 给 flex item 明确的 used cross-size，descendant `max-h: 100%` 才能正确解析。`justify-content: stretch` 主轴对称处理。figure 内部已有的 `items-center justify-center` 继续负责把 img 居中，不冲突。
+
+**Why it matters**：Tailwind/CSS 里 `flex items-center justify-center` 是高频组合，开发者直觉觉得"居中=安全"，但碰到子元素带 intrinsic ratio + percentage 约束时变成 silent cropping bug。修复**单行 CSS**，但根因诊断非常容易绕路（看代码全是 `object-contain` 找不到 cover）。
+
+**Lesson**：碰到"object-contain 仍被裁"，先 Playwright 量 stage / figure / img 三层 boundingRect，看哪层先溢出。Spike 验证：`page.addStyleTag({ content: '.X { align-items: stretch !important; }' })` 实测前后对比。
+
+### [2026-05-14] Satori 不保留 CSS `object-fit` 字面属性，必须用几何断言验证 contain/cover
+
+<!-- tags: satori, svg, object-fit, server-side-rendering, geometric-assertion, wallpaper, image-composition, test, design -->
+
+**Scenario**：服务端 Satori JSX 渲染 `<img style={{ objectFit: "contain" }}>`，输出 SVG 字符串。红队验收测试想断言"objectFit 是 contain"，自然写 `expect(svg).toMatch(/object-fit\s*:\s*contain/)` —— **失败**。
+
+**Lesson**：Satori 把 CSS `object-fit` 翻译成 **几何**：直接计算 `<image>` 的 `x / y / width / height` 属性（cover 时 image 可能超出 viewport 由 `<clipPath>` 兜底；contain 时 image 缩进容器留白）。输出 SVG **不保留** `object-fit` 这个原始 CSS prop 字面。同类陷阱：`object-position`、`background-size`、`background-repeat` 等可能也走几何翻译。
+
+**正确测试**：断言 `<image>` 的几何不变量。contain 行为 = `x ≥ 0 ∧ y ≥ 0 ∧ x+w ≤ containerW ∧ y+h ≤ containerH`，且当 photo aspect ≠ container aspect 时**至少一边贴边**。cover = `image` 可能超出容器（需要 clipPath）。
+
+**Evidence**：`apps/backend/src/lib/wallpaper/__tests__/template.acceptance.test.ts` TM-1/TM-2 用 satori 实际渲染 portrait + landscape 两种 photo，xpath/正则匹 `<image x="..." y="..." width="..." height="..."`，几何验证不变量；TM-3 单独断言 SVG 含 `#F9F5EC` 字面（背景色作为静态 paint 是保留的）。蓝队 1:1 配对的真实合成 JPEG 角落像素均色精确 = COLOR_BACKGROUND（0 偏差）。
+
+**Why it matters**：服务端 JSX 渲染（Satori / resvg）和浏览器 CSS 渲染**语义同名但实现不同**。把浏览器侧的 CSS-prop 字面断言搬到 SSR 测试上必失败。测试策略要从"prop 字面"切到"渲染行为不变量"。
+
 ### [2026-05-11] exifr 默认 reviveValues:true 会把 EXIF 日期转 Date 对象——存 SQLite TEXT 列变 `[object Object]`
 
 <!-- tags: exifr, exif, sqlite, date-revive, reviveValues, translateValues, type-coercion, datetime-original, bug, library-default -->
@@ -708,3 +736,29 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 修 mock 路径错误**不属于"改红队测试让 assertion 过"**（不违反红队铁律），属于"修 mock setup 路径 bug"——assertion 没动、契约没变、只是模块 id 对齐。
 
 **Evidence**: `apps/backend/src/lib/face/__tests__/attributes.acceptance.test.ts:27` 修复前 `"../../ai/client"` → 修复后 `"../../../ai/client"`。修复前：14 cases failed；修复后：22/22 cases passed。
+
+### [2026-05-14] 人脸增量聚类的「centroid 雪球 + 垃圾桶 cluster」陷阱与三件套修复
+
+<!-- tags: face-clustering, incremental-clustering, centroid-drift, quality-aware, snowball, garbage-cluster, embedding, arcface, bug, algorithm -->
+
+**Lesson**: 增量聚类用 centroid（均值脸）做赛马 + cosine 阈值合并，**必然滚雪球**——大 cluster 的 centroid 趋向"通用脸"，吸引力远超小 cluster 的"特定真人脸"。symptom：某个 person 集合里混入大量错合并的脸（甚至跨性别/全年龄段），形成"什么人都有"的垃圾桶 cluster。
+
+**Why**：
+- centroid = (centroid_old × N + new_embedding) / (N+1)，N 越大 centroid 越稳越平庸
+- 任何低质量 face（模糊/侧脸/远景）的 embedding 跟"通用脸"都中等相似，cosine 容易过阈值
+- 第一张混入的杂质后，centroid 漂移 → 更多边界 face 被吸 → 不可逆
+- 临界区属性硬过滤救不了：杂质常以 cosine ≥ mergeThreshold（如 0.7）直接合并，跳过过滤
+
+**How to apply**：人脸增量聚类必须三件套同时配齐：
+
+1. **quality 分级** — 用 SCRFD detection_score + bbox 大小 + (可选) qwen 语义评分把 face 分 HIGH/MED/LOW
+2. **centroid 只让 HIGH/MED 拉动**，LOW face 只被吸不影响 centroid（避免污染）
+3. **属性硬过滤覆盖全程**：mergeThreshold 调到 0.85（而非 0.7），让 cosine [0.55, 0.85] 全区间都走 gender/age_band 拒绝判断。**只有极相似（≥0.85）才完全跳过属性过滤**
+
+代价：persons 数量上升 ~35%（同人在不同表情/角度被切成多 cluster），但单 cluster 纯度可达 100%。后者比前者重要——错合并不可逆且伤害用户信任，过度拆分用 UI"手动合并"按钮可恢复。
+
+**Evidence**：拾光人脸 6175 张全量重跑后 person #6（125 张 young_adult 男）属性分布：male 46% / unknown 28% / **female 26%** + age_band 全年龄段——典型垃圾桶。person #3（271 张 young_adult 女）混入 87 male / 73 unknown，错合 ~15%。
+
+`apps/backend/scripts/recluster-quality.mjs` 实现三件套（quality 三级 + LOW 不拉 centroid + mergeThreshold=0.85），在不重跑 qwen 的前提下纯算法重聚类：person #3 缩到 165 张但 female=165/165 = **100% 纯净**，垃圾桶 #6 被拆消失，用户验证 top 3 cluster 全部"非常准确"。persons 1131→1520（+35%）是可接受代价。
+
+旧设计（mergeThreshold=0.7，属性硬过滤只覆盖 [0.55, 0.7)）在 design 时被 plan-reviewer PASS、QA 也 PASS，红蓝队测试全绿——但**真实数据上才暴露雪球**。教训：聚类算法不能只靠单元测试 + 小样本验收，必须在全量真实数据上验收 cluster 纯度。

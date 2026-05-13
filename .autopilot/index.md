@@ -23,6 +23,9 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-14] flex item `align-items: center` + 子元素 aspectRatio + max-h-full = 祖先 overflow-hidden 隐式裁剪 | tags: flexbox, css, align-items, aspect-ratio, max-height, overflow-hidden, frontend, daily-hero, bug, layout | → patterns.md
+- [2026-05-14] Satori 不保留 CSS object-fit 字面，必须用几何断言验证 contain/cover | tags: satori, svg, object-fit, server-side-rendering, geometric-assertion, wallpaper, image-composition, test, design | → patterns.md
+- [2026-05-14] 人脸增量聚类的「centroid 雪球 + 垃圾桶 cluster」陷阱与三件套修复（quality 分级 + LOW 不拉 centroid + mergeThreshold 0.85） | tags: face-clustering, incremental-clustering, centroid-drift, quality-aware, snowball, garbage-cluster, embedding, arcface, bug, algorithm | → patterns.md
 - [2026-05-13] 批量危险脚本（清空/全量入队）必须 `--help` + `--yes` 二次确认 | tags: cli, dangerous-operation, bullmq, queue, safety, dry-run, confirmation, batch-job, bug, ops | → patterns.md
 - [2026-05-13] vitest `vi.mock` 路径以测试文件位置为基准（不是实现文件） | tags: vitest, vi-mock, relative-path, hoisted, module-resolution, test-infra, blue-red, bug | → patterns.md
 - [2026-05-12] HF 模型下载 URL 必须先 WebFetch /api/models/{org}/{repo}/tree/main 验证路径，猜路径 401/404 浪费多轮 | tags: huggingface, model-download, onnx, webfetch, hf-api, url-discovery, multi-source, bug | → patterns.md
