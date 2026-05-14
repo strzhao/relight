@@ -413,3 +413,27 @@
 - 「清空重建」persons / faces 接受丢失用户手动 name / nickname（用户已显式确认）
 
 **Evidence**: 设计 + 实施 + QA 完整记录在 `.autopilot/requirements/20260513-开始实现方案-C-并重跑/state.md`（autopilot：brainstorm 9 决策 → Plan Reviewer PASS → 蓝/红队对抗 → contract-checker 1 修 → QA 89/89 ✅）。merge commit `69e8764`。500 张验收由用户手动跑 `node scripts/rerun-faces.mjs --limit 500 --clear`。
+
+### [2026-05-14] 单 centroid → Apple 多原型方案：每 person 存 1-5 个 sub-prototype，匹配规则 max(cosine)
+
+<!-- tags: face-clustering, multi-prototype, exemplar, apple-photos, cross-age, cross-appearance, kmeans, arcface, centroid, design, architecture -->
+
+**Background**: 拾光经过 Phase 2 quality-aware 三件套（[[人脸增量聚类的「centroid 雪球 + 垃圾桶 cluster」陷阱]]）后单 cluster 纯度达 100%，但**单 centroid 设计是天花板**——同一人 5 岁/20 岁的 ArcFace embedding 在球面上距离很远，centroid 是几何中点不代表任何外观；戴眼镜/口罩/胡子同理。Apple Photos 用 ["a set of canonical exemplars X₀..Xc per person"](https://machinelearning.apple.com/research/recognizing-people-photos)（two-pass clustering: greedy + HAC），Immich 保留全量 embedding 做 k-NN，只有 PhotoPrism 和拾光是单 centroid。
+
+**Choice**: 每 person 存 1-5 个 sub-prototype（K_MAX=5）代表不同"外观模式"。新表 `person_prototypes` 关系型（不进 JSON 列，512 维 base64 ~2.7KB 入 JSON 会撑爆 row）。匹配规则改 `max over i of cosine(new, prototype_i)`。增量规则：找最近 prototype，cosine ≥ 0.88 → running weighted avg 更新；否则未满 K_MAX 就新建一个原型；满了就合并最相似两个再插。merge 接口：source.prototypes 迁到 target，总数 > K_MAX 时 mini-batch k-means 蒸馏。
+
+**保留 persons.centroid_embedding** 作粗筛索引：先 cosine to centroid 快速过滤掉明显不像的 person，再去查 prototypes 表。**保留 quality-aware（LOW face 不进 prototype）+ attribute filter（gender/age_band 硬过滤）**——多原型只在匹配规则上叠加 max，不替代 [[人脸增量聚类的「centroid 雪球 + 垃圾桶 cluster」陷阱]] 的三件套。
+
+**Alternatives rejected**:
+- **全量 embedding k-NN（Immich 式）**：1485 person × 平均 3-4 face = 5444 embedding × 512 × 4 bytes = 11MB 内存可接受，但匹配复杂度 O(F) 而非 O(P×K)，大库不扩展
+- **JSON 列存 prototypes**：512 维 base64 一个 ~2.7KB × K=5 ~13.5KB/row，drizzle update 整列重写性能差，且不能 partial update 单个原型
+- **upper-body embedding（Apple Pass 1 双信号）**：要新模型（DINOv2 或 CLIP 截上半身），引入额外 onnxruntime session + 模型权重下载。先做单 face embedding 多原型，验证收益后再叠 upper-body（P4 future）
+- **UI 暴露 sub-prototype 让用户标"小时候"/"戴眼镜"**：本次范围只做底层（P1 基建 + P2 主流程），UI 暴露留 P3 future。schema 已留 `label TEXT NULL` 字段
+
+**Trade-offs**:
+- K_MAX=5 是启发式（一个人 3-7 个外观模式合理上限）。回填时 k = clamp(round(memberCount/40), 1, 5)。后续可改 silhouette 自适应
+- **自实现 mini-batch k-means（~80 行）**而非 ml-kmeans 依赖：5444 face 规模太小不值得引依赖；cosine 距离需 custom 实现，库内 Euclidean k-means 不能直接用
+- 失败兜底：prototype 表读失败/单脸更新失败/k-means 异常 → 退回单 centroid 路径，不阻塞 face 入库
+- `manualOverride=true` 的 person 跳过 prototype 蒸馏，保留用户手动状态
+
+**Evidence**: 设计 + 实施 + QA + 真实验收完整记录在 `.autopilot/requirements/20260514-需要，按照苹果的方案/state.md`。verify-prototypes-vs-centroid.ts 在 5444 张已分配 face 上量化对比：新方案 self-consistency 83.5% vs 旧单 centroid 78.7%，净增益 +261 张面孔正确归位，5.9% 真实增益（旧错新对，cosine 0.73-0.84 区间的边缘正例）。merge commit `f66859c`。设计稿初版 `prototypeCoarseFilter=0.70` 在验收时实证错误，见 [[ArcFace 边缘正例 cosine 分布陷阱]]。

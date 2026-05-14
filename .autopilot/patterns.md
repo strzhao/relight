@@ -762,3 +762,29 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 `apps/backend/scripts/recluster-quality.mjs` 实现三件套（quality 三级 + LOW 不拉 centroid + mergeThreshold=0.85），在不重跑 qwen 的前提下纯算法重聚类：person #3 缩到 165 张但 female=165/165 = **100% 纯净**，垃圾桶 #6 被拆消失，用户验证 top 3 cluster 全部"非常准确"。persons 1131→1520（+35%）是可接受代价。
 
 旧设计（mergeThreshold=0.7，属性硬过滤只覆盖 [0.55, 0.7)）在 design 时被 plan-reviewer PASS、QA 也 PASS，红蓝队测试全绿——但**真实数据上才暴露雪球**。教训：聚类算法不能只靠单元测试 + 小样本验收，必须在全量真实数据上验收 cluster 纯度。
+
+### [2026-05-14] ArcFace MobileFaceNet 边缘正例 cosine 分布陷阱：聚类粗筛阈值不能凭"安全裕量"推理
+
+<!-- tags: face-clustering, arcface, mobilefacenet, cosine-threshold, coarse-filter, embedding-distribution, prototype, recall, autopilot-verification, bug -->
+
+**Lesson**: 聚类管线的"粗筛"阈值如果按"= 主合并阈值 - 安全裕量"推理设定（如 mergeThreshold 0.85 - 0.15 = 0.70），在 ArcFace MobileFaceNet 上**会大量误剔同人正例**。这个模型的同人不同模式（不同表情/装扮/年龄/光照）cosine 大量分布在 [0.55, 0.70) 区间，粗筛 0.70 会损失 ~19% 召回。
+
+**Why**：
+- ArcFace MobileFaceNet 是个**轻量模型**（vs ArcFace ResNet100），同人 cosine 分布更宽更扁：典型正例 0.6-0.85，边缘正例（戴帽/侧脸/老照片）0.55-0.70 占可观比例
+- "安全裕量"假设的前提是 cosine 分布对称且边缘平滑，但 ArcFace 实际分布是双峰（同人簇 + 异人簇）+ 中间区有重叠 — 粗筛切在重叠区会大量误伤
+- 设计阶段 plan-reviewer 看不出这个问题（数学上 mergeThreshold-0.15 是"保守"的）；红蓝队对抗测试用 fixture 模拟也看不出（fixture 阈值是自洽的）
+- 必须在**真实 embedding 全量分布**上验证
+
+**How to apply**：人脸/embedding 类聚类管线选阈值：
+1. **不要从 mergeThreshold 推理粗筛阈值**。粗筛只起"零信号剔除"作用，应当 = `minThreshold`（拾光取 0.55，即"完全不像就拒"）。
+2. **必须在真实数据上验证**：写一个 self-consistency 脚本（如 `verify-prototypes-vs-centroid.ts`），把已分配 face 当"新脸"喂回去，统计新方法的召回率，对比旧方法。看到 net loss 立即调阈值。
+3. **autopilot 工作流上**：在 merge 前**强制做真实数据验收**，用户主动 trigger 的"我来验"步骤可暴露 plan-reviewer + QA + 红蓝队都看不出的设计缺陷。
+4. **教训外推**：所有"距离/相似度类阈值"必须用真实数据校准，不能凭数学直觉。这条同样适用于 burst detector phash 阈值、daily-selection 候选 cosine 阈值。
+
+**Evidence**: 多原型方案设计稿用 `prototypeCoarseFilter = mergeThreshold - 0.15 = 0.70`，QA 全绿（红队 43/43 + face 全量 191/191）。但真实验收阶段 `verify-prototypes-vs-centroid.ts` 跑全量 5444 face 暴露问题：
+- 0.70 阈值下：新方案 self-consistency **60.1%** vs 旧 78.7%（-18.6 pp，1041 张漏召回）—— 净退步
+- 调成 0.55（= minThreshold）：新方案 **83.5%** vs 旧 78.7%（+4.8 pp，净增益 +261 张）
+
+漏召回样例（0.70 阈值时）：face cosine to centroid 都在 0.572 / 0.644 / 0.650 / 0.685 — 全部 ∈ [0.55, 0.70) 区间被粗筛剔除。
+
+Hotfix 落地于 `apps/backend/src/lib/config.ts:80-89` 默认值 0.70 → 0.55 + 写明理由注释。`apps/backend/src/cli/verify-prototypes-vs-centroid.ts` 保留作回归工具。merge commit `f66859c`。

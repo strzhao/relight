@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-14] 单 centroid → Apple 多原型方案：每 person 1-5 个 sub-prototype + max(cosine) 匹配 | tags: face-clustering, multi-prototype, exemplar, apple-photos, cross-age, cross-appearance, kmeans, arcface, centroid, design, architecture | → decisions.md
 - [2026-05-13] 人脸聚类引入 qwen 语义属性 + 临界硬过滤 + JSON 字段预留未来扩展 | tags: face-recognition, face-clustering, qwen-vl, semantic-attributes, hybrid-clustering, cosine-threshold, json-schema, schema-version, future-proof, design, architecture | → decisions.md
 - [2026-05-12] 人脸识别选 ONNX Runtime + SCRFD-500M + ArcFace MBF 纯本地方案，设计偏离 2.5G → 500M（公开 ONNX 镜像无 2.5G） | tags: face-recognition, onnx, scrfd, arcface, local-inference, privacy, coreml, model-selection, design, architecture | → decisions.md
 - [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标 | tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context | → decisions.md
@@ -23,6 +24,7 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-14] ArcFace MobileFaceNet 边缘正例 cosine 分布陷阱：聚类粗筛阈值不能凭"安全裕量"推理 | tags: face-clustering, arcface, mobilefacenet, cosine-threshold, coarse-filter, embedding-distribution, prototype, recall, autopilot-verification, bug | → patterns.md
 - [2026-05-14] flex item `align-items: center` + 子元素 aspectRatio + max-h-full = 祖先 overflow-hidden 隐式裁剪 | tags: flexbox, css, align-items, aspect-ratio, max-height, overflow-hidden, frontend, daily-hero, bug, layout | → patterns.md
 - [2026-05-14] Satori 不保留 CSS object-fit 字面，必须用几何断言验证 contain/cover | tags: satori, svg, object-fit, server-side-rendering, geometric-assertion, wallpaper, image-composition, test, design | → patterns.md
 - [2026-05-14] 人脸增量聚类的「centroid 雪球 + 垃圾桶 cluster」陷阱与三件套修复（quality 分级 + LOW 不拉 centroid + mergeThreshold 0.85） | tags: face-clustering, incremental-clustering, centroid-drift, quality-aware, snowball, garbage-cluster, embedding, arcface, bug, algorithm | → patterns.md
