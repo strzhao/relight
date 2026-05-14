@@ -118,6 +118,25 @@ export function PersonEditDialog({
     }
   }
 
+  async function handleToggleSelf() {
+    if (!personId || !detail) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (detail.isSelf) {
+        await api.persons.clearSelf(personId);
+      } else {
+        await api.persons.setSelf(personId);
+      }
+      const fresh = await api.persons.detail(personId);
+      setDetail(fresh.data);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleMerge(target: Person) {
     if (!personId || !detail) return;
     const sourceLabel = `${detail.name ?? `人物 #${detail.id.slice(0, 4)}`}（${detail.memberCount} 张）`;
@@ -269,17 +288,28 @@ export function PersonEditDialog({
               disabled={saving}
             />
 
-            {/* 保存 / 隐藏 / 取消 */}
+            {/* 保存 / 隐藏 / 我自己 / 取消 */}
             <div className="flex justify-between gap-2 border-t pt-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleHide}
-                disabled={saving}
-                data-testid="person-hide-btn"
-              >
-                从头像条隐藏
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleHide}
+                  disabled={saving}
+                  data-testid="person-hide-btn"
+                >
+                  从头像条隐藏
+                </Button>
+                <Button
+                  variant={detail.isSelf ? "outline" : "ghost"}
+                  size="sm"
+                  onClick={handleToggleSelf}
+                  disabled={saving}
+                  data-testid="person-self-toggle-btn"
+                >
+                  {detail.isSelf ? "取消我自己" : "设为我自己"}
+                </Button>
+              </div>
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={onClose} disabled={saving}>
                   取消

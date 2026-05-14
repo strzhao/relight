@@ -25,6 +25,9 @@ import { saveCustomAvatar } from "../lib/face/avatar";
 import { centroidWeightFor, qualityOf, updatePersonAttributeSummary } from "../lib/face/clustering";
 import { decodeEmbedding, encodeEmbedding } from "../lib/face/embedding-codec";
 import { miniBatchKmeansCosine } from "../lib/face/prototypes";
+import { deleteSetting, getSettingValue, setSettingValue } from "../lib/settings";
+
+const SELF_PERSON_ID_KEY = "selfPersonId";
 
 /**
  * 安全 personId 校验：仅允许 `[A-Za-z0-9_-]`，长度 1-128。
@@ -40,7 +43,7 @@ const ALLOWED_AVATAR_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ALLOWED_AVATAR_FORMAT = new Set(["jpeg", "png", "webp"]);
 
 /** 把 DB 行转为 API 返回 Person（boolean 字段 cast，timestamp 字段已是 ISO） */
-function toApiPerson(row: typeof schema.persons.$inferSelect) {
+function toApiPerson(row: typeof schema.persons.$inferSelect, selfPersonId: string | null) {
   return {
     id: row.id,
     storageSourceId: row.storageSourceId,
@@ -56,6 +59,7 @@ function toApiPerson(row: typeof schema.persons.$inferSelect) {
     hidden: row.hidden,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    isSelf: selfPersonId !== null && row.id === selfPersonId,
   };
 }
 
@@ -97,9 +101,11 @@ export const personsRouter = new Hono()
       .where(conditions.length === 1 ? conditions[0] : and(...conditions))
       .orderBy(desc(schema.persons.memberCount));
 
+    const selfPersonId = await getSettingValue(SELF_PERSON_ID_KEY);
+
     return c.json({
       success: true,
-      data: rows.map(toApiPerson),
+      data: rows.map((r) => toApiPerson(r, selfPersonId)),
     });
   })
 
@@ -134,10 +140,12 @@ export const personsRouter = new Hono()
       });
     }
 
+    const selfPersonId = await getSettingValue(SELF_PERSON_ID_KEY);
+
     return c.json({
       success: true,
       data: {
-        ...toApiPerson(person),
+        ...toApiPerson(person, selfPersonId),
         photos,
         faces: faceRows.map(toApiFace),
       },
@@ -188,7 +196,8 @@ export const personsRouter = new Hono()
     if (!refreshed) {
       return c.json({ success: false, error: "更新后查询失败" }, 500);
     }
-    return c.json({ success: true, data: toApiPerson(refreshed) });
+    const selfPersonId = await getSettingValue(SELF_PERSON_ID_KEY);
+    return c.json({ success: true, data: toApiPerson(refreshed, selfPersonId) });
   })
 
   /** 设置代表 face（manualOverride=true，避免后续自动覆盖） */
@@ -273,7 +282,8 @@ export const personsRouter = new Hono()
     if (!refreshed) {
       return c.json({ success: false, error: "更新后查询失败" }, 500);
     }
-    return c.json({ success: true, data: toApiPerson(refreshed) });
+    const selfPersonId = await getSettingValue(SELF_PERSON_ID_KEY);
+    return c.json({ success: true, data: toApiPerson(refreshed, selfPersonId) });
   })
 
   /** 合并：把当前 person 的全部 faces 转移到 targetPersonId，删除当前 person */
@@ -582,4 +592,30 @@ export const personsRouter = new Hono()
     } catch {
       return c.json({ success: false, error: "头像文件已丢失" }, 404);
     }
+  })
+
+  /** 设为"我自己"：写 settings.selfPersonId = :id（覆盖原值，全局单值指针） */
+  .put("/:id/self", async (c) => {
+    const id = c.req.param("id");
+    const personRows = await db.select().from(schema.persons).where(eq(schema.persons.id, id));
+    if (!personRows[0]) {
+      return c.json({ success: false, error: "人物不存在" }, 404);
+    }
+    await setSettingValue(SELF_PERSON_ID_KEY, id);
+    return c.json({ success: true, data: { personId: id, isSelf: true } });
+  })
+
+  /** 取消"我自己"：仅当 settings.selfPersonId === :id 时删除（幂等） */
+  .delete("/:id/self", async (c) => {
+    const id = c.req.param("id");
+    const personRows = await db.select().from(schema.persons).where(eq(schema.persons.id, id));
+    if (!personRows[0]) {
+      return c.json({ success: false, error: "人物不存在" }, 404);
+    }
+    const current = await getSettingValue(SELF_PERSON_ID_KEY);
+    if (current === id) {
+      await deleteSetting(SELF_PERSON_ID_KEY);
+      return c.json({ success: true, data: { cleared: true } });
+    }
+    return c.json({ success: true, data: { cleared: false } });
   });

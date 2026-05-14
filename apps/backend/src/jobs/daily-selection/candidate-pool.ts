@@ -10,8 +10,9 @@
  * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
  */
 
-import { and, desc, gte, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
+import { getSettingValue } from "../../lib/settings";
 import { type ClusteredCandidate, clusterByDirnameAndTime } from "./cluster";
 
 /** 全局最大候选数（质量优化：从 20 降到 12，避免低分照片摊薄整体质感 + 减 40% AI narrate 调用）*/
@@ -46,6 +47,11 @@ export interface EnrichedCandidate {
   longitude: number | null;
   /** 时区偏移，如 "+08:00"（用于 narrate 注入） */
   offsetTime: string | null;
+  /**
+   * 画面中命名人物的称呼数组（按 bbox 面积 DESC，去重 by person.id）。
+   * 视频候选恒为 []。规则：nickname 非空、hidden=0、不等于 selfPersonId。
+   */
+  peopleNicknames: string[];
 }
 
 /**
@@ -354,6 +360,7 @@ export async function buildCandidatePool(
           latitude: r.latitude ?? null,
           longitude: r.longitude ?? null,
           offsetTime: r.offsetTime ?? null,
+          peopleNicknames: [],
         };
       });
   }
@@ -381,7 +388,78 @@ export async function buildCandidatePool(
   // ---- 主题去重聚类（dirname + 时间窗）----
   // 簇数 < maxN 时直接接受 N<maxN（保护 4 源等比混采契约，不做 K 回退）
   const clustered = clusterByDirnameAndTime(merged);
-  return clustered.slice(0, maxN);
+  const finalPool = clustered.slice(0, maxN);
+
+  // ---- 在最终池形成后注入 peopleNicknames（仅图片候选）----
+  await enrichWithPeopleNicknames(finalPool);
+  return finalPool;
+}
+
+/**
+ * 为最终候选池注入 peopleNicknames（in-place 修改）。
+ *
+ * 规则（契约规约 §数据契约）：
+ * - 仅查图片候选；视频候选直接保持 []（detect-faces 跳过 video，无 face 数据）
+ * - 一次批量 JOIN faces+persons：nickname 非空、hidden=0、person.id != selfPersonId
+ * - 按 bbox 面积 DESC、去重 by person.id 后输出 nickname 数组
+ */
+async function enrichWithPeopleNicknames(candidates: ClusteredCandidate[]): Promise<void> {
+  if (candidates.length === 0) return;
+
+  const imageCandidates = candidates.filter((c) => c.mediaType !== "video");
+  if (imageCandidates.length === 0) return;
+
+  const selfPersonId = await getSettingValue("selfPersonId");
+
+  const photoIds = imageCandidates.map((c) => c.photoId);
+  // 用 '' 作为 sentinel，确保 selfPersonId 未设置时 p.id != '' 恒真
+  const selfSentinel = selfPersonId ?? "";
+
+  const rows = await db
+    .select({
+      photoId: schema.faces.photoId,
+      personId: schema.persons.id,
+      nickname: schema.persons.nickname,
+      area: sql<number>`${schema.faces.bboxW} * ${schema.faces.bboxH}`,
+    })
+    .from(schema.faces)
+    .innerJoin(schema.persons, sql`${schema.persons.id} = ${schema.faces.personId}`)
+    .where(
+      and(
+        sql`${schema.faces.photoId} IN (${sql.join(
+          photoIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})`,
+        sql`TRIM(COALESCE(${schema.persons.nickname}, '')) != ''`,
+        eq(schema.persons.hidden, false),
+        ne(schema.persons.id, selfSentinel),
+      ),
+    );
+
+  // 分组 by photoId → 按 area DESC 排序 → 去重 by personId → 取 nickname
+  const byPhoto = new Map<string, { personId: string; nickname: string; area: number }[]>();
+  for (const r of rows) {
+    const nick = r.nickname;
+    if (!nick) continue;
+    const bucket = byPhoto.get(r.photoId);
+    const entry = { personId: r.personId, nickname: nick, area: Number(r.area) };
+    if (bucket) bucket.push(entry);
+    else byPhoto.set(r.photoId, [entry]);
+  }
+
+  for (const candidate of imageCandidates) {
+    const bucket = byPhoto.get(candidate.photoId);
+    if (!bucket || bucket.length === 0) continue;
+    bucket.sort((a, b) => b.area - a.area);
+    const seen = new Set<string>();
+    const nicknames: string[] = [];
+    for (const e of bucket) {
+      if (seen.has(e.personId)) continue;
+      seen.add(e.personId);
+      nicknames.push(e.nickname);
+    }
+    candidate.peopleNicknames = nicknames;
+  }
 }
 
 /**

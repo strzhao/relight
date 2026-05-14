@@ -77,6 +77,8 @@ export interface Person {
   hidden: boolean;
   createdAt: string;
   updatedAt: string;
+  /** 是否为「我自己」（拍照人/看精选的人）。派生自 settings.selfPersonId */
+  isSelf: boolean;
   /** 方案 C：person 内 face attributes 的多数票聚合，可为 null */
   attributeSummary?: PersonAttributeSummary | null;
 }
