@@ -226,5 +226,16 @@ export const api = {
       }),
     /** 头像图片 URL（custom > auto > 404） */
     avatarUrl: (id: string) => `${BASE_URL}${API_ROUTES.persons.avatarImage(id)}`,
+    /** 设为「我自己」：写 settings.selfPersonId（覆盖原值） */
+    setSelf: (id: string) =>
+      fetchApi<ApiResponse<{ personId: string; isSelf: true }>>(
+        `${API_ROUTES.persons.detail(id)}/self`,
+        { method: "PUT" },
+      ),
+    /** 取消「我自己」（幂等） */
+    clearSelf: (id: string) =>
+      fetchApi<ApiResponse<{ cleared: boolean }>>(`${API_ROUTES.persons.detail(id)}/self`, {
+        method: "DELETE",
+      }),
   },
 };

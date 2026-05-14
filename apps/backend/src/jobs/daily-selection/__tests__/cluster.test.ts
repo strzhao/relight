@@ -35,6 +35,7 @@ function makeCandidate(
     latitude: opts.latitude ?? null,
     longitude: opts.longitude ?? null,
     offsetTime: opts.offsetTime ?? null,
+    peopleNicknames: [],
   };
 }
 

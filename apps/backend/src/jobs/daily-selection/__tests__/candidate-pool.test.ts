@@ -88,6 +88,7 @@ function makeCandidate(
     latitude: null,
     longitude: null,
     offsetTime: null,
+    peopleNicknames: [],
   };
 }
 
