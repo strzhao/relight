@@ -52,7 +52,7 @@ function makePerson(overrides: Partial<Person> = {}): Person {
     representativeFaceId: "f-1",
     avatarPath: ".persons/avatars/auto/p-1.jpg",
     customAvatarPath: null,
-    memberCount: 8,
+    memberCount: 50,
     manualOverride: false,
     displayable: true,
     hidden: false,
@@ -202,10 +202,11 @@ describe("PersonStrip — 点击交互（SSR 静态校验）", () => {
 describe("PersonStrip — 数据透传契约", () => {
   it("传入按 memberCount 排序的 persons → 渲染顺序应保持", async () => {
     // 服务端已按 memberCount desc 排序，组件不应再排
+    // 注意：所有 person 都需 memberCount >= 20，否则会被「小 cluster 默认隐藏」规则过滤
     const persons = [
-      makePerson({ id: "p-high", name: "高频", memberCount: 20 }),
-      makePerson({ id: "p-mid", name: "中频", memberCount: 10 }),
-      makePerson({ id: "p-low", name: "低频", memberCount: 6 }),
+      makePerson({ id: "p-high", name: "高频", memberCount: 200 }),
+      makePerson({ id: "p-mid", name: "中频", memberCount: 80 }),
+      makePerson({ id: "p-low", name: "低频", memberCount: 25 }),
     ];
     const html = await renderStrip({ storageSourceId: "src-001", persons });
 
@@ -216,5 +217,21 @@ describe("PersonStrip — 数据透传契约", () => {
     expect(idxHigh).toBeGreaterThanOrEqual(0);
     expect(idxMid).toBeGreaterThan(idxHigh);
     expect(idxLow).toBeGreaterThan(idxMid);
+  });
+
+  it("memberCount < 20 的 person 默认不应出现在 visible strip", async () => {
+    // 契约：人脸聚类常产生大量低 memberCount 小群，顶部头像条只展示主要人物（>=20 张）
+    const persons = [
+      makePerson({ id: "p-big", name: "主要人物", memberCount: 100 }),
+      makePerson({ id: "p-tiny-a", name: "小群A", memberCount: 19 }),
+      makePerson({ id: "p-tiny-b", name: "小群B", memberCount: 5 }),
+    ];
+    const html = await renderStrip({ storageSourceId: "src-001", persons });
+
+    expect(html).toContain("主要人物");
+    expect(html).not.toContain("小群A");
+    expect(html).not.toContain("小群B");
+    expect(html).not.toContain("/api/persons/p-tiny-a/avatar.jpg");
+    expect(html).not.toContain("/api/persons/p-tiny-b/avatar.jpg");
   });
 });

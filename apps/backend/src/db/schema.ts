@@ -313,6 +313,26 @@ export const persons = sqliteTable(
   }),
 );
 
+/** 人物原型（多原型聚类，每个 person 最多 5 条） */
+export const personPrototypes = sqliteTable(
+  "person_prototypes",
+  {
+    id: text("id").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => persons.id, { onDelete: "cascade" }),
+    embedding: text("embedding").notNull(),
+    weightSum: real("weight_sum").notNull().default(0),
+    memberCount: integer("member_count").notNull().default(0),
+    label: text("label"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    personIdx: index("idx_person_prototypes_person").on(table.personId),
+  }),
+);
+
 /** 人脸（每张人脸独立行）— bbox + 512 维 embedding */
 export const faces = sqliteTable(
   "faces",

@@ -16,7 +16,7 @@ import {
   setPersonRepresentativeSchema,
   updatePersonSchema,
 } from "@relight/shared";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
@@ -24,6 +24,7 @@ import type { FaceAttributes } from "../lib/face/attributes";
 import { saveCustomAvatar } from "../lib/face/avatar";
 import { centroidWeightFor, qualityOf, updatePersonAttributeSummary } from "../lib/face/clustering";
 import { decodeEmbedding, encodeEmbedding } from "../lib/face/embedding-codec";
+import { miniBatchKmeansCosine } from "../lib/face/prototypes";
 
 /**
  * 安全 personId 校验：仅允许 `[A-Za-z0-9_-]`，长度 1-128。
@@ -330,6 +331,66 @@ export const personsRouter = new Hono()
         .run();
       tx.delete(schema.persons).where(eq(schema.persons.id, id)).run();
     });
+
+    // 合并原型集合（source → target）+ 超限时 k-means 蒸馏
+    if (!target.manualOverride) {
+      try {
+        // 1. 把 source 的原型转移到 target
+        db.transaction((tx) => {
+          tx.update(schema.personPrototypes)
+            .set({ personId: targetPersonId })
+            .where(eq(schema.personPrototypes.personId, id))
+            .run();
+        });
+
+        // 2. 查 target 当前的全部原型
+        const targetProtos = await db
+          .select()
+          .from(schema.personPrototypes)
+          .where(eq(schema.personPrototypes.personId, targetPersonId));
+
+        if (targetProtos.length > config.face.prototypeMaxPerPerson) {
+          // 3. 蒸馏：k-means 压缩到 prototypeMaxPerPerson 个
+          const embeddings = targetProtos.map((r) => decodeEmbedding(r.embedding));
+          const weights = targetProtos.map((r) => r.weightSum);
+          const k = config.face.prototypeMaxPerPerson;
+          const clusters = miniBatchKmeansCosine(
+            embeddings,
+            weights,
+            k,
+            config.face.prototypeKmeansMaxIters,
+          );
+
+          const mergeNow = new Date().toISOString();
+          const protoIds = targetProtos.map((r) => r.id);
+          db.transaction((tx) => {
+            // DELETE all existing prototypes for target
+            if (protoIds.length > 0) {
+              tx.delete(schema.personPrototypes)
+                .where(inArray(schema.personPrototypes.id, protoIds))
+                .run();
+            }
+            // INSERT k new prototypes
+            for (const cluster of clusters) {
+              tx.insert(schema.personPrototypes)
+                .values({
+                  id: crypto.randomUUID(),
+                  personId: targetPersonId,
+                  embedding: encodeEmbedding(cluster.centroid),
+                  weightSum: cluster.weightSum,
+                  memberCount: cluster.memberCount,
+                  label: null,
+                  createdAt: mergeNow,
+                  updatedAt: mergeNow,
+                })
+                .run();
+            }
+          });
+        }
+      } catch {
+        // 原型合并失败不阻塞主合并结果
+      }
+    }
 
     // 合并后重算 target.centroidEmbedding + attribute_summary（数学/语义一致性）。
     //

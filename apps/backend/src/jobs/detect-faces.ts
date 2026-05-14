@@ -27,7 +27,7 @@
  */
 import * as path from "node:path";
 import type { Job } from "bullmq";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import type { FaceAttributes } from "../lib/face/attributes";
@@ -147,6 +147,7 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
     centroidWeightFor,
     clusterConfigForQuality,
   } = await import("../lib/face/clustering");
+  const { matchByPrototypes, updatePrototypesIncremental } = await import("../lib/face/prototypes");
   const { decodeEmbedding } = await import("../lib/face/embedding-codec");
   const { generateAutoAvatar } = await import("../lib/face/avatar");
   const { cropFaceToJpeg } = await import("../lib/face/crop");
@@ -224,41 +225,73 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       }
     }
 
-    // 5c. 拉同 storageSource 的 person centroids（含 attribute_summary）
+    // 5c. 拉同 storageSource 的 person centroids（含 attribute_summary 和 prototypes）
     const personsRows = await db
       .select()
       .from(schema.persons)
       .where(eq(schema.persons.storageSourceId, photo.storageSourceId));
 
-    const candidates = personsRows.map((p) => {
-      let parsedSummary: PersonAttributeSummary | null = null;
-      if (p.attributeSummary) {
-        try {
-          parsedSummary = JSON.parse(p.attributeSummary) as PersonAttributeSummary;
-        } catch {
-          parsedSummary = null;
-        }
-      }
-      return {
-        id: p.id,
-        memberCount: p.memberCount,
-        centroid: decodeEmbedding(p.centroidEmbedding),
-        attribute_summary: parsedSummary,
-      };
-    });
+    // 一次 IN 查询加载所有 prototypes（避免 N+1）
+    const personIds = personsRows.map((p) => p.id);
+    const allPrototypeRows =
+      personIds.length > 0
+        ? await db
+            .select()
+            .from(schema.personPrototypes)
+            .where(inArray(schema.personPrototypes.personId, personIds))
+        : [];
+
+    // 按 personId 分组 prototypes
+    const prototypesByPerson = new Map<
+      string,
+      Array<{
+        id: string;
+        personId: string;
+        embedding: Float32Array;
+        weightSum: number;
+        memberCount: number;
+      }>
+    >();
+    for (const row of allPrototypeRows) {
+      const arr = prototypesByPerson.get(row.personId) ?? [];
+      arr.push({
+        id: row.id,
+        personId: row.personId,
+        embedding: decodeEmbedding(row.embedding),
+        weightSum: row.weightSum,
+        memberCount: row.memberCount,
+      });
+      prototypesByPerson.set(row.personId, arr);
+    }
 
     // Quality-aware：LOW face 用更严阈值，避免污染大 cluster（patterns.md 雪球陷阱）
     const quality = qualityOf(det.score, det.w, det.h, qualityConfig);
     const effectiveConfig = clusterConfigForQuality(clusterConfig, quality);
-    const result = assignToPersonWithAttrFilter(
-      embedding,
-      faceAttributes,
-      candidates,
-      effectiveConfig,
-    );
     const centroidWeight = centroidWeightFor(quality, config.face.medQualityCentroidWeight);
+
+    // 主路径：多原型匹配
+    const prototypeCandidates = personsRows.map((p) => ({
+      person: {
+        id: p.id,
+        centroidEmbedding: p.centroidEmbedding,
+        attributeSummary: p.attributeSummary,
+      },
+      prototypes: prototypesByPerson.get(p.id) ?? [],
+    }));
+
+    const protoMatchConfig = {
+      ...effectiveConfig,
+      prototypeCoarseFilter: config.face.prototypeCoarseFilter,
+    };
+
+    const result = matchByPrototypes(
+      embedding,
+      prototypeCandidates,
+      faceAttributes,
+      protoMatchConfig,
+    );
     job.log(
-      `[detect-faces] face=${faceId} quality=${quality} weight=${centroidWeight} bestSim=${result.bestSim.toFixed(3)} rejectedByAttr=${result.rejectedByAttr} → ${result.matchedPersonId ?? "(new)"}`,
+      `[detect-faces] face=${faceId} quality=${quality} weight=${centroidWeight} protoScore=${result.score.toFixed(3)} → ${result.matchedPersonId ?? "(new)"}`,
     );
 
     if (result.matchedPersonId) {
@@ -329,6 +362,17 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
         job.log(`[detect-faces] attribute_summary 重算失败（已忽略）: ${(err as Error).message}`);
       }
 
+      // 增量更新原型
+      try {
+        await updatePrototypesIncremental(matched.id, embedding, quality, {
+          prototypeTightMerge: config.face.prototypeTightMerge,
+          prototypeMaxPerPerson: config.face.prototypeMaxPerPerson,
+          medQualityCentroidWeight: config.face.medQualityCentroidWeight,
+        });
+      } catch (err) {
+        job.log(`[detect-faces] 原型更新失败（已忽略）: ${(err as Error).message}`);
+      }
+
       // 5f. 自动选代表 + 重新生成头像（manualOverride=false 时）
       if (!matched.manualOverride) {
         await maybeUpdateRepresentativeAndAvatar(matched.id, source.id, buffer, job);
@@ -373,6 +417,24 @@ export async function detectFacesWorker(job: Job<DetectFacesJobData>): Promise<v
       } catch (err) {
         job.log(`[detect-faces] 新建 person 事务失败（已跳过该脸）: ${(err as Error).message}`);
         continue;
+      }
+
+      // 新建 person：INSERT 初始原型
+      if (centroidWeight > 0) {
+        try {
+          await db.insert(schema.personPrototypes).values({
+            id: crypto.randomUUID(),
+            personId: newPersonId,
+            embedding: encodeEmbedding(embedding),
+            weightSum: centroidWeight,
+            memberCount: 1,
+            label: null,
+            createdAt: now,
+            updatedAt: now,
+          });
+        } catch (err) {
+          job.log(`[detect-faces] 初始原型写入失败（已忽略）: ${(err as Error).message}`);
+        }
       }
 
       // 生成初始头像

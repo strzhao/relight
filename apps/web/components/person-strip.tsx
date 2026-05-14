@@ -6,6 +6,11 @@ import { EyeOff, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+// 小 cluster 默认隐藏阈值：人脸聚类容易产生大量低 memberCount 的小群（多为偶然出现/误检），
+// 顶部头像条只展示主要人物，<20 张的 person 不计入 visible，也不计入 hidden bucket
+// （hidden bucket 仅承载用户主动隐藏的人物）。
+const MIN_VISIBLE_MEMBER_COUNT = 20;
+
 interface PersonStripProps {
   /** 可选：仅显示该 storageSource 下的人物（与照片库筛选保持一致） */
   storageSourceId?: string;
@@ -28,7 +33,9 @@ export function PersonStrip({
   onPersonClick,
 }: PersonStripProps) {
   const hasInitial = initialPersons !== undefined;
-  const [visible, setVisible] = useState<Person[]>(initialPersons ?? []);
+  const [visible, setVisible] = useState<Person[]>(
+    (initialPersons ?? []).filter((p) => p.memberCount >= MIN_VISIBLE_MEMBER_COUNT),
+  );
   const [hidden, setHidden] = useState<Person[]>([]);
   const [loading, setLoading] = useState(!hasInitial);
   const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
@@ -43,7 +50,7 @@ export function PersonStrip({
     ])
       .then(([v, h]) => {
         if (!alive) return;
-        setVisible(v.data ?? []);
+        setVisible((v.data ?? []).filter((p) => p.memberCount >= MIN_VISIBLE_MEMBER_COUNT));
         setHidden(h.data ?? []);
       })
       .catch(() => {

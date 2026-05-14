@@ -76,5 +76,22 @@ export const config = {
     detectionThreshold: Number.parseFloat(process.env.FACE_DETECTION_THRESHOLD ?? "0.5"),
     /** 最小人脸 bbox 边长（像素），过滤太小的脸 */
     minFaceSize: Number.parseInt(process.env.FACE_MIN_SIZE ?? "80", 10),
+    /** 多原型：cosine >= 此值才合并到已有原型（tight merge） */
+    prototypeTightMerge: Number.parseFloat(process.env.FACE_PROTOTYPE_TIGHT_MERGE ?? "0.88"),
+    /**
+     * 多原型：粗筛阈值，centroid cosine < 此值直接跳过该 person。
+     * 默认 0.55 = clusteringMinThreshold（仅剔除零信号，不替代 mergeThreshold）。
+     * 历史：设计稿曾设 0.70（= mergeThreshold-0.15），实证显示对 ArcFace MobileFaceNet
+     * 边缘正例分布过严，会损失 ~19% 召回（cosine 0.55-0.70 真同人被剔除）。
+     * 验收实测：阈值降到 0.55 后新方案 self-consistency 83.5% vs 单 centroid 78.7%，净增益 +261 张。
+     */
+    prototypeCoarseFilter: Number.parseFloat(process.env.FACE_PROTOTYPE_COARSE_FILTER ?? "0.55"),
+    /** 多原型：每个 person 最多保留的原型数量 */
+    prototypeMaxPerPerson: Number.parseInt(process.env.FACE_PROTOTYPE_MAX_PER_PERSON ?? "5", 10),
+    /** 多原型：k-means 最大迭代次数 */
+    prototypeKmeansMaxIters: Number.parseInt(
+      process.env.FACE_PROTOTYPE_KMEANS_MAX_ITERS ?? "20",
+      10,
+    ),
   },
 } as const;
