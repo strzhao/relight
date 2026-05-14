@@ -99,14 +99,18 @@ export const transcriptResultSchema = baseFileFields.extend({
 });
 export type TranscriptResult = z.infer<typeof transcriptResultSchema>;
 
-const transcriptInlineSchema = transcriptResultSchema.pick({
-  language: true,
-  text: true,
-  segments: true,
-  srt: true,
-  model: true,
-  hasWordTimestamps: true,
-});
+const transcriptInlineSchema = transcriptResultSchema
+  .pick({
+    language: true,
+    text: true,
+    segments: true,
+    srt: true,
+    model: true,
+    hasWordTimestamps: true,
+  })
+  .extend({
+    updatedAt: z.string().optional(),
+  });
 
 export const manifestImageEntrySchema = imageAnalysisResultSchema;
 
