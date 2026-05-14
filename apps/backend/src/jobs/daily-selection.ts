@@ -79,11 +79,6 @@ async function processSingleEntry(
         : "未知";
     const tzStr = candidate.offsetTime ?? "+08:00";
 
-    const peopleStr =
-      candidate.peopleNicknames.length > 0
-        ? `画面人物：${candidate.peopleNicknames.join("、")}`
-        : "画面人物：（无命名人物）";
-
     let userText = narratePrompts.user
       .replace("{date}", heroDate)
       .replace("{years_ago}", String(candidate.yearsAgo ?? 0))
@@ -93,10 +88,6 @@ async function processSingleEntry(
       .replace("{latitude}", latStr)
       .replace("{longitude}", lonStr)
       .replace("{timezone}", tzStr);
-
-    if (!isVideo) {
-      userText = userText.replace("{people}", peopleStr);
-    }
 
     if (isVideo) {
       const analysisRows = await db

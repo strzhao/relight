@@ -3,7 +3,6 @@
 已知元数据（供参考）：
 - 自动检测标签: {tags}
 - 情感基调: {emotions}
-- {people}
 - 画面描述: {narrative}
 - GPS 坐标: 纬度 {latitude}，经度 {longitude}
 - 时区: {timezone}

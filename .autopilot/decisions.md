@@ -1,5 +1,41 @@
 # 架构决策日志
 
+### [2026-05-15] 撤销 narrate 命名人物注入：第二人称「你」呼告体优于硬塞具体称呼
+
+<!-- tags: daily-selection, narrate-prompt, person-injection, second-person, product-tone, reversal, scope-control, ai-prompt-engineering -->
+
+**Background**: commit `6d1f4c0` 将 candidate-pool 的 `peopleNicknames` 数组通过 `{people}` 占位符注入 narrate user prompt，期望文案能写出「妈妈在伏见稻荷的朱红长廊里笑」等具体称呼。真实跑出来的 narrative 出现两类问题：(1) **AI 角色反转** — system prompt 明写「『你』=拍照人不在画面里」「画面里有妈妈时用妈妈指代」，但 AI 把"妈妈"理解为画面外的拍摄者、把画面里的女性当成"你"，输出「**你**站在伏见稻荷…**妈妈**在镜头外…**你**比剪刀手」；(2) **改良 prompt 后角色顺过来了，但失去亲密呼告感** — 「妈妈在朱红长廊里笑得毫无防备」读起来像第三方旁观叙述，丢失"那年今日"的对话亲密感。
+
+**Choice**: 撤销 narrate 阶段的人物注入：
+1. `daily-selection.ts`: 删除 `peopleStr` 构造 + `replace("{people}", ...)` 分支。
+2. `narrate/system.txt`: 删除整段「画面人物处理」规则（line 11-16）。
+3. `narrate/user.txt`: 删除 `- {people}` 占位符行。
+4. 删除 `narrate-prompt-injection.acceptance.test.ts`（契约已撤）。
+5. **保留** `EnrichedCandidate.peopleNicknames` 字段、`enrichWithPeopleNicknames` 实现、`people-injection.acceptance.test.ts` — 已落库人脸数据无需作废，未来 person-strip UI / 同人物聚类 / 按人筛选仍可复用。
+
+**Lesson**:
+- **人称代词的相对性**让 AI 反向解读：「妈妈」在中文里=「我的母亲」，AI 看图+读 prompt 时倾向于把"妈妈"当成画面外的讲述者（拍摄者称自己母亲为妈妈），即使 prompt 显式锚定「画面人物：妈妈」也压不住这层语义。
+- **AI prompt 的 system 规则 vs 风格示例冲突时，示例胜出**：旧 system 示例「那天风很大，你还没学会如何体面地告别，只顾着在镜头前揉眼睛」里"你"明显在画面里揉眼睛——与规则 2「『你』不在画面」直接矛盾。AI 优先模仿示例。
+- **产品调性**："你"呼告 = 用户在跟过去自己/挚爱说话的亲密对话；具体称呼 = 第三方旁观描述。同样信息密度下前者情感载荷更高。
+- **测试通过 ≠ 产品成功**：commit `6d1f4c0` 红蓝队 39 acceptance + qa-reviewer 17/17 全绿，证明数据流和注入逻辑全对——但效果验证（端到端跑一次实际 narrate）才发现产品调性问题。
+
+**Alternatives rejected**:
+- **改良 prompt 修正角色反转**（加正反例锚定「画面人物：妈妈 + 画面女性 → 写妈妈不写你」+ 替换有歧义的风格示例）：实测 AI 角色顺过来了，但用户审美反馈"妈妈在朱红长廊"读起来很怪，不如"你站在朱红深处"。问题不在 AI 不听话，在产品调性本身不该用第三人称称呼。
+- **保留注入但仅作上下文提示**（不强制称呼出现）：AI 没明确指令时易回到第三人称叙述或角色错位，不可控。
+- **完全保留并接受角色反转**：narrative 出现"你/妈妈"语义混乱，比无注入版更差。
+
+**Trade-offs**:
+- 一次性把 6d1f4c0 的 narrate 部分回滚，但 `peopleNicknames` 数据 + self 过滤 + selfPersonId settings 全部保留，下个用人物的产品功能（搜索、聚类、UI）不用重做。
+- 命名人物覆盖率（7 人 ~2600 张照片）的潜在价值推迟到非 narrate 路径释放。
+- decisions.md 的两条原始决策标记为 **Superseded** 而非删除，保留决策演化历史。
+
+**Evidence**:
+- 端到端验证：5 张候选撤销注入后 narrate 全部回到「那年五月，**你**怀里的孩子还那么小」「2018年的夏天，**你**染了一头温柔的紫发」「**你**在空旷的地下停车场停下脚步」等呼告体，0/5 出现角色反转。
+- 测试: daily-selection 测试套件 80/80 通过（删除注入相关 39 条 + 保留人物字段相关 21 条）。
+- 用户审美反馈直接驱动：「改成妈妈反而很怪，不如你」。
+
+---
+
 ### [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标
 
 <!-- tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context -->
@@ -440,7 +476,9 @@
 
 ### [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt）
 
-<!-- tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design -->
+<!-- tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design, superseded -->
+
+> **Superseded by [2026-05-15] 撤销 narrate 命名人物注入** — 真实端到端跑 narrate 验证后发现 AI 角色反转 + 产品调性偏向「你」呼告体，注入逻辑已回滚。`peopleNicknames` 字段与 self 过滤保留。
 
 **Background**: 人脸识别管线（persons + faces 表，SCRFD/ArcFace 聚类，用户已命名 7 个核心家人 nickname）已就绪，但 daily-selection narrate 仍泛化（"那天笑得开心"）。优化路径有 4 条候选：(A) 候选池加权偏向含命名人物的照片，(B) members 选权用人物交集硬排序，(C) narrate prompt 注入"画面里有谁"叙事增强，(D) 新增"故人重逢"候选源。
 

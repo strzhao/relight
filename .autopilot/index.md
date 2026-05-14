@@ -1,7 +1,8 @@
 # Knowledge Index
 
 ## Decisions
-- [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt） | tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design | → decisions.md
+- [2026-05-15] 撤销 narrate 命名人物注入：第二人称「你」呼告体优于硬塞具体称呼 | tags: daily-selection, narrate-prompt, person-injection, second-person, product-tone, reversal, scope-control, ai-prompt-engineering | → decisions.md
+- [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt） **[已撤销 5-15]** | tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design, superseded | → decisions.md
 - [2026-05-15] self 标记用 settings.selfPersonId 单 key，不加 persons.isSelf 列 | tags: settings, schema-design, single-value-pointer, isSelf, persons, design | → decisions.md
 - [2026-05-14] 单 centroid → Apple 多原型方案：每 person 1-5 个 sub-prototype + max(cosine) 匹配 | tags: face-clustering, multi-prototype, exemplar, apple-photos, cross-age, cross-appearance, kmeans, arcface, centroid, design, architecture | → decisions.md
 - [2026-05-13] 人脸聚类引入 qwen 语义属性 + 临界硬过滤 + JSON 字段预留未来扩展 | tags: face-recognition, face-clustering, qwen-vl, semantic-attributes, hybrid-clustering, cosine-threshold, json-schema, schema-version, future-proof, design, architecture | → decisions.md
