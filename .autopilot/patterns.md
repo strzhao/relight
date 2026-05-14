@@ -788,3 +788,34 @@ callback ref 在 node 挂载/卸载时由 React 自动调用，天然管理 obse
 漏召回样例（0.70 阈值时）：face cosine to centroid 都在 0.572 / 0.644 / 0.650 / 0.685 — 全部 ∈ [0.55, 0.70) 区间被粗筛剔除。
 
 Hotfix 落地于 `apps/backend/src/lib/config.ts:80-89` 默认值 0.70 → 0.55 + 写明理由注释。`apps/backend/src/cli/verify-prototypes-vs-centroid.ts` 保留作回归工具。merge commit `f66859c`。
+
+### [2026-05-15] candidate-pool / 主流程加新 SQL JOIN 必须同步补所有 acceptance fixture 表 DDL
+
+<!-- tags: vitest, acceptance-test, fixture, schema, sql-join, no-such-table, daily-selection, bug -->
+
+**症状**: daily-selection 主流程在 `buildCandidatePool` 收尾时新增一次 `INNER JOIN faces JOIN persons` 拿命名人物，跑现有 acceptance 测试就报 `SQLITE_ERROR: no such table: faces`。
+
+**根因**: 既有 acceptance test 的 SQL setup 段是手写 DDL（不复用 `setupTestSchema` helper），最初版本只 CREATE 该测试用到的表（storage_sources/photos/tags/photo_tags/photo_analyses/daily_picks/daily_pick_entries/bursts/settings/scan_logs）。当主流程新增对 faces/persons 的 JOIN 时，fixture 表清单与 schema.ts 真实表清单**漂移**，JOIN 立即 SQL error。
+
+**对策**:
+- 当 candidate-pool / processSingleEntry 等主流程新增任意 SQL JOIN，**所有相关 acceptance 测试 fixture 必须同步补 CREATE TABLE**（与 schema.ts DDL 严格一致，含索引）。
+- 把这条作为 contract-checker / plan-reviewer 的 BLOCKER 项之一（设计阶段就在契约规约写明"测试 fixture 必须 CREATE TABLE X+Y"）。
+- 长期优化：让所有 acceptance test 共用 `setupTestSchema` helper（已有），避免每个测试维护一份 DDL。但本次没动既有测试结构，按硬要求补字段最快。
+
+**Evidence**: plan-reviewer 一审标 BLOCKER B1（`daily-selection-multi-photo.acceptance.test.ts:96-210` 和 `daily-selection-entries.acceptance.test.ts:96-210` 缺 faces/persons 表）。修复后 113 个回归测试全绿。merge commit `6d1f4c0`，session `.autopilot/sessions/prompt/requirements/20260512-近期新加了人物识别能/state.md`。
+
+### [2026-05-15] narrate 第二人称"你"+ 画面人物注入：AI 仍偶尔把"你"映射到画面里的人
+
+<!-- tags: ai, narrate-prompt, second-person, soft-constraint, prompt-engineering, daily-selection, bug -->
+
+**症状**: system.txt 显式写了规则 "「你」=拍照人/看精选的人，不出现在画面里"，但实际 AI 调用产出的 narrative 中仍出现 "你穿着那件蓝色的Polo衫"（画面里是个人物自拍）、"你戴着那顶黑白条纹的宽檐帽"（画面里是戴帽女子）等用"你"指代画面里人物的表达。
+
+**根因**: prompt 工程中的"否定式约束 + 第二人称"是 LLM 最难遵守的组合之一。模型预训练时见过大量第二人称叙事都是"对画面中的人说话"，单条规则文本不足以反转这个先验。规则又是否定式（"不要 X"），LLM 反而更易激活 X。
+
+**对策**（暂未实施，待 prompt 工程迭代）:
+- 加正向 few-shot 示例：在 system.txt 列 3-5 个"画面里有妈妈和六六" → narrative "妈妈牵着六六的手过桥"的范例，让 AI 学习正确视角；
+- 重写为"主动角色定义"：把"你不在画面"改成"你站在镜头后看着画面里的他们"，给 AI 一个明确的物理位置 → 自然不会用"你"指画面里人；
+- 接受 narrative 后做后处理校验：若 narrative 含 self 称呼立刻 fallback 到模板文案；
+- 真要兜底，把"你"全替换为 self 称呼（"爸爸看着妈妈和六六笑"）— 但这会让叙事散文味变差。
+
+**当前折衷**: 硬契约（user prompt 字段注入正确、system.txt 三条规则字面存在、self person 在源头被过滤）已全部通过，AI 偶尔行为偏离作为 ⚠️ 软约束 issue 记入 QA 报告，不阻塞合并。已 merge `6d1f4c0`。

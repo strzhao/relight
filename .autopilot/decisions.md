@@ -437,3 +437,45 @@
 - `manualOverride=true` 的 person 跳过 prototype 蒸馏，保留用户手动状态
 
 **Evidence**: 设计 + 实施 + QA + 真实验收完整记录在 `.autopilot/requirements/20260514-需要，按照苹果的方案/state.md`。verify-prototypes-vs-centroid.ts 在 5444 张已分配 face 上量化对比：新方案 self-consistency 83.5% vs 旧单 centroid 78.7%，净增益 +261 张面孔正确归位，5.9% 真实增益（旧错新对，cosine 0.73-0.84 区间的边缘正例）。merge commit `f66859c`。设计稿初版 `prototypeCoarseFilter=0.70` 在验收时实证错误，见 [[ArcFace 边缘正例 cosine 分布陷阱]]。
+
+### [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt）
+
+<!-- tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design -->
+
+**Background**: 人脸识别管线（persons + faces 表，SCRFD/ArcFace 聚类，用户已命名 7 个核心家人 nickname）已就绪，但 daily-selection narrate 仍泛化（"那天笑得开心"）。优化路径有 4 条候选：(A) 候选池加权偏向含命名人物的照片，(B) members 选权用人物交集硬排序，(C) narrate prompt 注入"画面里有谁"叙事增强，(D) 新增"故人重逢"候选源。
+
+**Choice**: 仅做 (C) 叙事增强单路径。narrate user.txt 加 `{people}` 占位符，candidate-pool 在 cluster 之后批量 JOIN faces+persons 拿命名 nickname 数组（过滤 self/hidden/未命名）传给 AI，让文案能写"和妈妈、六六笑得开心"。**不动**候选池权重 / members 选择 / 加新源。配套机制：新增 settings.selfPersonId 让用户标"这是我自己"，self 在源头被过滤（视角设定"你"=拍照人不在画面）。
+
+**Alternatives rejected**:
+- **(A) 候选池加权**：会让久远 / 风景 / 美学高分照片被人物常出现的近期照片挤掉，破坏 4 源混采的均衡和"久远度优先"产品哲学。
+- **(B) members 选权**：当前 members 已交 AI 选（看时间窗 + 主题），加人物硬排序会引入"必须同人物组合才入选"的过严约束，可能让有故事性的不同人物群体被排除。
+- **(D) 新增候选源**：基于"出现高频人物 + 30 天未出现"的源需要更多调权和去重逻辑，本次范围内做不深。
+- **传更丰富的人物上下文（memberCount / bbox 占比 / 主从）**：信号越多噪声越多。命名 nickname 数组已足够强（妈妈/六六这些中文亲属词 AI 直接懂关系），加 memberCount AI 还要做"亲密度"中间判断，反而绕远路。
+
+**Trade-offs**:
+- 立即可见但增益受限于命名覆盖率：当前 7 个命名 person 覆盖约 2600 张照片（约 42% 含脸照片），未命名人物文案仍不动；
+- AI 软约束失效风险：system.txt 写"你=拍照人不在画面"但 AI 仍偶尔把"你"映射到画面里的人，prompt 工程后续可继续打磨；
+- 候选池本次没加权 → 含命名人物的照片入选概率不变，可能某日精选全是风景/未命名照片（人物增益不可见），需要 (A) 路径补；
+- 视频侧暂不动（detect-faces 跳过 mediaType='video'）；
+- self 用 settings 单 key（不加 persons.isSelf 列）见下一条决策。
+
+**Evidence**: 真实 AI 验证一次跑出 entry 标题"那年六六的倔强"含命名人物"六六"，narrative 0 处出现 self 称呼"赵桂雄/爸爸"。设计 + 红蓝队对抗（39 acceptance test 全绿）+ contract-checker (22/22 PASS) + qa-reviewer (17/17 PASS) 完整记录在 `.autopilot/sessions/prompt/requirements/20260512-近期新加了人物识别能/state.md`。merge commit `6d1f4c0`。
+
+### [2026-05-15] self 标记用 settings.selfPersonId 单 key，不加 persons.isSelf 列
+
+<!-- tags: settings, schema-design, single-value-pointer, isSelf, persons, design -->
+
+**Background**: 需要标记"哪个 person 是用户本人"（让 narrate 视角设定生效：self 在画面里不传给 AI）。两种存储选择：(A) settings 表新加 key='selfPersonId' value=personId；(B) persons 表加 is_self BOOLEAN 列。
+
+**Choice**: (A) settings 单 key。helper `getSettingValue/setSettingValue/deleteSetting` 三函数无内存缓存（每次 SELECT），persons 路由 GET 接口在 handler 内一次性查 selfPersonId 缓存到闭包，每行派生 isSelf 字段。
+
+**Alternatives rejected**:
+- **persons.is_self 列**：self 是全局**单值指针**（最多一个 person），不是 person 本征属性。列设计允许"多 person 同时 is_self=true"成为可能错状态，需要应用层防御（事务、独占约束）。settings 单 key 天然唯一，无并发竞态。
+- **缓存到进程内**：写后失效语义复杂（多进程？热重启？），SQLite 单条 SELECT 本身已极快（<1ms），不值得引入缓存层。
+
+**Trade-offs**:
+- 无 schema migration、无 schema 漂移、无 fixture 改造（既有 settings 表已存在）；
+- 多了一次 SQL（每次 GET 列表 / 详情都查），可忽略；
+- 未来扩展：如果要加 isFamily / starred / 候选池加权时，可同模式新增 settings 键（如 `familyPersonIds` JSON 数组），或者那时再加 persons 表列承载多个标记。
+
+**Evidence**: API 契约（PUT/DELETE /api/persons/:id/self 幂等设计，DELETE cleared:boolean 而非 404）+ 21 个 acceptance test 覆盖（settings-helper 6 + persons-self 15）全绿。merge commit `6d1f4c0`。

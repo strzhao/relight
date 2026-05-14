@@ -1,6 +1,8 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt） | tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design | → decisions.md
+- [2026-05-15] self 标记用 settings.selfPersonId 单 key，不加 persons.isSelf 列 | tags: settings, schema-design, single-value-pointer, isSelf, persons, design | → decisions.md
 - [2026-05-14] 单 centroid → Apple 多原型方案：每 person 1-5 个 sub-prototype + max(cosine) 匹配 | tags: face-clustering, multi-prototype, exemplar, apple-photos, cross-age, cross-appearance, kmeans, arcface, centroid, design, architecture | → decisions.md
 - [2026-05-13] 人脸聚类引入 qwen 语义属性 + 临界硬过滤 + JSON 字段预留未来扩展 | tags: face-recognition, face-clustering, qwen-vl, semantic-attributes, hybrid-clustering, cosine-threshold, json-schema, schema-version, future-proof, design, architecture | → decisions.md
 - [2026-05-12] 人脸识别选 ONNX Runtime + SCRFD-500M + ArcFace MBF 纯本地方案，设计偏离 2.5G → 500M（公开 ONNX 镜像无 2.5G） | tags: face-recognition, onnx, scrfd, arcface, local-inference, privacy, coreml, model-selection, design, architecture | → decisions.md
@@ -24,6 +26,8 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-15] candidate-pool / 主流程加新 SQL JOIN 必须同步补所有 acceptance fixture 表 DDL | tags: vitest, acceptance-test, fixture, schema, sql-join, no-such-table, daily-selection, bug | → patterns.md
+- [2026-05-15] narrate 第二人称"你"+ 画面人物注入：AI 仍偶尔把"你"映射到画面里的人 | tags: ai, narrate-prompt, second-person, soft-constraint, prompt-engineering, daily-selection, bug | → patterns.md
 - [2026-05-14] ArcFace MobileFaceNet 边缘正例 cosine 分布陷阱：聚类粗筛阈值不能凭"安全裕量"推理 | tags: face-clustering, arcface, mobilefacenet, cosine-threshold, coarse-filter, embedding-distribution, prototype, recall, autopilot-verification, bug | → patterns.md
 - [2026-05-14] flex item `align-items: center` + 子元素 aspectRatio + max-h-full = 祖先 overflow-hidden 隐式裁剪 | tags: flexbox, css, align-items, aspect-ratio, max-height, overflow-hidden, frontend, daily-hero, bug, layout | → patterns.md
 - [2026-05-14] Satori 不保留 CSS object-fit 字面，必须用几何断言验证 contain/cover | tags: satori, svg, object-fit, server-side-rendering, geometric-assertion, wallpaper, image-composition, test, design | → patterns.md
