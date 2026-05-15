@@ -16,6 +16,11 @@ import type { FaceAttributes } from "../attributes";
 import type { ClusterConfig } from "../clustering";
 import type { Prototype } from "../prototypes";
 
+// db 模块在 module-load 期 eager 打开 SQLite（基于 cwd 相对路径），
+// 从仓库根跑 vitest 时 cwd 不在 apps/backend，路径解析失败。
+// 本测试只用 prototypes.ts 的纯数学函数，stub 掉 db 避免 import 副作用。
+vi.mock("../../../db", () => ({ db: {}, schema: {} }));
+
 // ---------------------------------------------------------------------------
 // 类型声明（契约导出，不依赖具体实现文件结构）
 // ---------------------------------------------------------------------------

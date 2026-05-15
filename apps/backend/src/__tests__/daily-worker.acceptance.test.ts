@@ -39,6 +39,11 @@ const mockSql = vi.hoisted(() => {
     values,
   });
   (fn as unknown as Record<string, unknown>).raw = (s: string) => ({ __op: "sql_raw", s });
+  (fn as unknown as Record<string, unknown>).join = (items: unknown[], sep: unknown) => ({
+    __op: "sql_join",
+    items,
+    sep,
+  });
   return fn;
 });
 
@@ -48,6 +53,7 @@ vi.mock("drizzle-orm", () => ({
   gte: mockGte,
   lte: mockLte,
   lt: (a: unknown, b: unknown) => ({ __op: "lt", left: a, right: b }),
+  ne: (a: unknown, b: unknown) => ({ __op: "ne", left: a, right: b }),
   desc: (col: unknown) => ({ __op: "desc", column: col }),
   sql: mockSql,
 }));
@@ -155,6 +161,21 @@ const mockSchema = vi.hoisted(() => ({
     score: "dailyPickEntries.score",
     members: "dailyPickEntries.members",
     createdAt: "dailyPickEntries.created_at",
+  },
+  settings: {
+    key: "settings.key",
+    value: "settings.value",
+  },
+  persons: {
+    id: "persons.id",
+    nickname: "persons.nickname",
+    hidden: "persons.hidden",
+  },
+  faces: {
+    photoId: "faces.photo_id",
+    personId: "faces.person_id",
+    bboxW: "faces.bbox_w",
+    bboxH: "faces.bbox_h",
   },
 }));
 
