@@ -239,15 +239,6 @@ export const selectionGroupSchema = z.object({
 });
 export type SelectionGroup = z.infer<typeof selectionGroupSchema>;
 
-export const cutawaySchema = z.object({
-  targetClipFid: z.string(),
-  atSec: z.number().nonnegative(),
-  sourceFid: z.string(),
-  durSec: z.number().positive().default(2.5),
-  audioMix: z.number().min(0).max(1).default(0),
-});
-export type Cutaway = z.infer<typeof cutawaySchema>;
-
 export const selectionSchema = z.object({
   version: z.literal(1),
   vlogId: z.string(),
@@ -259,20 +250,6 @@ export const selectionSchema = z.object({
    */
   order: z.array(z.string()).default([]),
   groups: z.array(selectionGroupSchema).default([]),
-  /** B-roll cutaway 标记（006）：在指定 clip 的特定秒数处插入 b-roll 片段。 */
-  cutaways: z.array(cutawaySchema).default([]).optional(),
-  /** 章节内用户自定义排序（008）。 */
-  chapterOrders: z
-    .array(
-      z.object({
-        chapterIdx: z.number().int().nonnegative(),
-        customOrder: z.array(z.string()),
-      }),
-    )
-    .default([])
-    .optional(),
-  /** 用户选择忽略的重复组（007）。 */
-  ignoredDuplicateGroups: z.array(z.string()).default([]).optional(),
 });
 export type Selection = z.infer<typeof selectionSchema>;
 
