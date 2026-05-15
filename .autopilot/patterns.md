@@ -1,3 +1,37 @@
+### [2026-05-15] 红队 acceptance fixture 自身 bug — anti-rationalization 的边界与处理路径
+
+<!-- tags: vitest, acceptance-test, fixture, red-team, anti-rationalization, autopilot, contract-checker, bug -->
+
+**Pattern**: 红队为新功能写 acceptance 测试时，**测试断言正确**（表达设计意图），但 **fixture setup 未能构造测试意图所需的场景** → 测试永远 fail，但实现没有 bug。autopilot 框架红队铁律说"红队失败 = 修实现"，但此场景修实现会破坏其他正常逻辑。
+
+**真实案例**：B-5 "pool1 代表稳定性：fillUp 不替换 pool1 任何簇代表"
+- 断言：`expect(resultIds).toContain("p_main")` — 正确
+- Fixture：`p_main = yearsAgoISO(3)` + `p_fill_conflict = yearsAgoISO(3) + 30min`，两者都进 historyToday 源
+- 实际：主路径自身的 `clusterByDirnameAndTime + pickRepresentative`（[[2026-05-10] 主题去重]）按 weightedScore 选 p_fill_conflict（9.9>8.5）为代表，p_main 沦为 sibling 在 pool1 阶段就消失，fillUp 阶段未触发
+- 红队**自己**在测试代码注释 `:329-388` 里识别了 fixture 问题（"正确场景应该是 p_main 是 historyToday + p_fill_conflict 不能进主路径..."），但最终 fixture 代码没按注释构造
+
+**Symptom**：测试 `expected ['p_fill_high', 'p_fill_conflict'] to include 'p_main'`，看起来像"实现违反契约"，但 contract-checker 字面比对 PASS、qa-reviewer 独立读代码也确认实现符合契约。
+
+**辨别**：
+1. **contract-checker 跑过吗？** 13/13 字面契约 PASS 是关键信号 — 实现按设计要求执行
+2. **测试代码自身有注释指出 fixture 问题吗？** 红队写注释自承认场景构造不正确是强信号
+3. **修实现会破坏其他通过的测试吗？** 这里改 clusterByDirnameAndTime 不按 weightedScore 选代表 → cluster.test.ts + cluster-gps.acceptance + candidate-pool.integration 等数十个 test 直接挂
+
+**处理路径**（不违反 anti-rationalization 精神）：
+1. **不要**修红队 acceptance test（铁律 — 哪怕只改 fixture setup）
+2. **不要**修实现去适配错误 fixture（会破坏正常逻辑）
+3. **必做**：QA 报告里诚实记录 — 列出根因证据（fixture 设置 + 实际执行流程 + contract-checker 证明）
+4. **必做**：走 `gate: "review-accept"` 把决策交给用户
+5. **可选**：让用户决策是否在后续 sprint 让蓝队补一个 confidence unit test 直接验证契约（不动 acceptance）
+
+**反 pattern（要避免）**：
+- 找理由"测试就是 fixture bug 所以可以接受失败" — 这是 anti-rationalization 红线。诚实记录 ≠ 接受跳过。证据 + 决策权交用户 = 合规
+- 静默修 fixture / 加 if 容错 / 加 try-catch 让断言不抛 — 这都属于"修测试期望"
+
+**Lesson**: anti-rationalization 指南的精神是「不要修测试来掩盖实现 bug」。fixture bug 是测试自身的代码错误，**不是测试期望**。但识别和处理这类情况需要双重证据（contract-checker + qa-reviewer）+ 走 review-accept gate，不能 AI 自己拍板"接受失败"。如果系统层面想根治，应该让 plan-reviewer 在 design 阶段就审查"测试场景的 fixture 构造前置条件"（本次 plan-reviewer 已抓到第 1 轮的 BLOCKER，但没审到 fixture 实现细节，属可改进项）。
+
+
+
 ### [2026-05-14] flex item `align-items: center` + 子元素 `aspectRatio` + `max-h-full` = 祖先 overflow-hidden 隐式裁剪
 
 <!-- tags: flexbox, css, align-items, aspect-ratio, max-height, overflow-hidden, frontend, daily-hero, bug, layout -->

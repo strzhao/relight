@@ -1,6 +1,8 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-15] candidate-pool 触底回填第 5 源 fillUp：聚类压缩 < maxN 时启动兜底，pool1 代表 pin 住，避免 entries 断崖 | tags: daily-selection, candidate-pool, fillUp, fallback, theme-conflict, primary-candidate-source, type-narrowing, pool1-stability, design | → decisions.md
+- [2026-05-15] narrate prompt {recent_titles} 软约束 + 「避免重复标题」准则：跨日 title 去重零额外 AI 调用 | tags: daily-selection, narrate-prompt, title-deduplication, soft-constraint, recent-titles, query-recent-titles, ai-prompt-engineering, design | → decisions.md
 - [2026-05-15] 撤销 narrate 命名人物注入：第二人称「你」呼告体优于硬塞具体称呼 | tags: daily-selection, narrate-prompt, person-injection, second-person, product-tone, reversal, scope-control, ai-prompt-engineering | → decisions.md
 - [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt） **[已撤销 5-15]** | tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design, superseded | → decisions.md
 - [2026-05-15] self 标记用 settings.selfPersonId 单 key，不加 persons.isSelf 列 | tags: settings, schema-design, single-value-pointer, isSelf, persons, design | → decisions.md
@@ -27,6 +29,7 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-05-15] 红队 acceptance fixture 自身 bug：contract-checker + qa-reviewer 双重证实实现正确时走 review-accept gate，不修测试不破坏实现 | tags: vitest, acceptance-test, fixture, red-team, anti-rationalization, autopilot, contract-checker, bug | → patterns.md
 - [2026-05-15] candidate-pool / 主流程加新 SQL JOIN 必须同步补所有 acceptance fixture 表 DDL | tags: vitest, acceptance-test, fixture, schema, sql-join, no-such-table, daily-selection, bug | → patterns.md
 - [2026-05-15] narrate 第二人称"你"+ 画面人物注入：AI 仍偶尔把"你"映射到画面里的人 | tags: ai, narrate-prompt, second-person, soft-constraint, prompt-engineering, daily-selection, bug | → patterns.md
 - [2026-05-14] ArcFace MobileFaceNet 边缘正例 cosine 分布陷阱：聚类粗筛阈值不能凭"安全裕量"推理 | tags: face-clustering, arcface, mobilefacenet, cosine-threshold, coarse-filter, embedding-distribution, prototype, recall, autopilot-verification, bug | → patterns.md

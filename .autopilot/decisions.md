@@ -1,5 +1,64 @@
 # 架构决策日志
 
+### [2026-05-15] candidate-pool 触底回填第 5 源（fillUp）：主路径聚类压缩导致 entries 断崖时启动兜底，pool1 代表 pin 住不替换
+
+<!-- tags: daily-selection, candidate-pool, fillUp, fallback, theme-conflict, primary-candidate-source, type-narrowing, pool1-stability, design -->
+
+**Background**: 过去一周 daily-selection entries 数从 12 张断崖跌到 2 张（2026-05-15 仅 2 个 entry）。直接 SQL 诊断：4 源原始可用照片充足（sameMonth=157、sameSeason=222、agedAll=874，aesthetic ≥7.5 且未在 30 天去重池里 105 张），但 [[2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12] 引入的 `clusterByDirnameAndTime`（dirname+60min + GPS 500m/24h union-find）把高分照片压成 1-2 个簇 — 用户高分照片大量集中在少数几次旅行（伏见稻荷、洪崖洞等 dirname 内成百张高分）。
+
+**Choice**: 候选池触底回填第 5 源（fillUp），仅在主路径不足时激活：
+1. **类型拆分**（解决 BLOCKER：新枚举扩散）：抽 `PrimaryCandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom"`（4 源内部），`CandidateSource = PrimaryCandidateSource | "fillUp"`（对外联合）；`dedupAndQuotaMerge` 参数签名改 `Record<PrimaryCandidateSource, ...>`，让 fillUp 在类型层面无法误入 quota 路径
+2. **触发**：主路径 `clustered.slice(0, maxN)` 得 pool1，`pool1.length >= maxN` 时直接返回（零额外路径）；`pool1.length < maxN` 时启动 fillUp
+3. **fillUp 查询**：`aesthetic_score >= 7.5`（硬性下限避免低分污染）+ `NOT IN (excludeIds ∪ pool1.photoId ∪ pool1.clusterSiblingIds)` + `(burst_id IS NULL OR is_burst_representative=1)`，按 `weighted + RANDOM 抖动` desc 取 `needCount * 3` 张（× 3 留给聚类+冲突过滤）
+4. **pool1 代表 pin 住**（解决 BLOCKER：重聚类替换代表）：fillUp 候选**独立**跑一次 `clusterByDirnameAndTime` → 对每个簇代表 P 用 `isConflictWithPrimary(P, pool1)` 判定与 pool1 的 dirname+60min 或 GPS 500m+24h 冲突，冲突簇全部丢弃；pool1 代表绝不参与重选
+5. **最终池** = `pool1 + 非冲突 fillUp 代表`，按 weighted desc 全局排序截前 maxN
+6. console.info 日志 `[fillUp] 主路径仅 N 簇，启动回填，目标补足 K 张`
+
+**Alternatives rejected**:
+- **放宽 dirname/GPS 聚类窗口**（如 30min/200m）：会回退 [[2026-05-10] top N 主题去重] 的效果（伏见稻荷 4 张又会混进同日）
+- **扩大 K_PER_SOURCE 到 1.5x 或 2x 重跑**：[[2026-05-10]] 已证明会破坏 4 源等比混采契约（plan-reviewer 历史结论）
+- **fillUp 与 pool1 合并后重新聚类**（plan-reviewer 第 1 轮发现的 BLOCKER）：pool1 代表会被 fillUp 高分候选按 weightedScore 替换，破坏 pool1 稳定性 → 改为 fillUp 独立聚类 + 冲突过滤模式
+
+**Trade-offs**:
+- fillUp 多一次大 SQL 查询（NOT IN 含 30 天 dedup ~50-100 个 id），对 SQLite 可忽略（<10ms）
+- 主题冲突判定 O(fillUp × pool1) ≤ 432 次比较，性能 OK
+- fillUp 簇与 pool1 不合并意味着 `clusterSiblingIds` 不会跨 pool1/fillUp 共享 — fillUp 簇的 sibling 仅来自 fillUp 池内部
+- `needCount * 3` 倍率是经验值；旅行重度用户场景下可能不足，最终接受 N < maxN（不再 K 回退凑数，宁缺勿滥）
+
+**Evidence**: `apps/backend/src/jobs/daily-selection/candidate-pool.ts:398-565` 新增 fillUp 分支；`cluster.ts` 导出 `parseTakenAtMs` 供冲突判定复用；14 个 acceptance 用例（B-3/B-4/B-5/B-6/B-7/B-8 覆盖触发/不触发/排除集/质量下限/上限/pool1 稳定性），contract-checker 13/13 PASS。提交 `ca4a2b5`。
+
+**Lesson**: 当架构有"代表稳定性"等隐性契约时，"合并后重选"是诱人但破坏性的优化。**fillUp 必须独立聚类 + 冲突过滤 + 追加**，不能与已稳定 pool 合并重选。Plan-reviewer 第 1 轮就抓出这个 BLOCKER — 修订设计避免了同 BLOCKER 重现。
+
+
+
+### [2026-05-15] narrate prompt 软约束（recent_titles 占位 + 「避免重复标题」准则）：跨日 title 去重，并行无状态，零额外 AI 调用
+
+<!-- tags: daily-selection, narrate-prompt, title-deduplication, soft-constraint, recent-titles, query-recent-titles, ai-prompt-engineering, design -->
+
+**Background**: 过去一周日精选标题反复出现 "朱红隧道里的旧时"（05-10/05-14/05-15 共 4 次，05-10 当天 rank=2/3 同名两张不同照片）。narrate 12 entry 并行调 vision 模型，prompt 无共享上下文，模型对同类题材（朱红/隧道/鸟居）固定输出模板标题。
+
+**Choice**: narrate prompt 软约束（用户明选「最轻」方案，零额外 AI 调用）：
+1. `daily-selection.ts` 新增 `queryRecentTitles(daysBack=30): Promise<string>`：扫描 `daily_picks.title` ∪ `daily_pick_entries.title`，过滤 fallback "今日拾光"，截断 30 条/600 字，空集返回 "无"，否则半角逗号拼接
+2. `narrate/user.txt` 在「已知元数据」节后插入 `近期已用标题（请避开相同意象/句式）：{recent_titles}`
+3. `narrate/system.txt` 创作准则追加第 6 条「**避免重复标题**：参考下方的"近期已用标题"列表，新标题应使用不同的意象、主语、句式；不要落入相同的命名模板（例：已用过"朱红隧道里的旧时"，下次同类题材应换为更具体的画面元素，如"鸟居下的尾绳"）」
+4. `processSingleEntry` 签名加 `recentTitles: string` 参数，worker 主流程在阶段 0 末尾查询一次后透传给所有 entry（共享）
+
+**Alternatives rejected**:
+- **后处理重 narrate 冲突项**（中等成本）：同日并行 narrate 完成后扫描重复 title，对 rank>0 冲突 entry 用「已用 title 黑名单」重 narrate 1 次。增加 ~1-3 次 AI 调用。用户选最轻方案，本期不做
+- **硬约束串行 narrate**（最强约束）：12 张串行 + 每次 narrate 携带"前面已生成 title"全量黑名单。100% 不重复但 30s → 2-3min，体感差
+- **post-process 字符串后缀去重**（如改成"·之二"）：换皮重复不解决根本质量问题
+
+**Trade-offs**:
+- 并行 narrate 无法看到"同批正在生成的 title"，只能看到"最近 30 天历史 title"；同日内偶发重复（如 05-10 同名两张）仍可能出现 — 已知限制，由后续观察决定是否升级
+- recent_titles 600 字符上限 ~ vision prompt 增加 100-200 token，可忽略
+- AI 是软约束，遵循度取决于模型；qwen-vl 实测对中文 prompt 配合度尚可，但不能保证 100%
+
+**Evidence**: `daily-selection.ts:25-71` queryRecentTitles + `processSingleEntry` 签名扩展；narrate prompt 2 个文件 +4 行；acceptance test C-9/C-10/C-11/C-12 + D-13/D-14 共 6 个用例验证查询过滤、时间窗、截断、占位符注入。提交 `ca4a2b5`。
+
+**Lesson**: 跨调用上下文（"近期已用 title"）通过 prompt 注入是并行 AI 流水线最便宜的去重路径。系统层无状态、零额外 AI 调用，唯一成本是 prompt token 增量。同批并行内的重复需要 post-process 路径，但应作为下一阶段优化，不强行串行化。
+
+
+
 ### [2026-05-15] 撤销 narrate 命名人物注入：第二人称「你」呼告体优于硬塞具体称呼
 
 <!-- tags: daily-selection, narrate-prompt, person-injection, second-person, product-tone, reversal, scope-control, ai-prompt-engineering -->
