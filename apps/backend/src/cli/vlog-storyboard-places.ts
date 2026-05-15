@@ -1001,9 +1001,34 @@ async function main(): Promise<void> {
   const outroFrames = 90; // 3s
   let cursor = 0;
 
+  // task 008: 章节内自定义排序（selection.chapterOrders 覆盖默认顺序）
+  // 优先级：selection.chapterOrders[idx] > group.fids 内部序 > 现有 ch.fileIds（即 takenAt 时间序）
+  const chapterOrderMap = new Map<number, string[]>();
+  for (const co of selection?.chapterOrders ?? []) {
+    chapterOrderMap.set(co.chapterIdx, co.customOrder);
+  }
+
   const timelineChapters: TimelineChapter[] = chapters.map((ch, idx) => {
     const startFrame = cursor;
     cursor += titleCardFrames;
+
+    // 应用 chapterOrders 重排（如果存在 + 成员集合一致）
+    const customOrder = chapterOrderMap.get(idx);
+    if (customOrder && customOrder.length > 0) {
+      const chSet = new Set(ch.fileIds);
+      const customSet = new Set(customOrder);
+      // 仅当 customOrder 是 ch.fileIds 的排列（成员集合相同）才采用
+      if (
+        customOrder.length === ch.fileIds.length &&
+        customOrder.every((f) => chSet.has(f)) &&
+        ch.fileIds.every((f) => customSet.has(f))
+      ) {
+        ch.fileIds = customOrder;
+        err(`[storyboard-places] chapter ${idx} reordered by selection.chapterOrders`);
+      } else {
+        err(`[storyboard-places] WARN: chapterOrders[${idx}] member mismatch, ignored`);
+      }
+    }
 
     const clips: TimelineClip[] = ch.fileIds.map((fid, clipIdx) => {
       const entry = byId.get(fid);
