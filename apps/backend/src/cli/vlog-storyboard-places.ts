@@ -1162,7 +1162,172 @@ async function main(): Promise<void> {
     cursor += hookFrames;
   }
 
-  const totalDurationFrames = cursor + outroFrames;
+  let totalDurationFrames = cursor + outroFrames;
+
+  // ── B-roll Cutaway 应用（task 006 / plan-reviewer BLOCKER-2 字幕偏移 6 步算法）──
+  // 对每个 selection.cutaway，把目标 clip 分割为 A1 + B + A2 三段：
+  //   A1: 前段，keep 原 audio + 截断字幕
+  //   B:  b-roll clip，subtitles=[], audioGain=audioMix（通常 0）
+  //   A2: 后段，keep 原 audio + 字幕偏移 BDS*F
+  //   时间偏移传播：A2 之后所有 clip 的 renderStartFrame += BDS*F，后续 chapter.startFrame/endFrame 同步偏移
+  if (selection?.cutaways && selection.cutaways.length > 0) {
+    // 按 targetClipFid 分组 cutaways，单 clip 内多个按 atSec 升序
+    const cutawaysByFid = new Map<
+      string,
+      Array<{ atSec: number; sourceFid: string; durSec: number; audioMix: number }>
+    >();
+    for (const cu of selection.cutaways) {
+      // 边界过滤：sourceFid 必须在 manifest，且不能等于 targetClipFid
+      if (!byId.has(cu.sourceFid)) {
+        err(
+          `[storyboard-places] WARN: cutaway sourceFid '${cu.sourceFid}' not in manifest, skipped`,
+        );
+        continue;
+      }
+      if (cu.sourceFid === cu.targetClipFid) {
+        err(
+          `[storyboard-places] WARN: cutaway sourceFid === targetClipFid '${cu.sourceFid}', skipped`,
+        );
+        continue;
+      }
+      if (!cutawaysByFid.has(cu.targetClipFid)) cutawaysByFid.set(cu.targetClipFid, []);
+      const list = cutawaysByFid.get(cu.targetClipFid);
+      if (list) {
+        list.push({
+          atSec: cu.atSec,
+          sourceFid: cu.sourceFid,
+          durSec: cu.durSec ?? 2.5,
+          audioMix: cu.audioMix ?? 0,
+        });
+      }
+    }
+
+    // 对每个 chapter 内的每个 clip，应用其上的 cutaways
+    let cumulativeOffset = 0; // 累计帧偏移（所有 B 段总和）
+    for (const chapter of timelineChapters) {
+      // 先应用累计偏移（前面 chapter 的 B 段已使本 chapter 后移）
+      chapter.startFrame += cumulativeOffset;
+      chapter.endFrame += cumulativeOffset;
+
+      const newClips: TimelineClip[] = [];
+      for (const clip of chapter.clips) {
+        // 提取此 clip 的 fid（从 source 路径反推：sources/<basename> → basename without ext）
+        const baseName = path.basename(clip.source);
+        const fid = baseName.replace(/\.[^.]+$/, "");
+        const cuList = cutawaysByFid.get(fid);
+
+        // 先应用累计偏移到 clip
+        clip.renderStartFrame += cumulativeOffset;
+        for (const sub of clip.subtitles) {
+          sub.startFrame += cumulativeOffset;
+          sub.endFrame += cumulativeOffset;
+        }
+
+        if (!cuList || cuList.length === 0) {
+          newClips.push(clip);
+          continue;
+        }
+
+        // 章节内单 clip 时 reject（避免章节空掉）
+        if (chapter.clips.length === 1 && cuList.length > 0) {
+          err(
+            `[storyboard-places] WARN: cutaway on single-clip chapter '${chapter.title}' skipped (${cuList.length} cutaways)`,
+          );
+          newClips.push(clip);
+          continue;
+        }
+
+        // 按 atSec 升序处理
+        cuList.sort((a, b) => a.atSec - b.atSec);
+
+        // 「working clip」迭代：每次分割成 A1 + B + 留 A2 作下次输入
+        let working = { ...clip, subtitles: [...clip.subtitles] };
+        for (const cu of cuList) {
+          // atSec 边界：必须在 working clip 的 srcStart..srcEnd 范围内（相对原 clip 而非累计后）
+          const workingSrcDuration = (working.srcEndSec ?? 0) - (working.srcStartSec ?? 0);
+          if (cu.atSec <= 0 || cu.atSec >= workingSrcDuration - 1.0) {
+            err(
+              `[storyboard-places] WARN: cutaway atSec=${cu.atSec} out of range [0, ${workingSrcDuration - 1.0}) for ${fid}, skipped`,
+            );
+            continue;
+          }
+
+          const F = fps;
+          const ATS = cu.atSec;
+          const BDS = cu.durSec;
+          const R = working.renderStartFrame;
+          const SS = working.srcStartSec ?? 0;
+          const SE = working.srcEndSec ?? 0;
+          const splitRenderFrame = R + Math.round(ATS * F);
+          const bFrames = Math.round(BDS * F);
+
+          // A1
+          const a1Subs = working.subtitles
+            .filter((s) => s.startFrame < splitRenderFrame)
+            .map((s) => ({ ...s, endFrame: Math.min(s.endFrame, splitRenderFrame) }));
+          const a1: TimelineClip = {
+            ...working,
+            id: `${working.id}_a1`,
+            renderStartFrame: R,
+            renderDurationFrames: Math.round(ATS * F),
+            srcStartSec: SS,
+            srcEndSec: SS + ATS,
+            subtitles: a1Subs,
+          };
+
+          // B
+          const bEntry = byId.get(cu.sourceFid);
+          const bSource = bEntry
+            ? `sources/${path.basename(bEntry.filePath)}`
+            : `sources/${cu.sourceFid}.mp4`;
+          const b: TimelineClip = {
+            id: `${working.id}_b_${cu.sourceFid}`,
+            source: bSource,
+            kind: "video",
+            srcStartSec: 0,
+            srcEndSec: BDS,
+            renderStartFrame: splitRenderFrame,
+            renderDurationFrames: bFrames,
+            subtitles: [],
+            subtitleStyle: "off",
+            transitionIn: "cut",
+            audioGain: cu.audioMix,
+          };
+
+          newClips.push(a1, b);
+          cumulativeOffset += bFrames;
+
+          // A2 = 下次迭代的 working clip
+          const a2Subs = working.subtitles
+            .filter((s) => s.startFrame >= splitRenderFrame)
+            .map((s) => ({
+              ...s,
+              startFrame: s.startFrame + bFrames,
+              endFrame: s.endFrame + bFrames,
+            }));
+          working = {
+            ...working,
+            id: `${working.id}_a2`,
+            renderStartFrame: splitRenderFrame + bFrames,
+            renderDurationFrames: working.renderDurationFrames - Math.round(ATS * F),
+            srcStartSec: SS + ATS,
+            srcEndSec: SE,
+            subtitles: a2Subs,
+            transitionIn: "cut",
+          };
+        }
+        // 收尾 A2
+        newClips.push(working);
+      }
+
+      chapter.clips = newClips;
+    }
+
+    totalDurationFrames += cumulativeOffset;
+    err(
+      `[storyboard-places] cutaway applied: ${selection.cutaways.length} requests, +${cumulativeOffset} frames`,
+    );
+  }
 
   const timeline: Timeline = {
     type: "vlog",
