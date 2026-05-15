@@ -88,7 +88,7 @@ async function main() {
   const cfg = {
     mergeThreshold: config.face.clusteringMergeThreshold,
     minThreshold: config.face.clusteringMinThreshold,
-    midZoneAttrFilter: config.face.midZoneAttrFilter,
+    midZoneFilter: config.face.midZoneAttrFilter,
     medQualityCentroidWeight: config.face.medQualityCentroidWeight,
     prototypeCoarseFilter: process.env.OVERRIDE_COARSE
       ? Number(process.env.OVERRIDE_COARSE)
