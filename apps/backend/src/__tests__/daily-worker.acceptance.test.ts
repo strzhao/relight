@@ -384,6 +384,12 @@ function setupCandidates(candidates: unknown[]) {
     .mockReturnValueOnce(chainableMock([]))
     // #8: 视频 narrate 的 analysis 查询（如果是视频 hero）→ 空
     .mockReturnValueOnce(chainableMock([]));
+
+  // 兜底：worker 主流程引入了新查询（queryRecentTitles、enrichWithPeopleNicknames
+  // 等），调用序列变长。设默认 fallback 返回空数组，避免序列耗尽后 select() 返回
+  // undefined 导致 ".from of undefined" 错误。所有 mockReturnValueOnce 用完后的
+  // 调用自动落到此默认 fallback。
+  mockDb.select.mockReturnValue(chainableMock([]));
 }
 
 /** 设置阶段 1 AI chat 返回 valid JSON */

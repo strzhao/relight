@@ -47,8 +47,10 @@ export interface ClusterOptions {
  *
  * 与 related-pool.ts 保持一致：EXIF 写入的 takenAt 多为
  * 'YYYY-MM-DD HH:MM:SS'（无时区）字面值，按 UTC 处理避免本地时区平移。
+ *
+ * 导出供 candidate-pool.ts 的 fillUp 冲突判定使用。
  */
-function parseTakenAtMs(takenAt: string | null): number | null {
+export function parseTakenAtMs(takenAt: string | null): number | null {
   if (!takenAt) return null;
   const isoLike = /[Zz]|[+-]\d{2}:?\d{2}$/.test(takenAt)
     ? takenAt

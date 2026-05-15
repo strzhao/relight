@@ -10,18 +10,23 @@
  * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
  */
 
+import path from "node:path";
 import { and, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
+import { haversineMeters } from "../../lib/geo";
 import { getSettingValue } from "../../lib/settings";
-import { type ClusteredCandidate, clusterByDirnameAndTime } from "./cluster";
+import { type ClusteredCandidate, clusterByDirnameAndTime, parseTakenAtMs } from "./cluster";
 
 /** 全局最大候选数（质量优化：从 20 降到 12，避免低分照片摊薄整体质感 + 减 40% AI narrate 调用）*/
 const MAX_N = 12;
 /** 每源保底席位 */
 const QUOTA_PER_SOURCE = 3;
 
-/** 4 个候选源标识 */
-export type CandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom";
+/** 4 个主路径候选源标识（不含 fillUp） */
+export type PrimaryCandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom";
+
+/** 全部候选源标识（含第 5 源 fillUp） */
+export type CandidateSource = PrimaryCandidateSource | "fillUp";
 
 /** 候选照片（带加权分和元数据） */
 export interface EnrichedCandidate {
@@ -388,7 +393,170 @@ export async function buildCandidatePool(
   // ---- 主题去重聚类（dirname + 时间窗）----
   // 簇数 < maxN 时直接接受 N<maxN（保护 4 源等比混采契约，不做 K 回退）
   const clustered = clusterByDirnameAndTime(merged);
-  const finalPool = clustered.slice(0, maxN);
+  const pool1 = clustered.slice(0, maxN);
+
+  // ---- 候选池触底回填（fillUp）----
+  // 主路径足量时直接返回，零额外路径
+  if (pool1.length >= maxN) {
+    await enrichWithPeopleNicknames(pool1);
+    return pool1;
+  }
+
+  // 主路径不足，启动 fillUp 第 5 源
+  const needCount = maxN - pool1.length;
+  console.info(`[fillUp] 主路径仅 ${pool1.length} 簇，启动回填，目标补足 ${needCount} 张`);
+
+  // overfetch 倍率：fillUp 候选可能被聚类合并 + 主题冲突过滤各砍一波
+  const FILLUP_OVERFETCH_RATIO = 3;
+
+  // 排除集 = 传入的 excludeIds ∪ pool1 所有 photoId ∪ pool1 所有 clusterSiblingIds
+  const excludeAfterPrimary = new Set<string>(excludeIds);
+  for (const c of pool1) {
+    excludeAfterPrimary.add(c.photoId);
+    for (const sibId of c.clusterSiblingIds) {
+      excludeAfterPrimary.add(sibId);
+    }
+  }
+
+  // 把排除集转为 SQL IN 子句（drizzle 无原生 notInArray for large sets，用 raw sql）
+  const excludeList = [...excludeAfterPrimary];
+  const fillUpLimit = needCount * FILLUP_OVERFETCH_RATIO;
+
+  let fillUpRawRows: typeof historyTodayRows = [];
+  if (excludeList.length === 0) {
+    fillUpRawRows = await db
+      .select({
+        photoId: schema.photos.id,
+        filePath: schema.photos.filePath,
+        takenAt: schema.photos.takenAt,
+        mediaType: schema.photos.mediaType,
+        durationSec: schema.photos.durationSec,
+        aestheticScore: schema.photoAnalyses.aestheticScore,
+        narrative: schema.photoAnalyses.narrative,
+        emotionalAnalysis: schema.photoAnalyses.emotionalAnalysis,
+        tags: schema.photoAnalyses.tags,
+        thumbnailPath: schema.photos.thumbnailPath,
+        sourceType: schema.storageSources.type,
+        latitude: schema.photos.latitude,
+        longitude: schema.photos.longitude,
+        offsetTime: schema.photos.offsetTime,
+      })
+      .from(schema.photos)
+      .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
+      .innerJoin(
+        schema.storageSources,
+        sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
+      )
+      .where(and(gte(schema.photoAnalyses.aestheticScore, 7.5), burstRepOnly))
+      .orderBy(
+        desc(
+          sql`(COALESCE(${schema.photoAnalyses.aestheticScore}, 5.0) + ABS(RANDOM() % 3)) / 1.0`,
+        ),
+      )
+      .limit(fillUpLimit);
+  } else {
+    // 排除集非空：拼 NOT IN 子句
+    const excludePlaceholders = excludeList.map((id) => sql`${id}`);
+    fillUpRawRows = await db
+      .select({
+        photoId: schema.photos.id,
+        filePath: schema.photos.filePath,
+        takenAt: schema.photos.takenAt,
+        mediaType: schema.photos.mediaType,
+        durationSec: schema.photos.durationSec,
+        aestheticScore: schema.photoAnalyses.aestheticScore,
+        narrative: schema.photoAnalyses.narrative,
+        emotionalAnalysis: schema.photoAnalyses.emotionalAnalysis,
+        tags: schema.photoAnalyses.tags,
+        thumbnailPath: schema.photos.thumbnailPath,
+        sourceType: schema.storageSources.type,
+        latitude: schema.photos.latitude,
+        longitude: schema.photos.longitude,
+        offsetTime: schema.photos.offsetTime,
+      })
+      .from(schema.photos)
+      .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
+      .innerJoin(
+        schema.storageSources,
+        sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
+      )
+      .where(
+        and(
+          gte(schema.photoAnalyses.aestheticScore, 7.5),
+          burstRepOnly,
+          sql`${schema.photos.id} NOT IN (${sql.join(excludePlaceholders, sql`, `)})`,
+        ),
+      )
+      .orderBy(
+        desc(
+          sql`(COALESCE(${schema.photoAnalyses.aestheticScore}, 5.0) + ABS(RANDOM() % 3)) / 1.0`,
+        ),
+      )
+      .limit(fillUpLimit);
+  }
+
+  // 转换 fillUp 原始行为 EnrichedCandidate，source 标 "fillUp"
+  const fillUpCandidates = toEnriched(fillUpRawRows, "fillUp");
+
+  // fillUp 候选单独跑聚类
+  const fillUpClusters = clusterByDirnameAndTime(fillUpCandidates);
+
+  // ---- 主题冲突过滤 ----
+  // 对每个 fillUp 簇代表 P，与 pool1 中每个簇代表做冲突检查：
+  //   dirname 谓词：同 dirname 且 |Δt| ≤ 60min → 冲突
+  //   GPS 谓词：haversineMeters ≤ 500m 且 |Δt| ≤ 24h → 冲突
+  //
+  // 简化说明：冲突判定仅对 pool1 簇代表做，不遍历 sibling。
+  // 簇代表与 sibling 时间/位置相近，dirname 通常相同，已能覆盖绝大多数冲突。
+  const CONFLICT_DIRNAME_MS = 60 * 60 * 1000; // 60 分钟
+  const CONFLICT_GPS_M = 500; // 500 米
+  const CONFLICT_GPS_MS = 24 * 3600 * 1000; // 24 小时
+
+  const nonConflictFillUp: ClusteredCandidate[] = [];
+
+  for (const fp of fillUpClusters) {
+    const fpDir = path.posix.dirname(fp.filePath);
+    const fpMs = parseTakenAtMs(fp.takenAt);
+
+    let hasConflict = false;
+    for (const p1 of pool1) {
+      // dirname + 时间窗 谓词
+      const p1Dir = path.posix.dirname(p1.filePath);
+      if (fpDir === p1Dir) {
+        const p1Ms = parseTakenAtMs(p1.takenAt);
+        if (fpMs !== null && p1Ms !== null && Math.abs(fpMs - p1Ms) <= CONFLICT_DIRNAME_MS) {
+          hasConflict = true;
+          break;
+        }
+      }
+
+      // GPS 谓词
+      if (
+        fp.latitude !== null &&
+        fp.longitude !== null &&
+        p1.latitude !== null &&
+        p1.longitude !== null
+      ) {
+        const p1Ms = parseTakenAtMs(p1.takenAt);
+        if (fpMs !== null && p1Ms !== null && Math.abs(fpMs - p1Ms) <= CONFLICT_GPS_MS) {
+          const dist = haversineMeters(fp.latitude, fp.longitude, p1.latitude, p1.longitude);
+          if (dist <= CONFLICT_GPS_M) {
+            hasConflict = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!hasConflict) {
+      nonConflictFillUp.push(fp);
+    }
+  }
+
+  // ---- 最终池 = pool1 + 非冲突 fillUp，按 weightedScore desc 全局排序截前 maxN ----
+  const combined = [...pool1, ...nonConflictFillUp];
+  combined.sort((a, b) => b.weightedScore - a.weightedScore);
+  const finalPool = combined.slice(0, maxN);
 
   // ---- 在最终池形成后注入 peopleNicknames（仅图片候选）----
   await enrichWithPeopleNicknames(finalPool);
@@ -469,12 +637,18 @@ async function enrichWithPeopleNicknames(candidates: ClusteredCandidate[]): Prom
  * - 合并 → 同 photoId 去重（保留先出现者）→ 截前 maxN
  *
  * 注：抢占池上限设为 maxN（而非固定 8），确保活跃源少时仍能填满 maxN 个唯一候选。
+ * 注：fillUp 不参与 quota 合并，由 buildCandidatePool 单独处理。
  */
 export function dedupAndQuotaMerge(
-  bySource: Record<CandidateSource, EnrichedCandidate[]>,
+  bySource: Record<PrimaryCandidateSource, EnrichedCandidate[]>,
   maxN = MAX_N,
 ): EnrichedCandidate[] {
-  const sources: CandidateSource[] = ["historyToday", "sameMonth", "sameSeason", "agedRandom"];
+  const sources: PrimaryCandidateSource[] = [
+    "historyToday",
+    "sameMonth",
+    "sameSeason",
+    "agedRandom",
+  ];
 
   // 各源按 weightedScore 降序
   for (const src of sources) {
