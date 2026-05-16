@@ -1044,25 +1044,19 @@ async function main(): Promise<void> {
         groupByFid.get(fid)?.id === groupByFid.get(prevFid)?.id;
       const transitionIn: "crossfade" | "cut" = sameGroup ? "cut" : "crossfade";
 
-      // Smart trim: snap to transcript segment boundaries to avoid mid-sentence cuts.
-      const trim = smartTrim(entry.durationSec, entry.transcript?.segments, opts.maxClipSec);
-      const srcStartSec = trim.startSec;
-      const srcEndSec = trim.endSec;
+      // smart-trim 阶段已前置：srcStartSec=0, srcEndSec=entry.durationSec（契约 C6）
+      const srcStartSec = 0;
+      const srcEndSec = entry.durationSec;
       const clipDurSec = srcEndSec - srcStartSec;
       const renderDur = Math.max(1, Math.round(clipDurSec * fps));
 
-      // Rebase + slice subtitles to [srcStartSec, srcEndSec], then translate to absolute frames.
-      // First split any segments whose words have a >1.5s internal gap (Whisper sometimes
-      // glues two utterances separated by silence into one segment, causing 10–20s subtitles).
+      // Translate segments (already shifted by smart-trim) to absolute frames.
+      // splitSegmentByWordGap is now handled in the smart-trim stage — segments
+      // in the manifest are already pre-split. We just need to filter empty ones
+      // and map to frame coordinates.
       let subtitles: TimelineClip["subtitles"] = [];
       if (entry.transcript?.segments?.length) {
-        const splitSegs: TranscriptSegment[] = [];
-        for (const s of entry.transcript.segments) {
-          if (s.text.trim().length === 0) continue;
-          const parts = splitSegmentByWordGap(s, 1.5);
-          for (const p of parts) splitSegs.push(p);
-        }
-        const segs = splitSegs
+        const segs = entry.transcript.segments
           .filter((s) => s.end > srcStartSec && s.start < srcEndSec && s.text.trim().length > 0)
           .map((s) => {
             const localStart = Math.max(0, s.start - srcStartSec);
@@ -1112,17 +1106,19 @@ async function main(): Promise<void> {
         });
       }
 
-      const trimmedNote =
-        clipDurSec < entry.durationSec - 0.1
-          ? ` trim=${srcStartSec.toFixed(1)}-${srcEndSec.toFixed(1)}/${entry.durationSec.toFixed(1)}`
-          : "";
       err(
-        `[storyboard-places]   ${fid} @ ${formatLocalTime(entry.takenAt)} ${clipDurSec.toFixed(1)}s${trimmedNote} subs=${subtitles.length}`,
+        `[storyboard-places]   ${fid} @ ${formatLocalTime(entry.takenAt)} ${clipDurSec.toFixed(1)}s subs=${subtitles.length}`,
       );
+
+      // 契约 C6：根据 sourceTrim.status 决定 source 路径
+      // 注意：trimmed 文件统一 .mp4 容器（契约 C1），所以引用 sources-trimmed 时文件名用 fid + ".mp4"
+      const useTrimmed = entry.sourceTrim?.status === "ok";
+      const clipFileName = useTrimmed ? `${fid}.mp4` : path.basename(entry.filePath);
+      const sourceDir = useTrimmed ? "sources-trimmed" : "sources";
 
       const clip: TimelineClip = {
         id: `${fid}-${cursor}`,
-        source: `sources/${path.basename(entry.filePath)}`,
+        source: `${sourceDir}/${clipFileName}`,
         kind: "video",
         srcStartSec,
         srcEndSec,

@@ -361,6 +361,80 @@ async function readFrameFiles(dir: string, prefix: string): Promise<Buffer[]> {
 }
 
 /**
+ * 从视频精确裁切一段，二次编码为 libx264 CRF 18 + aac 192k mp4。
+ * 使用 -ss 在 -i 之前（快速 seek）+ -t duration 避免 -to 在不同 ffmpeg 版本下的时间戳基准歧义。
+ * 超时 5 分钟。失败抛 VideoProcessingError。
+ */
+export async function extractClip(
+  input: string,
+  startSec: number,
+  endSec: number,
+  output: string,
+): Promise<void> {
+  const ffmpeg = config.video.ffmpegPath;
+  const duration = endSec - startSec;
+  if (duration <= 0) {
+    throw new VideoProcessingError(
+      `extractClip: duration must be positive (startSec=${startSec} endSec=${endSec})`,
+      "extract_clip",
+    );
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const args = [
+      "-y",
+      "-ss",
+      String(startSec),
+      "-i",
+      input,
+      "-t",
+      String(duration),
+      "-c:v",
+      "libx264",
+      "-crf",
+      "18",
+      "-preset",
+      "medium",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-movflags",
+      "+faststart",
+      output,
+    ];
+
+    const proc = spawn(ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+
+    let timer: NodeJS.Timeout | null = setTimeout(() => {
+      timer = null;
+      proc.kill("SIGKILL");
+      reject(new VideoProcessingError("extractClip 超时（5min）", "extract_clip"));
+    }, 5 * 60_000);
+
+    proc.on("error", (err) => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      reject(new VideoProcessingError(`ffmpeg spawn 失败: ${err.message}`, "extract_clip"));
+    });
+
+    proc.on("close", (code) => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (code !== 0) {
+        reject(new VideoProcessingError(`extractClip 失败，退出码: ${code}`, "extract_clip"));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+/**
  * 从视频提取音轨为 16kHz mono WAV。
  * 无音轨时返回 null。
  * 超时 60s。

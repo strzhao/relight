@@ -130,10 +130,20 @@ export const manifestImageEntrySchema = imageAnalysisResultSchema.extend({
   personsStatus: personsStatusSchema.optional(),
 });
 
+export const sourceTrimSchema = z.object({
+  startSec: z.number().nonnegative(),
+  endSec: z.number().positive(),
+  originalDurationSec: z.number().positive(),
+  trimmedAt: z.string().optional(),
+  status: z.enum(["ok", "trim_failed", "skipped"]).optional(),
+});
+export type SourceTrim = z.infer<typeof sourceTrimSchema>;
+
 export const manifestVideoEntrySchema = videoAnalysisResultSchema.extend({
   transcript: transcriptInlineSchema.optional(),
   persons: mediaPersonsSchema.optional(),
   personsStatus: personsStatusSchema.optional(),
+  sourceTrim: sourceTrimSchema.optional(),
 });
 
 export type ManifestImageEntry = z.infer<typeof manifestImageEntrySchema>;
