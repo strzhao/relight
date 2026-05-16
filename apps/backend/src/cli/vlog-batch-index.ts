@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { analyzeImage } from "./vlog/lib/analyzeImage";
 import { analyzeVideo, defaultSpriteDir } from "./vlog/lib/analyzeVideo";
+import { detectPersonsInMedia } from "./vlog/lib/detect-persons";
+import type { PersonsResult } from "./vlog/lib/detect-persons";
 import { transcribeFile } from "./vlog/lib/transcribe";
 import { classifyFile, err, pLimit } from "./vlog/lib/util";
 import type { BatchManifest, ManifestImageEntry, ManifestVideoEntry } from "./vlog/types";
@@ -60,6 +62,59 @@ async function listFiles(rootDir: string, filterRegex?: string): Promise<string[
   return files.sort();
 }
 
+/**
+ * Phase 0: 对所有媒体文件做人脸识别，收集 personsByFile 和 autoPersonNames。
+ * 单文件失败 → 该文件 persons:[]，整批不中断。
+ */
+async function phase0DetectPersons(
+  mediaFiles: string[],
+  concurrency: number,
+): Promise<{
+  personsByFile: Map<string, PersonsResult>;
+  autoPersonNames: Set<string>;
+}> {
+  const personsByFile = new Map<string, PersonsResult>();
+  const autoPersonNames = new Set<string>();
+
+  if (mediaFiles.length === 0) {
+    return { personsByFile, autoPersonNames };
+  }
+
+  err(`[detect-persons] starting phase 0 for ${mediaFiles.length} files`);
+
+  const limit = pLimit<void>(concurrency);
+  let done = 0;
+
+  const tasks = mediaFiles.map((filePath) =>
+    limit(async () => {
+      const kind = classifyFile(filePath);
+      const mediaType = kind === "image" ? "image" : kind === "video" ? "video" : null;
+      if (!mediaType) {
+        done++;
+        return;
+      }
+
+      let result: PersonsResult;
+      try {
+        result = await detectPersonsInMedia(filePath, mediaType, {});
+      } catch {
+        result = { persons: [], status: "no_faces" };
+      }
+
+      personsByFile.set(filePath, result);
+      for (const p of result.persons) {
+        if (p.name) autoPersonNames.add(p.name);
+      }
+
+      done++;
+      err(`[detect-persons] ${done}/${mediaFiles.length} files processed`);
+    }),
+  );
+
+  await Promise.all(tasks);
+  return { personsByFile, autoPersonNames };
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.rootDir) {
@@ -75,6 +130,22 @@ async function main(): Promise<void> {
 
   const allFiles = await listFiles(rootDir, opts.filter);
   err(`[batch-index] discovered ${allFiles.length} files`);
+
+  // Phase 0: 人脸识别（在 analyze + transcribe 之前）
+  const mediaFiles = allFiles.filter((f) => {
+    const kind = classifyFile(f);
+    return kind === "image" || kind === "video";
+  });
+  const { personsByFile, autoPersonNames } = await phase0DetectPersons(
+    mediaFiles,
+    opts.fileConcurrency,
+  );
+
+  // 合并 WHISPER_INITIAL_PROMPT：autoPersonNames + env prompt → 去重 → 顿号分隔
+  const envPrompt = process.env.WHISPER_INITIAL_PROMPT ?? "";
+  const finalPrompt = mergeWhisperPrompt([...autoPersonNames], envPrompt);
+  process.env.WHISPER_INITIAL_PROMPT = finalPrompt;
+  err(`[batch-index] initialPrompt auto-merged: "${finalPrompt}"`);
 
   const t0 = Date.now();
   const limit = pLimit<ManifestImageEntry | ManifestVideoEntry | null>(opts.fileConcurrency);
@@ -98,7 +169,13 @@ async function main(): Promise<void> {
           err(
             `[batch-index] ${processed}/${allFiles.length} image ${path.basename(filePath)} ok=${r.ok} cache=${r.cacheHit} ${r.elapsedMs}ms`,
           );
-          return r as ManifestImageEntry;
+          const personsResult = personsByFile.get(filePath);
+          const entry: ManifestImageEntry = {
+            ...(r as ManifestImageEntry),
+            persons: personsResult?.persons,
+            personsStatus: personsResult?.status,
+          };
+          return entry;
         }
         if (kind === "video") {
           // Transcribe + analyze in parallel (different resources: whisper vs qwen)
@@ -123,6 +200,7 @@ async function main(): Promise<void> {
           if (transcript?.cacheHit) cacheHits++;
           if (!analysis.ok) failed++;
 
+          const personsResult = personsByFile.get(filePath);
           const merged: ManifestVideoEntry = {
             ...analysis,
             transcript: transcript
@@ -135,6 +213,8 @@ async function main(): Promise<void> {
                   hasWordTimestamps: transcript.hasWordTimestamps,
                 }
               : undefined,
+            persons: personsResult?.persons,
+            personsStatus: personsResult?.status,
           };
           processed++;
           err(
@@ -195,7 +275,15 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((e) => {
-  err("FATAL", (e as Error).stack ?? (e as Error).message);
-  process.exit(1);
-});
+export function mergeWhisperPrompt(autoNames: string[], envPrompt: string): string {
+  const envTerms = envPrompt.split(/[、,，\s]+/).filter(Boolean);
+  const allTerms = [...autoNames.filter(Boolean), ...envTerms];
+  return Array.from(new Set(allTerms)).join("、");
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    err("FATAL", (e as Error).stack ?? (e as Error).message);
+    process.exit(1);
+  });
+}

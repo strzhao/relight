@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { photoAnalysisResponseSchema } from "../../ai/response-parser";
 
+export const mediaPersonSchema = z.object({
+  personId: z.string(),
+  name: z.string(),
+  frameCount: z.number().int().nonnegative(),
+  confidence: z.number().min(0).max(1),
+});
+
+export const mediaPersonsSchema = z.array(mediaPersonSchema);
+export type MediaPerson = z.infer<typeof mediaPersonSchema>;
+export type MediaPersonsStatus = "ok" | "no_faces" | "model_unavailable" | "db_unavailable";
+
+const personsStatusSchema = z.enum(["ok", "no_faces", "model_unavailable", "db_unavailable"]);
+
 export { photoAnalysisResponseSchema };
 export type PhotoAnalysisResponse = z.infer<typeof photoAnalysisResponseSchema>;
 
@@ -112,10 +125,15 @@ const transcriptInlineSchema = transcriptResultSchema
     updatedAt: z.string().optional(),
   });
 
-export const manifestImageEntrySchema = imageAnalysisResultSchema;
+export const manifestImageEntrySchema = imageAnalysisResultSchema.extend({
+  persons: mediaPersonsSchema.optional(),
+  personsStatus: personsStatusSchema.optional(),
+});
 
 export const manifestVideoEntrySchema = videoAnalysisResultSchema.extend({
   transcript: transcriptInlineSchema.optional(),
+  persons: mediaPersonsSchema.optional(),
+  personsStatus: personsStatusSchema.optional(),
 });
 
 export type ManifestImageEntry = z.infer<typeof manifestImageEntrySchema>;

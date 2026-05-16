@@ -162,7 +162,7 @@ function buildOverallSummary(entries: ManifestEntry[]): string {
   ].join("\n");
 }
 
-function buildAvailableList(entries: ManifestEntry[]): string {
+export function buildAvailableList(entries: ManifestEntry[]): string {
   return entries
     .map((e) => {
       const id = fileIdFromEntry(e);
@@ -173,15 +173,17 @@ function buildAvailableList(entries: ManifestEntry[]): string {
         .join(",");
       const mood = e.ai?.emotionalAnalysis?.primary ?? "";
       const brief = (e.ai?.narrative ?? "").slice(0, 60).replace(/\n/g, " ");
+      const personNames = (e.persons ?? []).filter((p) => p.name).map((p) => p.name);
+      const personsStr = personNames.join("、");
       if (e.type === "video") {
         const dur = e.durationSec.toFixed(1);
         const trim = e.suggestedTrim
           ? `trim=${e.suggestedTrim.startSec.toFixed(1)}-${e.suggestedTrim.endSec.toFixed(1)}`
           : "trim=full";
         const tx = e.transcript?.text?.slice(0, 60).replace(/\n/g, " ") ?? "";
-        return `[id=${id}] [vid ${dur}s] [${trim}] [pacing=${e.ai?.videoPacing ?? "?"} motion=${e.ai?.motionScore ?? "?"}] [score=${score}] tags=${tags} mood=${mood}${tx ? ` tx="${tx}"` : ""} brief="${brief}"`;
+        return `[id=${id}] [vid ${dur}s] [${trim}] [pacing=${e.ai?.videoPacing ?? "?"} motion=${e.ai?.motionScore ?? "?"}] [score=${score}] tags=${tags} mood=${mood}${tx ? ` tx="${tx}"` : ""} brief="${brief}" persons="${personsStr}"`;
       }
-      return `[id=${id}] [pic] [score=${score}] tags=${tags} mood=${mood} brief="${brief}"`;
+      return `[id=${id}] [pic] [score=${score}] tags=${tags} mood=${mood} brief="${brief}" persons="${personsStr}"`;
     })
     .join("\n");
 }
@@ -483,7 +485,9 @@ async function main(): Promise<void> {
   process.stdout.write(`${json}\n`);
 }
 
-main().catch((e) => {
-  err("FATAL", (e as Error).stack ?? (e as Error).message);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    err("FATAL", (e as Error).stack ?? (e as Error).message);
+    process.exit(1);
+  });
+}
