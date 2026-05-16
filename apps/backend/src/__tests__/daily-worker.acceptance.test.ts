@@ -321,7 +321,7 @@ function makeCandidates(count: number) {
  * 设置候选查询返回指定结果
  *
  * 新版 worker 使用多源候选池，查询顺序：
- * 1. getRecentPickedPhotoIds → 返回空（无最近精选）
+ * 1. getRecentPickedEventKeys → 返回空（无最近精选）
  * 2. historyToday 子查询 → 返回 candidates（第一源承载所有候选）
  * 3. sameMonth 子查询 → 空
  * 4. sameSeason 子查询 → 空
@@ -368,9 +368,9 @@ function setupCandidates(candidates: unknown[]) {
   });
 
   mockDb.select
-    // #1: getRecentPickedPhotoIds — dailyPicks 扫描（旧格式）
+    // #1: getRecentPickedEventKeys — dailyPicks 扫描（旧格式）
     .mockReturnValueOnce(chainableMock([]))
-    // #2: getRecentPickedPhotoIds — dailyPickEntries 扫描（新格式）
+    // #2: getRecentPickedEventKeys — dailyPickEntries 扫描（新格式）
     .mockReturnValueOnce(chainableMock([]))
     // #3: historyToday → 承载所有候选
     .mockReturnValueOnce(chainableMock(dbRows))
@@ -385,7 +385,7 @@ function setupCandidates(candidates: unknown[]) {
     // #8: 视频 narrate 的 analysis 查询（如果是视频 hero）→ 空
     .mockReturnValueOnce(chainableMock([]));
 
-  // 兜底：worker 主流程引入了新查询（queryRecentTitles、enrichWithPeopleNicknames
+  // 兜底：worker 主流程引入了新查询（enrichWithPeopleNicknames、getRecentPickedEventKeys
   // 等），调用序列变长。设默认 fallback 返回空数组，避免序列耗尽后 select() 返回
   // undefined 导致 ".from of undefined" 错误。所有 mockReturnValueOnce 用完后的
   // 调用自动落到此默认 fallback。

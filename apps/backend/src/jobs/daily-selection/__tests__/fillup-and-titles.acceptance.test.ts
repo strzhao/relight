@@ -15,25 +15,13 @@
  *   B-7  fillUp 排除集：excludeIds / pool1.photoId / pool1.clusterSiblingIds 不出现在 fillUp
  *   B-8  最终池上限：返回数组 length <= maxN
  *
- * C. queryRecentTitles 行为
- *   C-9   空表返回 "无"
- *   C-10  过滤 "今日拾光" fallback 标题
- *   C-11  时间窗过滤（daysBack 外的 pick_date 不返回）
- *   C-12  截断：30 条 / 600 字上限
- *
- * D. narrate prompt 模板
- *   D-13  user.txt 包含占位符 {recent_titles}
- *   D-14  system.txt 包含字符串 "避免重复标题"
- *
  * 红队铁律：
- * - 不读取蓝队新增的 buildPrimaryPool / buildFillUpPool / isConflictWithPrimary /
- *   queryRecentTitles 等函数体
+ * - 不读取蓝队新增的 computeEventKey / getRecentPickedEventKeys / filterByEventKey
+ *   等函数体
  * - 仅依赖公开导出类型 + 行为契约
  * - 真实 SQLite(:memory:) + setupTestSchema
  */
 
-import fs from "node:fs/promises";
-import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -152,23 +140,6 @@ function addDailyPick(
        VALUES (?, ?, ?, ?, 'test', 8.0, ?, ?)`,
     )
     .run(pickId, photoId, pickDate, title, JSON.stringify(members), new Date().toISOString());
-}
-
-function addDailyPickEntry(
-  sqlite: Database.Database,
-  entryId: string,
-  dailyPickId: string,
-  rank: number,
-  photoId: string,
-  title: string,
-) {
-  sqlite
-    .prepare(
-      `INSERT OR IGNORE INTO daily_pick_entries
-        (id, daily_pick_id, rank, photo_id, title, narrative, score, members, created_at)
-       VALUES (?, ?, ?, ?, ?, 'test narrative', 8.0, '[]', ?)`,
-    )
-    .run(entryId, dailyPickId, rank, photoId, title, new Date().toISOString());
 }
 
 // 北京时间工具（与 candidate-pool.integration.test.ts 一致）
@@ -483,207 +454,5 @@ describe("B. buildCandidatePool 行为", () => {
 
     // 无论 fillUp 拉了多少，最终池不超过 maxN
     expect(result.length).toBeLessThanOrEqual(maxN);
-  });
-});
-
-// =====================================================================
-// C. queryRecentTitles 行为
-// =====================================================================
-
-describe("C. queryRecentTitles 行为", () => {
-  beforeEach(() => {
-    const t = createTestDb();
-    testSqlite = t.sqlite;
-    testDb = t.db;
-  });
-
-  afterEach(() => {
-    testSqlite.close();
-    vi.resetModules();
-  });
-
-  /** 插入一张占位照片（daily_picks 需要 photo_id 外键） */
-  function insertPlaceholderPhoto(sqlite: Database.Database, photoId: string) {
-    sqlite
-      .prepare(
-        `INSERT OR IGNORE INTO storage_sources (id, name, type, root_path) VALUES ('src-titles', 'test', 'local', '/tmp')`,
-      )
-      .run();
-    sqlite
-      .prepare(
-        `INSERT OR IGNORE INTO photos
-          (id, storage_source_id, file_path, file_hash, width, height, file_size, taken_at, created_at)
-         VALUES (?, 'src-titles', ?, ?, 100, 100, 1024, ?, ?)`,
-      )
-      .run(
-        photoId,
-        `/photos/${photoId}.jpg`,
-        `hash-${photoId}`,
-        new Date().toISOString(),
-        new Date().toISOString(),
-      );
-  }
-
-  it('C-9: 空表返回 "无"', async () => {
-    // 动态导入，可能来自 daily-selection.ts 或独立模块 recent-titles.ts
-    // 蓝队保证其中一个导出 queryRecentTitles
-    let queryRecentTitles: (daysBack: number) => Promise<string>;
-
-    try {
-      const mod = await import("../../daily-selection/recent-titles");
-      queryRecentTitles = mod.queryRecentTitles;
-    } catch {
-      // fallback：从 daily-selection.ts 导入（蓝队选择不抽独立文件时）
-      const mod = await import("../../daily-selection");
-      queryRecentTitles = (mod as unknown as { queryRecentTitles: typeof queryRecentTitles })
-        .queryRecentTitles;
-    }
-
-    const result = await queryRecentTitles(30);
-    expect(result).toBe("无");
-  });
-
-  it('C-10: 过滤 "今日拾光" fallback 标题，其他 title 正常返回', async () => {
-    let queryRecentTitles: (daysBack: number) => Promise<string>;
-    try {
-      const mod = await import("../../daily-selection/recent-titles");
-      queryRecentTitles = mod.queryRecentTitles;
-    } catch {
-      const mod = await import("../../daily-selection");
-      queryRecentTitles = (mod as unknown as { queryRecentTitles: typeof queryRecentTitles })
-        .queryRecentTitles;
-    }
-
-    // 插入占位照片
-    insertPlaceholderPhoto(testSqlite, "photo-c10-1");
-    insertPlaceholderPhoto(testSqlite, "photo-c10-2");
-    insertPlaceholderPhoto(testSqlite, "photo-c10-3");
-
-    const recentDate = new Date(Date.now() - 5 * 86400_000).toISOString().slice(0, 10);
-
-    // 3 条 daily_picks：1 条 title="今日拾光"（应被过滤），2 条正常 title
-    addDailyPick(testSqlite, "pick-c10-1", "photo-c10-1", recentDate, "朱红隧道里的旧时");
-    addDailyPick(
-      testSqlite,
-      "pick-c10-2",
-      "photo-c10-2",
-      new Date(Date.now() - 6 * 86400_000).toISOString().slice(0, 10),
-      "今日拾光",
-    );
-    addDailyPick(
-      testSqlite,
-      "pick-c10-3",
-      "photo-c10-3",
-      new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10),
-      "晨光下的青石板",
-    );
-
-    // 2 条 daily_pick_entries（关联 pick-c10-1）
-    addDailyPickEntry(testSqlite, "entry-c10-1", "pick-c10-1", 0, "photo-c10-1", "初夏的雨季记忆");
-    addDailyPickEntry(testSqlite, "entry-c10-2", "pick-c10-1", 1, "photo-c10-2", "今日拾光");
-
-    const result = await queryRecentTitles(30);
-
-    // 不含"今日拾光"
-    expect(result).not.toContain("今日拾光");
-    // 含其他 3 个 title
-    expect(result).toContain("朱红隧道里的旧时");
-    expect(result).toContain("晨光下的青石板");
-    expect(result).toContain("初夏的雨季记忆");
-  });
-
-  it("C-11: 时间窗过滤（daysBack 外的 pick_date 不返回）", async () => {
-    let queryRecentTitles: (daysBack: number) => Promise<string>;
-    try {
-      const mod = await import("../../daily-selection/recent-titles");
-      queryRecentTitles = mod.queryRecentTitles;
-    } catch {
-      const mod = await import("../../daily-selection");
-      queryRecentTitles = (mod as unknown as { queryRecentTitles: typeof queryRecentTitles })
-        .queryRecentTitles;
-    }
-
-    insertPlaceholderPhoto(testSqlite, "photo-c11-old");
-    insertPlaceholderPhoto(testSqlite, "photo-c11-recent");
-
-    // 60 天前的 pick（超出 daysBack=30 窗口）
-    const oldDate = new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10);
-    addDailyPick(testSqlite, "pick-c11-old", "photo-c11-old", oldDate, "远古的风景标题");
-
-    // 5 天前的 pick（在 daysBack=30 窗口内）
-    const recentDate = new Date(Date.now() - 5 * 86400_000).toISOString().slice(0, 10);
-    addDailyPick(testSqlite, "pick-c11-recent", "photo-c11-recent", recentDate, "近期的风景标题");
-
-    const result = await queryRecentTitles(30);
-
-    // 60 天前的不应出现
-    expect(result).not.toContain("远古的风景标题");
-    // 5 天前的应出现
-    expect(result).toContain("近期的风景标题");
-  });
-
-  it("C-12: 最多 30 条 / 总字符 <= 600 截断", async () => {
-    let queryRecentTitles: (daysBack: number) => Promise<string>;
-    try {
-      const mod = await import("../../daily-selection/recent-titles");
-      queryRecentTitles = mod.queryRecentTitles;
-    } catch {
-      const mod = await import("../../daily-selection");
-      queryRecentTitles = (mod as unknown as { queryRecentTitles: typeof queryRecentTitles })
-        .queryRecentTitles;
-    }
-
-    // 插入 50 条 daily_picks，每条 title 唯一（5 天前日期，在窗口内）
-    for (let i = 0; i < 50; i++) {
-      const photoId = `photo-c12-${i}`;
-      // 用稍微不同的日期避免 unique 约束冲突
-      const daysOffset = (i % 28) + 1;
-      const pickDate = new Date(Date.now() - daysOffset * 86400_000).toISOString().slice(0, 10);
-      insertPlaceholderPhoto(testSqlite, photoId);
-      // title 必须唯一，用索引区分
-      addDailyPick(
-        testSqlite,
-        `pick-c12-${i}`,
-        photoId,
-        // pick_date 有 UNIQUE 约束，用不同日期或跳过已存在
-        new Date(Date.now() - (i + 1) * 86400_000)
-          .toISOString()
-          .slice(0, 10),
-        `测试标题系列第${String(i).padStart(3, "0")}号`,
-      );
-    }
-
-    const result = await queryRecentTitles(60); // 用 60 天确保所有 pick 在窗口内
-
-    if (result === "无") {
-      // 如果所有 pick 在 60 天内但实现未查到（不应发生），标记明显失败
-      expect(result).not.toBe("无");
-      return;
-    }
-
-    // 用逗号分割，统计 title 数量
-    const titles = result.split(", ");
-    expect(titles.length).toBeLessThanOrEqual(30);
-
-    // 总字符长度 <= 600
-    expect(result.length).toBeLessThanOrEqual(600);
-  });
-});
-
-// =====================================================================
-// D. narrate prompt 模板
-// =====================================================================
-
-describe("D. narrate prompt 模板", () => {
-  it("D-13: user.txt 包含占位符 {recent_titles}", async () => {
-    const userTxtPath = path.join(__dirname, "../../../ai/prompts/v2/daily/narrate/user.txt");
-    const content = await fs.readFile(userTxtPath, "utf-8");
-    expect(content).toContain("{recent_titles}");
-  });
-
-  it('D-14: system.txt 包含字符串 "避免重复标题"', async () => {
-    const systemTxtPath = path.join(__dirname, "../../../ai/prompts/v2/daily/narrate/system.txt");
-    const content = await fs.readFile(systemTxtPath, "utf-8");
-    expect(content).toContain("避免重复标题");
   });
 });

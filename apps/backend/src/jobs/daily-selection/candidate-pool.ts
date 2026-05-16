@@ -21,6 +21,8 @@ import { type ClusteredCandidate, clusterByDirnameAndTime, parseTakenAtMs } from
 const MAX_N = 12;
 /** 每源保底席位 */
 const QUOTA_PER_SOURCE = 3;
+/** 事件键过滤的 overfetch 倍率：各源 SQL LIMIT 放大 1.5 倍，补偿事件键冲突丢弃的候选 */
+const EVENT_KEY_OVERFETCH_RATIO = 1.5;
 
 /** 4 个主路径候选源标识（不含 fillUp） */
 export type PrimaryCandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom";
@@ -74,28 +76,56 @@ export function ageWeightMultiplier(yearsAgo: number): number {
 }
 
 /**
- * 获取最近 daysBack 天精选过的 photoId 集合（含 hero + members）
+ * 计算事件键：`dirname::takenAt_date`。
+ *
+ * 一对 (dirname, date(takenAt)) 定义为"事件键"。30 天内每个事件键最多入选 1 次，
+ * 避免同一拍摄事件的照片反复出现在精选池中。
+ *
+ * @param filePath - 照片文件路径（POSIX 风格）
+ * @param takenAt - ISO 时间字符串或 null
+ * @returns 事件键字符串，或 null（takenAt 为 null 时）
+ */
+export function computeEventKey(filePath: string, takenAt: string | null): string | null {
+  if (!takenAt) return null;
+  const dirname = path.posix.dirname(filePath);
+  const date = takenAt.slice(0, 10); // "YYYY-MM-DD"
+  return `${dirname}::${date}`;
+}
+
+/**
+ * 获取最近 daysBack 天精选照片的事件键集合 + photoId 去重集合。
  *
  * 同时扫描两个表：
  * 1. daily_picks（旧格式：hero photoId + members JSON 列）
  * 2. daily_pick_entries（新格式：每行一个 entry 的 photo_id + members JSON 列）
- * 保证 19/20 entry 照片次日不会被重复入选。
+ *
+ * 每条结果 JOIN photos 表获取 file_path、taken_at，然后计算事件键。
+ * taken_at 为 NULL 的行不生成事件键。
+ *
+ * @returns { eventKeys: Set<string>, excludeIds: Set<string> }
  */
-export async function getRecentPickedPhotoIds(daysBack = 30): Promise<Set<string>> {
-  const cutoff = new Date(Date.now() - daysBack * 86400_000).toISOString().slice(0, 10);
+export async function getRecentPickedEventKeys(
+  daysBack = 30,
+  now: Date = new Date(),
+): Promise<{ eventKeys: Set<string>; excludeIds: Set<string> }> {
+  const cutoff = new Date(now.getTime() - daysBack * 86400_000).toISOString().slice(0, 10);
+  const nowDate = now.toISOString().slice(0, 10);
 
-  // 扫描 daily_picks（旧格式）
+  // 扫描 daily_picks（旧格式）— 仅 cutoff <= pick_date < nowDate（不含未来）
   const pickRows = await db
-    .select({ photoId: schema.dailyPicks.photoId, members: schema.dailyPicks.members })
+    .select({
+      photoId: schema.dailyPicks.photoId,
+      members: schema.dailyPicks.members,
+    })
     .from(schema.dailyPicks)
-    .where(gte(schema.dailyPicks.pickDate, cutoff));
+    .where(and(gte(schema.dailyPicks.pickDate, cutoff), lt(schema.dailyPicks.pickDate, nowDate)));
 
-  const ids = new Set<string>();
+  const excludeIds = new Set<string>();
   for (const r of pickRows) {
-    ids.add(r.photoId);
+    excludeIds.add(r.photoId);
     const memberList = (r.members as { photoId: string }[] | null) ?? [];
     for (const m of memberList) {
-      ids.add(m.photoId);
+      excludeIds.add(m.photoId);
     }
   }
 
@@ -110,23 +140,60 @@ export async function getRecentPickedPhotoIds(daysBack = 30): Promise<Set<string
       schema.dailyPicks,
       sql`${schema.dailyPicks.id} = ${schema.dailyPickEntries.dailyPickId}`,
     )
-    .where(gte(schema.dailyPicks.pickDate, cutoff));
+    .where(and(gte(schema.dailyPicks.pickDate, cutoff), lt(schema.dailyPicks.pickDate, nowDate)));
 
   for (const r of entryRows) {
-    ids.add(r.photoId);
+    excludeIds.add(r.photoId);
     const memberList = (r.members as { photoId: string }[] | null) ?? [];
     for (const m of memberList) {
-      ids.add(m.photoId);
+      excludeIds.add(m.photoId);
     }
   }
 
-  return ids;
+  // JOIN photos 表获取 file_path + taken_at，计算事件键
+  const eventKeys = new Set<string>();
+  if (excludeIds.size > 0) {
+    const excludeList = [...excludeIds];
+    const photoRows = await db
+      .select({
+        photoId: schema.photos.id,
+        filePath: schema.photos.filePath,
+        takenAt: schema.photos.takenAt,
+      })
+      .from(schema.photos)
+      .where(
+        sql`${schema.photos.id} IN (${sql.join(
+          excludeList.map((id) => sql`${id}`),
+          sql`, `,
+        )})`,
+      );
+
+    for (const r of photoRows) {
+      const key = computeEventKey(r.filePath, r.takenAt);
+      if (key) eventKeys.add(key);
+    }
+  }
+
+  return { eventKeys, excludeIds };
+}
+
+/**
+ * @deprecated 使用 getRecentPickedEventKeys().excludeIds 替代
+ */
+export async function getRecentPickedPhotoIds(
+  daysBack = 30,
+  now: Date = new Date(),
+): Promise<Set<string>> {
+  const { excludeIds } = await getRecentPickedEventKeys(daysBack, now);
+  return excludeIds;
 }
 
 /** 构建候选池参数 */
 export interface BuildCandidatePoolOptions {
   now?: Date;
   excludeIds?: Set<string>;
+  /** 事件键集合：30 天内已选照片的事件键，候选照片若命中则跳过 */
+  eventKeys?: Set<string>;
   maxN?: number;
 }
 
@@ -180,9 +247,14 @@ function calcYearsAgo(takenAt: string | null, currentYear: number): number {
 export async function buildCandidatePool(
   options: BuildCandidatePoolOptions = {},
 ): Promise<ClusteredCandidate[]> {
-  const { now = new Date(), excludeIds = new Set<string>(), maxN = MAX_N } = options;
-  // 每源取回数 = maxN，确保即使只有 1-2 个活跃源也能满足最终 maxN 张的需求
-  const K_PER_SOURCE = maxN;
+  const {
+    now = new Date(),
+    excludeIds = new Set<string>(),
+    eventKeys = new Set<string>(),
+    maxN = MAX_N,
+  } = options;
+  // 每源取回数 = maxN * overfetch 倍率，补偿事件键冲突丢弃的候选
+  const K_PER_SOURCE = Math.ceil(maxN * EVENT_KEY_OVERFETCH_RATIO);
   const { year, month, day, monthDay, seasonMonths } = getBeijingDateInfo(now);
   const currentYear = year;
   const twoYearsAgo = new Date(now.getTime() - 2 * 365.25 * 86400_000).toISOString();
@@ -370,10 +442,19 @@ export async function buildCandidatePool(
       });
   }
 
-  const historyToday = toEnriched(historyTodayRows, "historyToday");
-  const sameMonth = toEnriched(sameMonthRows, "sameMonth");
-  const sameSeason = toEnriched(sameSeasonRows, "sameSeason");
-  const agedRandom = toEnriched(agedRandomRows, "agedRandom");
+  /** 事件键过滤器：候选命中已知事件键则跳过（takenAt 为 null 时不过滤） */
+  function filterByEventKey(candidates: EnrichedCandidate[]): EnrichedCandidate[] {
+    if (eventKeys.size === 0) return candidates;
+    return candidates.filter((c) => {
+      const key = computeEventKey(c.filePath, c.takenAt);
+      return !key || !eventKeys.has(key);
+    });
+  }
+
+  const historyToday = filterByEventKey(toEnriched(historyTodayRows, "historyToday"));
+  const sameMonth = filterByEventKey(toEnriched(sameMonthRows, "sameMonth"));
+  const sameSeason = filterByEventKey(toEnriched(sameSeasonRows, "sameSeason"));
+  const agedRandom = filterByEventKey(toEnriched(agedRandomRows, "agedRandom"));
 
   // ---- per-source quota 合并（不截断）----
   // 按设计文档要求："merged.slice(0, maxN) 这一截断需要在聚类之后做，
@@ -496,7 +577,7 @@ export async function buildCandidatePool(
   }
 
   // 转换 fillUp 原始行为 EnrichedCandidate，source 标 "fillUp"
-  const fillUpCandidates = toEnriched(fillUpRawRows, "fillUp");
+  const fillUpCandidates = filterByEventKey(toEnriched(fillUpRawRows, "fillUp"));
 
   // fillUp 候选单独跑聚类
   const fillUpClusters = clusterByDirnameAndTime(fillUpCandidates);

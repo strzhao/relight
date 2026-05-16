@@ -8,67 +8,9 @@ import { parseDailyMembersResponse, parseDailyNarrateResponse } from "../ai/resp
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { createStorageAdapter } from "../storage";
-import { buildCandidatePool, getRecentPickedPhotoIds } from "./daily-selection/candidate-pool";
+import { buildCandidatePool, getRecentPickedEventKeys } from "./daily-selection/candidate-pool";
 import type { ClusteredCandidate } from "./daily-selection/cluster";
 import { buildRelatedPool } from "./daily-selection/related-pool";
-
-/**
- * 查询最近 daysBack 天精选过的标题（去重），用于 narrate prompt 软约束。
- *
- * 同时扫描两个表：
- * - daily_picks.title（旧格式主标题）
- * - daily_pick_entries.title（新格式每条 entry 标题）
- *
- * 过滤掉 fallback 文案「今日拾光」，截断到最多 30 个或总字符 ≤ 600。
- * 空集返回 "无"，否则用半角逗号拼接。
- */
-export async function queryRecentTitles(daysBack = 30): Promise<string> {
-  const cutoff = new Date(Date.now() - daysBack * 86400_000).toISOString().slice(0, 10);
-
-  // 从 daily_picks 取主标题
-  const pickTitleRows = await db
-    .select({ title: schema.dailyPicks.title })
-    .from(schema.dailyPicks)
-    .where(
-      sql`${schema.dailyPicks.pickDate} >= ${cutoff} AND ${schema.dailyPicks.title} != '今日拾光' AND ${schema.dailyPicks.title} IS NOT NULL`,
-    );
-
-  // 从 daily_pick_entries 取 entry 标题（JOIN 过滤日期）
-  const entryTitleRows = await db
-    .select({ title: schema.dailyPickEntries.title })
-    .from(schema.dailyPickEntries)
-    .innerJoin(
-      schema.dailyPicks,
-      sql`${schema.dailyPicks.id} = ${schema.dailyPickEntries.dailyPickId}`,
-    )
-    .where(
-      sql`${schema.dailyPicks.pickDate} >= ${cutoff} AND ${schema.dailyPickEntries.title} != '今日拾光' AND ${schema.dailyPickEntries.title} IS NOT NULL`,
-    );
-
-  // 合并去重
-  const titleSet = new Set<string>();
-  for (const r of pickTitleRows) {
-    if (r.title) titleSet.add(r.title);
-  }
-  for (const r of entryTitleRows) {
-    if (r.title) titleSet.add(r.title);
-  }
-
-  if (titleSet.size === 0) return "无";
-
-  // 截断：最多 30 个 title，总字符 ≤ 600
-  const titles = [...titleSet].sort();
-  const selected: string[] = [];
-  let totalChars = 0;
-  for (const t of titles) {
-    if (selected.length >= 30) break;
-    if (totalChars + t.length > 600) break;
-    selected.push(t);
-    totalChars += t.length;
-  }
-
-  return selected.join(", ");
-}
 
 /**
  * 生成北京时间 YYYY-MM-DD 格式的日期字符串
@@ -99,7 +41,6 @@ interface EntryResult {
  * @param rank - 候选序号（0-19）
  * @param otherHeroIds - 已选作其它 entry hero 的 photoId 集合（跨 entry members 互斥）
  * @param recentIds - 30 天去重 Set（用于构建关联池排除集）
- * @param recentTitles - 近期已用标题字符串（用于 narrate prompt 软约束）
  * @param log - 日志函数
  */
 async function processSingleEntry(
@@ -107,7 +48,6 @@ async function processSingleEntry(
   rank: number,
   otherHeroIds: Set<string>,
   recentIds: Set<string>,
-  recentTitles: string,
   log: (msg: string) => void,
 ): Promise<EntryResult> {
   const isVideo = (candidate.mediaType ?? "image") === "video";
@@ -147,8 +87,7 @@ async function processSingleEntry(
       .replace("{narrative}", candidate.narrative ?? "无描述")
       .replace("{latitude}", latStr)
       .replace("{longitude}", lonStr)
-      .replace("{timezone}", tzStr)
-      .replace("{recent_titles}", recentTitles);
+      .replace("{timezone}", tzStr);
 
     if (isVideo) {
       const analysisRows = await db
@@ -330,8 +269,12 @@ async function processSingleEntry(
 export async function dailySelectionWorker(job: Job): Promise<void> {
   job.log("开始每日精选（新版 20 张多入选流水线）");
 
-  const pickDate = formatPickDate();
-  job.log(`pickDate: ${pickDate}`);
+  // 允许 job.data.pickDate 覆盖（用于回填/重跑历史日期，格式 YYYY-MM-DD）
+  const overrideDate = (job.data as { pickDate?: string } | undefined)?.pickDate;
+  const pickDate = overrideDate ?? formatPickDate();
+  // 与 pickDate 对应的"now"（北京时间该日中午 12:00），用于 4 源时间窗 + 30 天去重池
+  const pickNow = overrideDate ? new Date(`${overrideDate}T04:00:00Z`) : new Date();
+  job.log(`pickDate: ${pickDate}${overrideDate ? " (override)" : ""}`);
 
   const concurrency = Number.parseInt(
     process.env.DAILY_SELECTION_CONCURRENCY ?? String(config.dailySelectionConcurrency ?? 2),
@@ -340,19 +283,17 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   job.log(`并发度: ${concurrency}`);
 
   // ---- 阶段 0: 构造候选池 ----
-  const recentIds = await getRecentPickedPhotoIds(30);
-  job.log(`最近 30 天去重池: ${recentIds.size} 个 photoId`);
+  const { eventKeys, excludeIds: recentIds } = await getRecentPickedEventKeys(30, pickNow);
+  job.log(`最近 30 天去重池: ${recentIds.size} 个 photoId, ${eventKeys.size} 个事件键`);
 
   const candidates = await buildCandidatePool({
-    now: new Date(),
+    now: pickNow,
     excludeIds: recentIds,
+    eventKeys,
     maxN: 12,
   });
 
   job.log(`4 源候选池共 ${candidates.length} 张候选`);
-
-  const recentTitles = await queryRecentTitles(30);
-  job.log(`最近 30 天 title 池: ${recentTitles === "无" ? 0 : recentTitles.split(", ").length} 个`);
 
   if (candidates.length === 0) {
     job.log("今日无候选照片，跳过每日精选");
@@ -374,13 +315,8 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
         const otherHeroIds = new Set([...allHeroIds].filter((id) => id !== candidate.photoId));
         job.log(`[rank=${idx}] 开始处理 photoId=${candidate.photoId}`);
         try {
-          return await processSingleEntry(
-            candidate,
-            idx,
-            otherHeroIds,
-            recentIds,
-            recentTitles,
-            (msg) => job.log(msg),
+          return await processSingleEntry(candidate, idx, otherHeroIds, recentIds, (msg) =>
+            job.log(msg),
           );
         } catch (err) {
           // 单张失败 → fallback，不阻塞其它
