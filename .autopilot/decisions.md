@@ -1,5 +1,24 @@
 # 架构决策日志
 
+### [2026-05-16] 事件键（dirname::takenAt 同日）前置去重替代 prompt 标题软约束
+
+<!-- tags: daily-selection, candidate-pool, event-key, dedup, title-duplication, rule-based, computeEventKey, getRecentPickedEventKeys, design -->
+
+**Background**: 上一轮实施的 narrate prompt {recent_titles} 软约束（`system.txt` 第 6 条 + `user.txt` 注入近期标题）被 qwen-vl 完全忽略 — 8 张伏见稻荷照片横跨 7 天全部生成相同标题"朱红隧道里的旧时"。8 张照片实际来自 2 次独立拍摄事件（2018-04-19 在 105APPLE 目录 + 2018-07-28 在珂珂手机照片目录），但 prompt 无法让 AI 产出不同标题。
+
+**Choice**: 撤销 prompt 软约束，改在候选池层面用确定性规则前置去重：
+1. 一对 `(dirname, date(taken_at))` 定义为"事件键" — `computeEventKey` = `path.posix.dirname(filePath) + "::" + takenAt.slice(0, 10)`
+2. `getRecentPickedEventKeys(30)` 查询过去 30 天已选照片的 `{ eventKeys, excludeIds }`，一次 DB 调用替代原来的 `getRecentPickedPhotoIds`
+3. 4 源 + fillUp 候选在映射为 `EnrichedCandidate` 后加 `filterByEventKey()`，命中已知事件键则跳过
+4. NULL taken_at 的候选不受影响（安全兜底）
+5. overfetch `K_PER_SOURCE = maxN * 1.5` 补偿过滤损耗（dry-run 实际过滤率 ~27%）
+
+**Why not prompt**: qwen-vl 视觉模型在 narrate 阶段不受 prompt soft constraint 约束 — 同题材照片会固定输出相同模板标题。规则方案是确定性（相同输入必相同输出）、零额外 AI 调用、不依赖模型配合。
+
+**Why this granularity**: dry-run 对比 9 个备选方案（纯 dirname 60/84 误杀灾难、phash 几乎无效、纯 takenAt 跨地点误杀、dirname+takenAt±1d 过宽）→ 方案 H（dirname AND takenAt 同日）最优：8/8 朱红命中 6 张（2 次事件 → 2 张代表），23/84 总排除均为合理同次拍摄去重。
+
+**Result**: 重跑 7 天验证 — "朱红隧道里的旧时"从 8 次（跨 7 天）降至 2 次（仅 05-09 当日不同事件），84 unique photoIds，80 unique event keys，每日期 12 entries 稳定。
+
 ### [2026-05-15] candidate-pool 触底回填第 5 源（fillUp）：主路径聚类压缩导致 entries 断崖时启动兜底，pool1 代表 pin 住不替换
 
 <!-- tags: daily-selection, candidate-pool, fillUp, fallback, theme-conflict, primary-candidate-source, type-narrowing, pool1-stability, design -->

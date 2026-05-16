@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-05-16] 事件键（dirname::takenAt 同日）前置去重替代 prompt 标题软约束：qwen-vl 忽略 soft constraint → 规则方案 8→2 | tags: daily-selection, candidate-pool, event-key, dedup, title-duplication, rule-based, design | → decisions.md
 - [2026-05-15] candidate-pool 触底回填第 5 源 fillUp：聚类压缩 < maxN 时启动兜底，pool1 代表 pin 住，避免 entries 断崖 | tags: daily-selection, candidate-pool, fillUp, fallback, theme-conflict, primary-candidate-source, type-narrowing, pool1-stability, design | → decisions.md
 - [2026-05-15] narrate prompt {recent_titles} 软约束 + 「避免重复标题」准则：跨日 title 去重零额外 AI 调用 | tags: daily-selection, narrate-prompt, title-deduplication, soft-constraint, recent-titles, query-recent-titles, ai-prompt-engineering, design | → decisions.md
 - [2026-05-15] 撤销 narrate 命名人物注入：第二人称「你」呼告体优于硬塞具体称呼 | tags: daily-selection, narrate-prompt, person-injection, second-person, product-tone, reversal, scope-control, ai-prompt-engineering | → decisions.md
