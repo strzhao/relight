@@ -6,6 +6,7 @@ import ImageIO
 struct RelightApp: App {
     @StateObject private var settings = AppSettings.shared
     @StateObject private var commandBus = MenuBarCommandBus()
+    @StateObject private var healthMonitor = MenuBarHealthMonitor()
 
     // 单例式持有 coordinator/autostart，避免 actor 在 init 内被 capture self 问题
     fileprivate static var sharedCoordinator: WallpaperCoordinator?
@@ -45,7 +46,7 @@ struct RelightApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("拾光", systemImage: "photo.stack") {
+        MenuBarExtra {
             MenuBarContent()
                 .environmentObject(commandBus)
                 .task {
@@ -53,7 +54,14 @@ struct RelightApp: App {
                     commandBus.onRefreshNow = {
                         await Self.sharedCoordinator?.refreshNow()
                     }
+                    healthMonitor.start()
                 }
+        } label: {
+            Image(systemName: healthMonitor.iconName)
+        }
+        Window("拾光 — 控制中心", id: "control-center") {
+            ControlCenterView()
+                .environmentObject(settings)
         }
         Settings {
             SettingsView()

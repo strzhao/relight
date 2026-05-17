@@ -1,5 +1,8 @@
 export const API_ROUTES = {
   health: "/api/health",
+  runtime: {
+    status: "/api/runtime/status",
+  },
   photos: {
     list: "/api/photos",
     detail: (id: string) => `/api/photos/${id}`,

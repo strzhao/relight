@@ -21,9 +21,17 @@ struct MenuBarContent: View {
             }
         }
         Divider()
+        openControlCenterButton
         settingsButton
         Button("退出 拾光") {
             NSApp.terminate(nil)
+        }
+    }
+
+    @ViewBuilder
+    private var openControlCenterButton: some View {
+        if #available(macOS 14, *) {
+            OpenControlCenterButton()
         }
     }
 
@@ -55,6 +63,18 @@ private struct MenuBarSettingsButton: View {
             } else {
                 openSettings()
             }
+        }
+    }
+}
+
+@available(macOS 14, *)
+private struct OpenControlCenterButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("打开控制中心") {
+            openWindow(id: "control-center")
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 }

@@ -11,6 +11,7 @@ import {
   personsRouter,
   photosRouter,
   queuesRouter,
+  runtimeRouter,
   scanRouter,
   settingsRouter,
   storageRouter,
@@ -46,6 +47,7 @@ export function createApp(): Hono {
   });
 
   app.route("/api/health", healthRouter);
+  app.route("/api/runtime", runtimeRouter);
   app.route("/api/photos", photosRouter);
   app.route("/api/daily", dailyRouter);
   app.route("/api/tags", tagsRouter);

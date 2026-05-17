@@ -1,4 +1,5 @@
 export { healthRouter } from "./health";
+export { runtimeRouter } from "./runtime";
 export { photosRouter } from "./photos";
 export { dailyRouter } from "./daily";
 export { tagsRouter } from "./tags";

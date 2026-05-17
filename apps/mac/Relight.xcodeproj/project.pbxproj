@@ -29,6 +29,7 @@
 		A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006A; settings = {}; };
 		A0000000000000000000006E /* AutostartManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B; settings = {}; };
 		A0000000000000000000006F /* BeijingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C; settings = {}; };
+		A00000000000000000000070 /* ControlCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000071; settings = {}; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 		A0000000000000000000006A /* WallpaperCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCoordinator.swift; sourceTree = "<group>"; };
 		A0000000000000000000006B /* AutostartManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutostartManager.swift; sourceTree = "<group>"; };
 		A0000000000000000000006C /* BeijingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeijingTime.swift; sourceTree = "<group>"; };
+		A00000000000000000000071 /* ControlCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlCenter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -155,6 +157,7 @@
 				A0000000000000000000005F /* MenuBarCommandBus.swift */,
 				A00000000000000000000060 /* MenuBarContent.swift */,
 				A00000000000000000000061 /* SettingsView.swift */,
+				A00000000000000000000071 /* ControlCenter.swift */,
 				A0000000000000000000005E /* SettingsTabs */,
 			);
 			path = UI;
@@ -264,6 +267,7 @@
 				A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */,
 				A0000000000000000000006E /* AutostartManager.swift in Sources */,
 				A0000000000000000000006F /* BeijingTime.swift in Sources */,
+				A00000000000000000000070 /* ControlCenter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

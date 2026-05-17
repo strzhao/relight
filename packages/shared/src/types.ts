@@ -552,3 +552,45 @@ export interface AnalyzeBatchProgressEvent {
   startedAt: string;
   finishedAt: string | null;
 }
+
+/** 服务运行状态（Mac App 控制中心使用） */
+export type ServiceStatus = "running" | "degraded" | "down";
+
+export interface RuntimeStatus {
+  overall: ServiceStatus;
+  version: string;
+  services: {
+    api: {
+      status: ServiceStatus;
+      port: number;
+      uptimeSec: number;
+      pid: number;
+    };
+    workers: {
+      status: ServiceStatus;
+      lastHeartbeatAgoSec: number | null;
+      commit: string | null;
+      queueDepth: {
+        scan: number;
+        analyze: number;
+        daily: number;
+        faces: number;
+      } | null;
+    };
+    redis: {
+      status: ServiceStatus;
+      latencyMs: number | null;
+    };
+    cron: {
+      status: ServiceStatus;
+      lastDailyPickDate: string | null;
+      nextRunAt: string | null;
+    };
+  };
+  repository: {
+    photoCount: number;
+    todayAdded: number;
+    pendingAnalysis: number;
+    storageBytes: number;
+  } | null;
+}
