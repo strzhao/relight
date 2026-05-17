@@ -1,6 +1,11 @@
 import "dotenv/config";
+import path from "node:path";
 
 export const config = {
+  /** monorepo 根目录（child_process spawn cwd 用）。
+   * ecosystem.config.cjs 启动 PM2 时显式注入 REPO_ROOT env；
+   * dev `pnpm --filter @relight/backend dev` cwd=apps/backend，fallback ../.. 命中根 */
+  repoRoot: process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
   port: Number.parseInt(process.env.PORT ?? "3000", 10),
   databasePath: process.env.DATABASE_PATH ?? "./data/relight.db",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",

@@ -2,6 +2,9 @@ export const API_ROUTES = {
   health: "/api/health",
   runtime: {
     status: "/api/runtime/status",
+    workersStart: "/api/runtime/workers/start",
+    workersStop: "/api/runtime/workers/stop",
+    workersReload: "/api/runtime/workers/reload",
   },
   photos: {
     list: "/api/photos",

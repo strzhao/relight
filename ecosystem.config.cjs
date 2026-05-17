@@ -9,7 +9,10 @@ module.exports = {
       autorestart: true,
       max_memory_restart: "2G",
       kill_timeout: 10000,
-      env: { NODE_ENV: "development" },
+      env: {
+        NODE_ENV: "development",
+        REPO_ROOT: process.cwd(),
+      },
     },
   ],
 };

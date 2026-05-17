@@ -66,6 +66,30 @@ struct RuntimeStatus: Codable {
     }
 }
 
+// MARK: - Worker Control Models
+
+enum WorkerAction: String {
+    case start, stop, reload
+}
+
+struct WorkerControlResponse: Codable {
+    let success: Bool
+    let stdout: String
+    let stderr: String
+    let exitCode: Int
+}
+
+enum WorkerControlError: LocalizedError {
+    case httpError(Int, String)
+    case decodeFailed(Error)
+    var errorDescription: String? {
+        switch self {
+        case .httpError(let code, let body): return "HTTP \(code): \(body)"
+        case .decodeFailed(let e): return "解析失败: \(e.localizedDescription)"
+        }
+    }
+}
+
 // MARK: - View Model
 
 @MainActor
@@ -120,6 +144,34 @@ final class RuntimeStatusViewModel: ObservableObject {
             // 网络挂了 → status 不变，但显示错误
             lastError = error.localizedDescription
             logger.warning("fetch runtime status failed: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    func controlWorker(_ action: WorkerAction) async throws -> WorkerControlResponse {
+        let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: "\(baseURL)/api/runtime/workers/\(action.rawValue)") else {
+            throw URLError(.badURL)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            // 500 解码尝试 — 提取 stderr 字段比 raw JSON 串更友好
+            let body = String(data: data, encoding: .utf8) ?? ""
+            if let parsed = try? JSONDecoder().decode(WorkerControlResponse.self, from: data),
+               !parsed.stderr.isEmpty {
+                throw WorkerControlError.httpError(http.statusCode, parsed.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            throw WorkerControlError.httpError(http.statusCode, body)
+        }
+        do {
+            return try JSONDecoder().decode(WorkerControlResponse.self, from: data)
+        } catch {
+            throw WorkerControlError.decodeFailed(error)
         }
     }
 }
@@ -182,6 +234,8 @@ struct ControlCenterView: View {
 struct ServicesPage: View {
     @ObservedObject var viewModel: RuntimeStatusViewModel
     @EnvironmentObject var settings: AppSettings
+    @State private var pendingAction: WorkerAction?
+    @State private var operationError: String?
 
     var body: some View {
         ScrollView {
@@ -249,20 +303,78 @@ struct ServicesPage: View {
 
     private var actionBar: some View {
         HStack(spacing: 8) {
-            Button {
-                openWeb()
-            } label: {
-                Label("打开 Web", systemImage: "safari")
-            }
-            Button {
-                Task { await viewModel.fetchOnce() }
-            } label: {
-                Label("刷新", systemImage: "arrow.clockwise")
-            }
+            Button { openWeb() } label: { Label("打开 Web", systemImage: "safari") }
+            Button { Task { await viewModel.fetchOnce() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
             Spacer()
-            Button("启动", action: {}).disabled(true)
-            Button("停止", action: {}).disabled(true)
-            Button("重启", action: {}).disabled(true)
+
+            let workersStatus = viewModel.status?.services.workers.status
+
+            Button("启动") { pendingAction = .start }
+                .disabled(workersStatus != .down)
+
+            Button("停止") { pendingAction = .stop }
+                .disabled(workersStatus != .running)
+
+            Button("重启") { pendingAction = .reload }
+                .disabled(workersStatus != .running)
+        }
+        .confirmationDialog(
+            confirmTitle(for: pendingAction),
+            isPresented: Binding(
+                get: { pendingAction != nil },
+                set: { if !$0 { pendingAction = nil } }
+            ),
+            presenting: pendingAction
+        ) { action in
+            Button(confirmButtonLabel(for: action), role: action == .stop ? .destructive : nil) {
+                Task {
+                    do {
+                        _ = try await viewModel.controlWorker(action)
+                        await viewModel.fetchOnce()
+                    } catch {
+                        operationError = error.localizedDescription
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { }
+        } message: { action in
+            Text(confirmMessage(for: action))
+        }
+        .alert(
+            "操作失败",
+            isPresented: Binding(
+                get: { operationError != nil },
+                set: { if !$0 { operationError = nil } }
+            )
+        ) {
+            Button("好") { }
+        } message: {
+            Text(operationError ?? "")
+        }
+    }
+
+    private func confirmTitle(for action: WorkerAction?) -> String {
+        switch action {
+        case .start: return "启动 workers"
+        case .stop: return "停止 workers"
+        case .reload: return "重启 workers"
+        case nil: return ""
+        }
+    }
+
+    private func confirmButtonLabel(for action: WorkerAction) -> String {
+        switch action {
+        case .start: return "启动"
+        case .stop: return "停止"
+        case .reload: return "重启"
+        }
+    }
+
+    private func confirmMessage(for action: WorkerAction) -> String {
+        switch action {
+        case .start: return "将启动后台扫描与分析进程。"
+        case .stop: return "workers 停止后扫描和分析将暂停。"
+        case .reload: return "重启会中断当前正在分析的任务，已分析过的不重做。"
         }
     }
 
