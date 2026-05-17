@@ -84,3 +84,5 @@
 - [2026-05-08] Playwright page.route glob 中 `?` 是单字符通配符，匹配 query string 必须用 `*` | tags: playwright, page-route, glob, minimatch, mock, query-string, e2e, bug | → patterns.md
 - [2026-05-10] 每日精选首页从「单 hero + 关联 members」升级为「20 entries 全展示 + 每条目独立系列」 | tags: daily-selection, multi-entries, schema-design, dual-write, daily-pick-entries, ui-redesign, architecture | → decisions.md
 - [2026-05-10] Next.js `useRouter()` 在 SSR / vitest renderToString 上下文抛 invariant，URL 同步改用 `history.replaceState` | tags: nextjs, app-router, useRouter, useSearchParams, ssr, vitest, render-to-string, invariant, history-api, bug | → patterns.md
+- [2026-05-17] BullMQ `getRepeatableJobs()` 返回的 id 是哈希而非用户 jobId，按 name 匹配 | tags: bullmq, repeatable-job, getRepeatableJobs, job-id, scheduler, cron, observability, bug | → patterns.md
+- [2026-05-17] 项目用传统 pbxproj 文件引用，新增 .swift 必须手工改 4 个 section（单文件集中策略） | tags: macos, xcode, pbxproj, file-reference, swiftui, build-target, project-convention | → patterns.md

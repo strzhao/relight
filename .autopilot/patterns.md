@@ -853,3 +853,42 @@ Hotfix 落地于 `apps/backend/src/lib/config.ts:80-89` 默认值 0.70 → 0.55 
 - 真要兜底，把"你"全替换为 self 称呼（"爸爸看着妈妈和六六笑"）— 但这会让叙事散文味变差。
 
 **当前折衷**: 硬契约（user prompt 字段注入正确、system.txt 三条规则字面存在、self person 在源头被过滤）已全部通过，AI 偶尔行为偏离作为 ⚠️ 软约束 issue 记入 QA 报告，不阻塞合并。已 merge `6d1f4c0`。
+
+### [2026-05-17] BullMQ `getRepeatableJobs()` 返回的 `id` 是内部哈希而非用户传入的 jobId
+
+<!-- tags: bullmq, repeatable-job, getRepeatableJobs, job-id, scheduler, cron, observability, bug -->
+
+**症状**: 控制中心接口 `/api/runtime/status` 检测 cron 注册：先用 `dailyQueue.add("daily-selection-cron", {}, { repeat, jobId: "daily-selection-cron" })` 注册，再用 `repeatables.find((j) => j.id === "daily-selection-cron")` 检查。Redis 里 repeatable key 实际存在（`bull:daily-selection:repeat:103e5123a4ea6d6f3b5a48d749085030`），但 find 永远返回 `undefined`，导致 cron 状态错报为 `down`。
+
+**根因**: `Queue.getRepeatableJobs()` 返回对象的 `id` 字段是 BullMQ 内部计算出的**哈希**（基于 cron pattern + tz + custom job id 等），不是用户在 `add(...)` 时传入的 `jobId` 选项。用户 jobId 实际上在 `name` 字段（与 `add(name, ...)` 第一个参数对应），或者编码在 `key` 字段里。
+
+**对策**:
+- 检测 repeatable 是否存在按 **`name` 匹配**：`repeatables.find((j) => j.name === "daily-selection-cron")`
+- 或按 `key` 前缀匹配：`repeatables.find((j) => j.key.includes(":daily-selection-cron:"))`
+- **不要**信任 `id` 字段对照用户传入的 `jobId`。`jobId` 仅参与内部去重存储。
+
+**外推**: 任何"基于 ID 查 BullMQ 内部状态"的代码（重复任务、scheduled job、delayed job）都先用 `console.log(JSON.stringify(repeatables[0]))` 打印真实 shape 再决定按哪个字段匹配。BullMQ 文档对 `getRepeatableJobs` 返回字段说明含糊，实测为准。
+
+**Evidence**: 拾光 `/api/runtime/status` 实测：修复前 `cron.status === "down"`（误判），修复后 `cron.status === "running"`, `nextRunAt === "2026-05-17T22:00:00.000Z"`（北京 06:00 正确）。修复 1 行：`apps/backend/src/routes/runtime.ts` probeCron 内 `j.id` → `j.name`。merge commit `750e443`。
+
+### [2026-05-17] 项目用传统 pbxproj 文件引用，新增 .swift 必须手工改 4 个 section
+
+<!-- tags: macos, xcode, pbxproj, file-reference, project.pbxproj, swiftui, build-target, project-convention -->
+
+**项目状态**: `apps/mac/Relight.xcodeproj/project.pbxproj` 使用 **traditional file references**（每个 .swift 显式列出），不是 Xcode 16 的 `PBXFileSystemSynchronizedRootGroup`。代码 agent 加新文件时必须**手工**改 pbxproj，否则文件不参与编译。
+
+**新增一个 .swift 文件需要改的 4 处**:
+1. `PBXBuildFile` section — 加 `<NEW_BUILD_ID> /* X.swift in Sources */ = {isa = PBXBuildFile; fileRef = <NEW_FILE_REF>; settings = {}; };`
+2. `PBXFileReference` section — 加 `<NEW_FILE_REF> /* X.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = X.swift; sourceTree = "<group>"; };`
+3. 对应的 `PBXGroup`（UI / Models / Networking 之一）的 `children = (...)` 加 `<NEW_FILE_REF>`
+4. 唯一的 `PBXSourcesBuildPhase` 的 `files = (...)` 加 `<NEW_BUILD_ID>`
+
+**ID 规则**: 用 `A0000000000000000000XXXX` 系列，找现有最大 ID +1。不要复用历史 ID。
+
+**对策（单文件集中策略）**:
+- 新功能涉及多个相关的 SwiftUI View / ViewModel / Model 时，**集成在一个 .swift 文件里**（如 `ControlCenter.swift` 一个文件装 model + VM + view + monitor）。这样只需要在 pbxproj 改 4 处 × 1 个文件，而不是 4 × N。
+- 改完立即 `xcodebuild build` 验证。错误的 UUID 写到 pbxproj 是静默灾难（编译不报，但 Xcode 打开报 missing reference）。
+
+**外推**: 项目特有约定，升级到 synchronized folder 需 Xcode 16+ 且 macOS 14+ 部署目标。升级前所有 agent 必须按 4-section 流程改 pbxproj。
+
+**Evidence**: 控制中心新增 `apps/mac/Relight/UI/ControlCenter.swift`（450+ 行集成 4 个相关类型），pbxproj 改 4 处：Build file `A00000000000000000000070` / File ref `A00000000000000000000071` / UI Group children +1 / Sources files +1。xcodebuild 一次性 SUCCESS，无 stale ref。merge commit `750e443`。
