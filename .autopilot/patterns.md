@@ -892,3 +892,26 @@ Hotfix 落地于 `apps/backend/src/lib/config.ts:80-89` 默认值 0.70 → 0.55 
 **外推**: 项目特有约定，升级到 synchronized folder 需 Xcode 16+ 且 macOS 14+ 部署目标。升级前所有 agent 必须按 4-section 流程改 pbxproj。
 
 **Evidence**: 控制中心新增 `apps/mac/Relight/UI/ControlCenter.swift`（450+ 行集成 4 个相关类型），pbxproj 改 4 处：Build file `A00000000000000000000070` / File ref `A00000000000000000000071` / UI Group children +1 / Sources files +1。xcodebuild 一次性 SUCCESS，无 stale ref。merge commit `750e443`。
+
+### [2026-05-17] SwiftUI MenuBarExtra Image 默认不自动 .template，必须显式 .renderingMode(.template)
+
+<!-- tags: swiftui, menubarextra, image, renderingmode, template, macos, dark-mode, light-mode, status-icon, accessibility -->
+
+**Scenario**: macOS 菜单栏图标用 `MenuBarExtra { } label: { Image(systemName: "photo.stack") }`。开发期在 Light 菜单栏调试一切正常；切深色菜单栏后图标变模糊 / 对比度不足 / 边缘锯齿。原因：SwiftUI `Image(systemName:)` 在菜单栏 label 中**默认按原色渲染**，不会像 NSStatusItem 时代那样自动按菜单栏前景色反色。
+
+**Lesson**: 给菜单栏 Image **必须显式**加 `.renderingMode(.template)`，等价于 NSStatusItem 时代的 `image.isTemplate = true`。template 模式下：
+
+- 深色菜单栏 → SF Symbol 渲染为白色
+- 浅色菜单栏 → SF Symbol 渲染为黑色
+- 高对比度 / Increase Contrast 辅助功能 → macOS 自动调整
+
+**别做的事**:
+- ❌ 加 `.foregroundColor(.green)` 想让 running 状态显绿 — `.template` 模式下颜色被强制覆盖为前景色，**无效**
+- ❌ 用 `NSImage` 自定义渲染绕过 SwiftUI — 复杂且失去 SwiftUI 声明式优势
+- ❌ 仅靠 macOS 14+ 的"会自动适配"假设 — 实测在 reduce transparency、不同 system style 下行为不一致
+
+**外推**: 任何菜单栏 UI（NSStatusItem、MenuBarExtra、popover 图标）都要走 template。状态语义靠**不同 SF Symbol 形态**区分（如 `photo.stack` vs `exclamationmark.triangle.fill` vs `xmark.octagon.fill`），不能靠颜色。
+
+**a11y 配套**: 给菜单栏 Image 加 `.accessibilityLabel(...)` 提供 VoiceOver 语义，每个状态对应一个简短中文（如 `"拾光 — 服务正常"` / `"拾光 — 服务降级"`），不要硬编码英文。
+
+**Evidence**: `apps/mac/Relight/RelightApp.swift:61-62` `.renderingMode(.template) + .accessibilityLabel(healthMonitor.accessibilityLabel)`；`apps/mac/Relight/UI/ControlCenter.swift:482-489` MenuBarHealthMonitor 4 态中文 accessibilityLabel。merge commit `54b8193`。

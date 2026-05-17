@@ -1,77 +1,38 @@
 project:
-  name: mac-wallpaper-app
-  goal: "新开发一个 mac 照片壁纸 APP，照片壁纸用的就是今日精选里的内容，注意图片和视频可能都会有"
-  created_at: "2026-05-07"
+  name: mac-control-center-cleanup
+  goal: "清理 Mac 控制中心 4 个遗留 track：菜单栏对比度 / API 安全加固 / PM2 编排接通 / 报告日志设置三页面"
+  created_at: "2026-05-17"
   design_file: design.md
 
 tasks:
-  - id: 001-mac-xcode-scaffold
-    title: "Xcode 工程脚手架 + monorepo 集成"
+  - id: 001-menu-bar-contrast
+    title: "菜单栏图标 .renderingMode(.template) + 暗色对比修复"
     complexity: S
     depends_on: []
     status: done
-    brief: tasks/001-mac-xcode-scaffold.md
-    handoff: tasks/001-mac-xcode-scaffold.handoff.md
-    commit: 060a793
+    brief: tasks/001-menu-bar-contrast.md
+    handoff: tasks/001-menu-bar-contrast.handoff.md
+    commit: 54b8193
 
-  - id: 002-relight-api-client
-    title: "Swift RelightClient（拉 daily + 下载 original + 本地缓存）"
+  - id: 002-api-security
+    title: "localhostOnly middleware + CORS 收紧 + runtime.ts 字段脱敏"
+    complexity: M
+    depends_on: []
+    status: pending
+    brief: tasks/002-api-security.md
+
+  - id: 003-pm2-orchestration
+    title: "POST /api/runtime/workers/{start,stop,reload} + Mac 按钮 wiring + 二次确认"
     complexity: M
     depends_on:
-      - 001-mac-xcode-scaffold
-    status: done
-    brief: tasks/002-relight-api-client.md
-    handoff: tasks/002-relight-api-client.handoff.md
-    commit: 6454638
+      - 002-api-security
+    status: pending
+    brief: tasks/003-pm2-orchestration.md
 
-  - id: 003-image-wallpaper-engine
-    title: "图片壁纸引擎（多显示器 setDesktopImageURL）"
-    complexity: M
-    depends_on:
-      - 002-relight-api-client
-    status: done
-    brief: tasks/003-image-wallpaper-engine.md
-    handoff: tasks/003-image-wallpaper-engine.handoff.md
-    commit: beb684f
-
-  - id: 004-video-to-dynamic-heic
-    title: "视频→动态 .heic 引擎（AVAssetImageGenerator + ImageIO + XMP）"
+  - id: 004-placeholder-pages
+    title: "报告页（复用 /api/daily）+ 日志页（PM2 log tail）+ 设置页（只读掩码）"
     complexity: L
     depends_on:
-      - 002-relight-api-client
-    status: done
-    brief: tasks/004-video-to-dynamic-heic.md
-    handoff: tasks/004-video-to-dynamic-heic.handoff.md
-    commit: 56307bb
-
-  - id: 005-menubar-and-settings-ui
-    title: "NSStatusItem 菜单栏 + SwiftUI 设置面板"
-    complexity: M
-    depends_on:
-      - 001-mac-xcode-scaffold
-    status: done
-    brief: tasks/005-menubar-and-settings-ui.md
-    handoff: tasks/005-menubar-and-settings-ui.handoff.md
-    commit: fabf6ad
-
-  - id: 006-coordinator-and-autostart
-    title: "调度协调器 + Timer + SMAppService 自启动"
-    complexity: S
-    depends_on:
-      - 003-image-wallpaper-engine
-      - 004-video-to-dynamic-heic
-      - 005-menubar-and-settings-ui
-    status: done
-    brief: tasks/006-coordinator-and-autostart.md
-    handoff: tasks/006-coordinator-and-autostart.handoff.md
-    commit: 270ae5c+3eee09b
-
-  - id: 007-package-readme
-    title: "xcodebuild archive 脚本 + README 使用说明"
-    complexity: S
-    depends_on:
-      - 006-coordinator-and-autostart
-    status: done
-    brief: tasks/007-package-readme.md
-    handoff: tasks/007-package-readme.handoff.md
-    commit: e2fab4b
+      - 003-pm2-orchestration
+    status: pending
+    brief: tasks/004-placeholder-pages.md

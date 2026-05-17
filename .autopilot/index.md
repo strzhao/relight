@@ -86,3 +86,4 @@
 - [2026-05-10] Next.js `useRouter()` 在 SSR / vitest renderToString 上下文抛 invariant，URL 同步改用 `history.replaceState` | tags: nextjs, app-router, useRouter, useSearchParams, ssr, vitest, render-to-string, invariant, history-api, bug | → patterns.md
 - [2026-05-17] BullMQ `getRepeatableJobs()` 返回的 id 是哈希而非用户 jobId，按 name 匹配 | tags: bullmq, repeatable-job, getRepeatableJobs, job-id, scheduler, cron, observability, bug | → patterns.md
 - [2026-05-17] 项目用传统 pbxproj 文件引用，新增 .swift 必须手工改 4 个 section（单文件集中策略） | tags: macos, xcode, pbxproj, file-reference, swiftui, build-target, project-convention | → patterns.md
+- [2026-05-17] SwiftUI MenuBarExtra Image 默认不自动 .template，必须显式 .renderingMode(.template) + .accessibilityLabel | tags: swiftui, menubarextra, image, renderingmode, template, macos, dark-mode, status-icon, accessibility | → patterns.md
