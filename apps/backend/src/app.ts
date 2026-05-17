@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { dailyQueue } from "./jobs/queues";
 import { AppError } from "./lib/errors";
+import { localhostOnly } from "./lib/middleware/localhost-only";
 import {
   adminRouter,
   analyzeRouter,
@@ -33,7 +34,22 @@ export async function registerDailyRepeatableJob(): Promise<void> {
 export function createApp(): Hono {
   const app = new Hono();
 
-  app.use("*", cors());
+  const allowedOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => {
+        // Hono cors() 实现：返回 falsy（"" / null）→ 不下发 ACAO 头
+        // - Mac App / 同源请求无 Origin 头：返回 "" 不下发 ACAO，URLSession 本身不做 CORS 检查 → 不受影响
+        // - 浏览器请求带 Origin：白名单内 echo back（值！不要用 *），否则不下发
+        if (!origin) return "";
+        return allowedOriginPattern.test(origin) ? origin : null;
+      },
+      credentials: false,
+    }),
+  );
+
+  app.use("/api/runtime/*", localhostOnly);
 
   app.onError((err, c) => {
     if (err instanceof AppError) {

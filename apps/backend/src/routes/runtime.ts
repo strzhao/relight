@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { RuntimeStatus } from "@relight/shared";
 import { count, desc, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import Redis from "ioredis";
@@ -142,7 +143,7 @@ async function repositoryStats(): Promise<{
   photoCount: number;
   todayAdded: number;
   pendingAnalysis: number;
-  storageBytes: number;
+  storageBytes: number | null;
 } | null> {
   try {
     const todayIso = todayStartIsoBeijing();
@@ -181,7 +182,7 @@ export const runtimeRouter = new Hono().get("/status", async (c) => {
     repositoryStats(),
   ]);
 
-  const services = {
+  const services: RuntimeStatus["services"] = {
     api: {
       status: "running" as Status,
       port: config.port,
@@ -204,6 +205,13 @@ export const runtimeRouter = new Hono().get("/status", async (c) => {
     : statuses.some((s) => s === "degraded")
       ? "degraded"
       : "running";
+
+  const isLocal = c.get("isLocalhost");
+  if (!isLocal) {
+    services.api.pid = null;
+    services.workers.commit = null;
+    if (repo) repo.storageBytes = null;
+  }
 
   return c.json({
     success: true,

@@ -300,3 +300,143 @@ describe("services.redis 状态", () => {
     15_000,
   );
 });
+
+// =====================================================================
+// 安全契约验收 — localhostOnly middleware + 脱敏
+//
+// ⚠️  TCP 模式安全前提（必读）：
+//   以下所有 "无 socket → 视为 localhost" 测试仅在项目以 **TCP** 模式监听时安全。
+//   若未来改用 UNIX socket / cluster IPC，c.env.incoming.socket.remoteAddress
+//   将为 undefined，会被中间件误判为 localhost，导致敏感字段泄露。
+//   改变 listen mode 时必须同步审查本测试 + middleware 文件。
+//
+//   契约来源：设计文档「## Middleware 行为契约」+ 「/api/runtime/status 响应脱敏契约」
+//   红队铁律：不读取 middleware 实现，仅依据设计契约写测试。
+// =====================================================================
+
+describe("安全契约 — localhostOnly middleware + 脱敏 (红队, 基于设计契约)", () => {
+  // ------------------------------------------------------------------
+  // Case A：app.request() 无 socket → 视为 localhost，pid 非 null（回归保护）
+  // ------------------------------------------------------------------
+  it("case A — 无 socket (TCP 模式 app.request) → isLocalhost=true → pid 是正整数", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    // 直接调用，不传第三个 env 参数，socket.remoteAddress 为 undefined
+    const res = await app.request("/api/runtime/status");
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    // pid 应当是正整数（未脱敏）
+    expect(typeof body.data.services.api.pid).toBe("number");
+    expect(body.data.services.api.pid).toBeGreaterThan(0);
+  }, 15_000);
+
+  // ------------------------------------------------------------------
+  // Case B：remoteAddress = "192.168.1.5" → GET → 脱敏，pid/commit/storageBytes 全 null
+  // ------------------------------------------------------------------
+  it("case B — 远端 IP (192.168.1.5) GET /api/runtime/status → HTTP 200 + 敏感字段脱敏为 null", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    const res = await app.request("/api/runtime/status", undefined, {
+      incoming: { socket: { remoteAddress: "192.168.1.5" } },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    // 敏感字段全部脱敏
+    expect(body.data.services.api.pid).toBeNull();
+    expect(body.data.services.workers.commit).toBeNull();
+    if (body.data.repository !== null) {
+      expect(body.data.repository.storageBytes).toBeNull();
+    }
+    // 非敏感字段仍然正常
+    expect(typeof body.data.services.api.uptimeSec).toBe("number");
+    expect(body.data.services.api.uptimeSec).toBeGreaterThanOrEqual(0);
+    expect(["running", "degraded", "down"]).toContain(body.data.overall);
+  }, 15_000);
+
+  // ------------------------------------------------------------------
+  // Case C：XFF 伪造无效 — X-Forwarded-For: 127.0.0.1 不影响脱敏判断
+  // ------------------------------------------------------------------
+  it("case C — XFF 伪造 (X-Forwarded-For: 127.0.0.1) + socket=192.168.1.5 → 脱敏同 case B，XFF 被忽略", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    const res = await app.request(
+      "/api/runtime/status",
+      { headers: { "X-Forwarded-For": "127.0.0.1" } },
+      { incoming: { socket: { remoteAddress: "192.168.1.5" } } },
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    // XFF 不能绕过脱敏；middleware 只读 socket.remoteAddress
+    expect(body.data.services.api.pid).toBeNull();
+    expect(body.data.services.workers.commit).toBeNull();
+    if (body.data.repository !== null) {
+      expect(body.data.repository.storageBytes).toBeNull();
+    }
+  }, 15_000);
+
+  // ------------------------------------------------------------------
+  // Case D：POST 来自非 localhost → middleware 直接 403
+  // ------------------------------------------------------------------
+  it("case D — 非 localhost POST /api/runtime/* → 403 forbidden", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    const res = await app.request(
+      "/api/runtime/anything-here",
+      { method: "POST" },
+      { incoming: { socket: { remoteAddress: "192.168.1.5" } } },
+    );
+    const body = await res.json();
+    expect(res.status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(body.error).toBe("forbidden");
+  }, 15_000);
+
+  // ------------------------------------------------------------------
+  // Case E：POST 来自 localhost socket → middleware 放行（不是 403）
+  // ------------------------------------------------------------------
+  it("case E — localhost POST /api/runtime/* → middleware 不拦截（404 或其它，绝不是 403）", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    const res = await app.request(
+      "/api/runtime/some-non-existent-post",
+      { method: "POST" },
+      { incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+    );
+    // middleware 放行 localhost，路由不存在时 Hono 返回 404；重点：不是 403
+    expect(res.status).not.toBe(403);
+  }, 15_000);
+
+  // ------------------------------------------------------------------
+  // Case F：IPv6 ::1 也是 localhost → pid 非 null
+  // ------------------------------------------------------------------
+  it("case F — IPv6 ::1 视为 localhost → pid 非 null（不脱敏）", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    const res = await app.request("/api/runtime/status", undefined, {
+      incoming: { socket: { remoteAddress: "::1" } },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.services.api.pid).not.toBeNull();
+    expect(typeof body.data.services.api.pid).toBe("number");
+    expect(body.data.services.api.pid).toBeGreaterThan(0);
+  }, 15_000);
+
+  // ------------------------------------------------------------------
+  // Case G：IPv4-mapped IPv6 ::ffff:127.0.0.1 也是 localhost → pid 非 null
+  // ------------------------------------------------------------------
+  it("case G — IPv4-mapped IPv6 ::ffff:127.0.0.1 视为 localhost → pid 非 null（不脱敏）", async () => {
+    const { createApp } = await import("../../app");
+    const app = createApp();
+    const res = await app.request("/api/runtime/status", undefined, {
+      incoming: { socket: { remoteAddress: "::ffff:127.0.0.1" } },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.services.api.pid).not.toBeNull();
+    expect(typeof body.data.services.api.pid).toBe("number");
+    expect(body.data.services.api.pid).toBeGreaterThan(0);
+  }, 15_000);
+});

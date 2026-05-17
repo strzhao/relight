@@ -564,7 +564,7 @@ export interface RuntimeStatus {
       status: ServiceStatus;
       port: number;
       uptimeSec: number;
-      pid: number;
+      pid: number | null;
     };
     workers: {
       status: ServiceStatus;
@@ -591,6 +591,6 @@ export interface RuntimeStatus {
     photoCount: number;
     todayAdded: number;
     pendingAnalysis: number;
-    storageBytes: number;
+    storageBytes: number | null;
   } | null;
 }
