@@ -136,6 +136,13 @@ export const sourceTrimSchema = z.object({
   originalDurationSec: z.number().positive(),
   trimmedAt: z.string().optional(),
   status: z.enum(["ok", "trim_failed", "skipped"]).optional(),
+  // 新增 6 个 optional 字段（向后兼容）
+  source: z.enum(["qwen", "qwen_cache", "fallback", "passthrough", "first_skip"]).optional(),
+  position: z.enum(["first", "middle", "closing"]).optional(),
+  reason: z.string().max(500).optional(),
+  capped: z.boolean().optional(),
+  cappedFrom: z.number().positive().optional(),
+  fallbackReason: z.enum(["timeout", "invalid_json", "schema_error", "range_invalid"]).optional(),
 });
 export type SourceTrim = z.infer<typeof sourceTrimSchema>;
 
