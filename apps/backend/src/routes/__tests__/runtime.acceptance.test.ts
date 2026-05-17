@@ -130,15 +130,29 @@ async function fetchRuntime(): Promise<{
   return { status: res.status, body };
 }
 
-async function setWorkerMeta(startedAtMsAgo: number): Promise<void> {
+async function setWorkerMeta(
+  opts: { ttlSec?: number; startedAtMsAgo?: number } = {},
+): Promise<void> {
   const meta = {
     commit: "abc1234",
     commitTime: "2026-05-01T00:00:00Z",
-    startedAt: new Date(Date.now() - startedAtMsAgo).toISOString(),
+    startedAt: new Date(Date.now() - (opts.startedAtMsAgo ?? 30_000)).toISOString(),
     pid: 12345,
     hostname: "test",
   };
-  await redis.set(WORKER_META_KEY, JSON.stringify(meta), "EX", 600);
+  await redis.set(WORKER_META_KEY, JSON.stringify(meta), "EX", opts.ttlSec ?? 120);
+}
+
+async function setWorkerMetaWithoutTtl(): Promise<void> {
+  const meta = {
+    commit: "abc1234",
+    commitTime: "2026-05-01T00:00:00Z",
+    startedAt: new Date().toISOString(),
+    pid: 12345,
+    hostname: "test",
+  };
+  // 无 TTL 表示心跳逻辑异常（worker 没用 EX 写入），按"down"处理
+  await redis.set(WORKER_META_KEY, JSON.stringify(meta));
 }
 
 async function removeWorkerMeta(): Promise<void> {
@@ -223,15 +237,26 @@ describe("GET /api/runtime/status — 契约形状", () => {
 // Worker 状态机验收（Redis 可用时）
 // =====================================================================
 
-describe("services.workers 状态机", () => {
+describe("services.workers 状态机（基于 Redis key TTL，不是 startedAt）", () => {
   it.skipIf(!redisAvailable)(
-    "worker 在线（30s 前心跳）→ status='running'",
+    "key 存在且 TTL > 0（心跳新鲜）→ status='running'，lastHeartbeatAgoSec≥0",
     async () => {
-      await setWorkerMeta(30_000);
+      await setWorkerMeta({ ttlSec: 120 });
       const { body } = await fetchRuntime();
       expect(body.data.services.workers.status).toBe("running");
       expect(body.data.services.workers.lastHeartbeatAgoSec).toBeGreaterThanOrEqual(0);
       expect(body.data.services.workers.commit).toBeTruthy();
+    },
+    15_000,
+  );
+
+  it.skipIf(!redisAvailable)(
+    "worker 跑了很久（startedAt 是 1 小时前）但 TTL 新鲜 → 仍然 running",
+    async () => {
+      await setWorkerMeta({ ttlSec: 100, startedAtMsAgo: 3_600_000 });
+      const { body } = await fetchRuntime();
+      // 关键回归：startedAt 不该影响 status 判断（曾用 startedAt 推 ageSec 导致误报 degraded）
+      expect(body.data.services.workers.status).toBe("running");
     },
     15_000,
   );
@@ -249,12 +274,11 @@ describe("services.workers 状态机", () => {
   );
 
   it.skipIf(!redisAvailable)(
-    "worker 心跳过期（>180s 前）→ status='degraded'",
+    "key 存在但无 TTL（worker 心跳逻辑异常）→ status='down'",
     async () => {
-      await setWorkerMeta(300_000);
+      await setWorkerMetaWithoutTtl();
       const { body } = await fetchRuntime();
-      expect(body.data.services.workers.status).toBe("degraded");
-      expect(body.data.services.workers.lastHeartbeatAgoSec).toBeGreaterThan(180);
+      expect(body.data.services.workers.status).toBe("down");
     },
     15_000,
   );

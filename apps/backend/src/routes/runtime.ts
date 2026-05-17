@@ -56,13 +56,16 @@ async function probeWorkers(): Promise<{
   });
   try {
     await r.connect();
-    const metaRaw = await r.get(`${config.bullmqPrefix}:worker:meta`);
-    if (!metaRaw) return { status: "down", lastHeartbeatAgoSec: null, commit: null };
+    const key = `${config.bullmqPrefix}:worker:meta`;
+    // Worker 写入时 EX 120，每 60s 续期一次。TTL 才是心跳新鲜度，
+    // startedAt 只是开机时间（worker 跑越久越大，不能用来判活）
+    const [metaRaw, ttl] = await Promise.all([r.get(key), r.ttl(key)]);
+    if (!metaRaw || ttl <= 0) {
+      return { status: "down", lastHeartbeatAgoSec: null, commit: null };
+    }
     const meta = JSON.parse(metaRaw) as { startedAt: string; commit?: string };
-    const ageSec = Math.floor((Date.now() - new Date(meta.startedAt).getTime()) / 1000);
-    // Worker 心跳 TTL 120s，超过则视为已死
-    const status: Status = ageSec > 180 ? "degraded" : "running";
-    return { status, lastHeartbeatAgoSec: ageSec, commit: meta.commit ?? null };
+    const lastHeartbeatAgoSec = Math.max(0, 120 - ttl);
+    return { status: "running", lastHeartbeatAgoSec, commit: meta.commit ?? null };
   } catch {
     return { status: "down", lastHeartbeatAgoSec: null, commit: null };
   } finally {
