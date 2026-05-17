@@ -18,8 +18,10 @@ tasks:
     title: "localhostOnly middleware + CORS 收紧 + runtime.ts 字段脱敏"
     complexity: M
     depends_on: []
-    status: pending
+    status: done
     brief: tasks/002-api-security.md
+    handoff: tasks/002-api-security.handoff.md
+    commit: aee4022+5a8551b
 
   - id: 003-pm2-orchestration
     title: "POST /api/runtime/workers/{start,stop,reload} + Mac 按钮 wiring + 二次确认"

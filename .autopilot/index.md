@@ -87,3 +87,4 @@
 - [2026-05-17] BullMQ `getRepeatableJobs()` 返回的 id 是哈希而非用户 jobId，按 name 匹配 | tags: bullmq, repeatable-job, getRepeatableJobs, job-id, scheduler, cron, observability, bug | → patterns.md
 - [2026-05-17] 项目用传统 pbxproj 文件引用，新增 .swift 必须手工改 4 个 section（单文件集中策略） | tags: macos, xcode, pbxproj, file-reference, swiftui, build-target, project-convention | → patterns.md
 - [2026-05-17] SwiftUI MenuBarExtra Image 默认不自动 .template，必须显式 .renderingMode(.template) + .accessibilityLabel | tags: swiftui, menubarextra, image, renderingmode, template, macos, dark-mode, status-icon, accessibility | → patterns.md
+- [2026-05-17] Hono Node adapter 安全 localhost-only middleware：只读 c.env.incoming.socket.remoteAddress，弃用 XFF（c.req.raw 无 socket），无 socket → localhost 仅 TCP 模式安全 | tags: hono, middleware, security, localhost-only, x-forwarded-for, xff, socket, remoteAddress, node-server, conninfo, cors, owasp | → patterns.md

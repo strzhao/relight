@@ -915,3 +915,47 @@ Hotfix 落地于 `apps/backend/src/lib/config.ts:80-89` 默认值 0.70 → 0.55 
 **a11y 配套**: 给菜单栏 Image 加 `.accessibilityLabel(...)` 提供 VoiceOver 语义，每个状态对应一个简短中文（如 `"拾光 — 服务正常"` / `"拾光 — 服务降级"`），不要硬编码英文。
 
 **Evidence**: `apps/mac/Relight/RelightApp.swift:61-62` `.renderingMode(.template) + .accessibilityLabel(healthMonitor.accessibilityLabel)`；`apps/mac/Relight/UI/ControlCenter.swift:482-489` MenuBarHealthMonitor 4 态中文 accessibilityLabel。merge commit `54b8193`。
+
+### [2026-05-17] Hono Node adapter 安全 localhost-only middleware：只读 c.env.incoming.socket.remoteAddress，弃用 XFF
+
+<!-- tags: hono, middleware, security, localhost-only, x-forwarded-for, xff, socket, remoteAddress, node-server, conninfo, cors, owasp -->
+
+**项目状态**: `@hono/node-server` 1.19+ 在 `c.env.incoming` 上挂 Node `IncomingMessage`（含 `socket.remoteAddress`）。这是 Hono Node adapter 下访问连接级 IP 的**唯一可靠路径**（也是官方 `conninfo` helper 走的路径）。
+
+**陷阱**: 别用 `c.req.raw.socket?.remoteAddress`。`c.req.raw` 是 Web 标准 `Request` 对象，没有 `socket` 属性 — 这个路径**永远** undefined，是死代码。曾在 plan-review 中作为 BLOCKER 揪出。
+
+**XFF 安全铁律**: 不要读 `c.req.header("x-forwarded-for")` 做安全判断。XFF 是客户端可任意设置的 HTTP 头：
+```bash
+# 攻击者从内网 192.168.x.x 一行绕过
+curl -H "X-Forwarded-For: 127.0.0.1" http://target:3000/api/runtime/status
+```
+要做反向代理 → 单独设计 trusted-proxy 白名单，不在 localhost-only middleware 里读 XFF。
+
+**安全 middleware 模板**:
+```ts
+const LOCAL_ADDRS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+export const localhostOnly: MiddlewareHandler = async (c, next) => {
+  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming;
+  const remoteAddr = incoming?.socket?.remoteAddress ?? "";
+
+  // 无 socket（vitest app.request() / 极少 TCP 握手前）→ 视为 localhost
+  const isLocal = remoteAddr === "" || LOCAL_ADDRS.has(remoteAddr);
+  c.set("isLocalhost", isLocal);
+
+  if (!isLocal && c.req.method !== "GET") {
+    return c.json({ success: false, error: "forbidden" }, 403);
+  }
+  await next();
+};
+```
+
+**测试上下文兼容**: `app.request(url, init, env?)` 第三参可注入 `{ incoming: { socket: { remoteAddress: "192.168.1.5" } } }` 模拟非 localhost；不传则 socket undefined → 视为 localhost。前者用来测脱敏 / 403；后者保护现有 acceptance test 不破坏。
+
+**外推（OWASP / 部署 caveat）**:
+- IPv4 / IPv6 / IPv4-mapped IPv6（`::ffff:127.0.0.1`）三种形态都要 cover
+- `0.0.0.0` 是 bind 地址，不会作为 remoteAddress 出现，不必加白名单
+- ⚠️ 「无 socket → localhost」**仅在 TCP 模式安全**。若改 UNIX socket / cluster IPC，`remoteAddress = undefined` 会被误判 localhost。必须在 middleware JSDoc + acceptance test 顶部都加 TCP 前提声明，listen mode 变更时同步审查
+- CORS 配合：白名单 echo back（如 `http(s)://localhost:*` / `127.0.0.1:*`），不用 `*`；空 Origin（同源 / 原生客户端无 Origin）返回 `""` falsy → Hono cors 不下发 ACAO（这是预期，原生客户端不做 CORS 检查）
+
+**Evidence**: `apps/backend/src/lib/middleware/localhost-only.ts` 37 行 + `apps/backend/src/routes/__tests__/runtime.acceptance.test.ts` 7 case A-G 覆盖 socket 全表 × method + XFF + IPv6 + 测试上下文 fallback。Wave 1.5 真实 curl 验证：本机 pid 非 null / 内网 IP 全脱敏 / XFF 仍脱敏 / POST 403 字面契约。merge commit `aee4022`。
