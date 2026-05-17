@@ -58,6 +58,8 @@ struct RelightApp: App {
                 }
         } label: {
             Image(systemName: healthMonitor.iconName)
+                .renderingMode(.template)
+                .accessibilityLabel(healthMonitor.accessibilityLabel)
         }
         Window("拾光 — 控制中心", id: "control-center") {
             ControlCenterView()

@@ -478,6 +478,15 @@ final class MenuBarHealthMonitor: ObservableObject {
         case nil: return "photo.stack"
         }
     }
+
+    var accessibilityLabel: String {
+        switch overall {
+        case .running: return "拾光 — 服务正常"
+        case .degraded: return "拾光 — 服务降级"
+        case .down: return "拾光 — 服务离线"
+        case nil: return "拾光 — 状态未知"
+        }
+    }
 }
 
 // MARK: - Placeholder
