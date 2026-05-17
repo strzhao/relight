@@ -38,5 +38,7 @@ tasks:
     complexity: L
     depends_on:
       - 003-pm2-orchestration
-    status: pending
+    status: done
     brief: tasks/004-placeholder-pages.md
+    handoff: tasks/004-placeholder-pages.handoff.md
+    commit: 31fa14a+7423a6d+951b00f

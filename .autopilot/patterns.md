@@ -1005,3 +1005,33 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**: 任何"sync 同步代码 + 异步事件"模式（spawn / fs.createReadStream / fetch Response.body / child_process.exec）的 mock 都遵循：emit schedule 放 mockImplementation 内 + 用 setImmediate / process.nextTick（不用 queueMicrotask）。
 
 **Evidence**: `apps/backend/src/routes/__tests__/workers-control.acceptance.test.ts` 78-115 行 `setupSpawnMock`。修复前 11/15 timeout，修复后 15/15 立即 PASS。**仅改 fixture timing，不改任何断言契约**（红队期望逻辑零变更），符合 patterns.md [2026-05-15] 类「fixture 自身 bug」处理。merge commit `b5b3e7e`。
+
+### [2026-05-17] SwiftUI ScrollView auto-follow 在 macOS 13 deployment target 不能用 DragGesture，降级手动按钮
+
+<!-- tags: swiftui, scrollview, scrollviewreader, scrollgeometrychange, draggesture, trackpad, macos, deployment-target, auto-follow, log-viewer, ui-degradation -->
+
+**Scenario**: SwiftUI 日志/聊天/终端类页面要做 "自动跟随到底部，用户上滑时暂停" 的 auto-follow。直觉方案：用 `simultaneousGesture(DragGesture)` 检测上滑触发 `userScrolledUp=true` 暂停 `proxy.scrollTo("bottom")`。
+
+**陷阱**: 
+1. **macOS trackpad 滚动不触发 DragGesture**。`DragGesture` 只捕获鼠标拖拽（press + move），trackpad 双指滑动走 ScrollView 自身的 scroll action，**不**经过 GestureRecognizer 链。Mac App 99% 用户用 trackpad，这个方案沉默失败。
+2. **`onScrollGeometryChange { geometry in ... }`** 能拿到 contentOffset 来判断是否接近底部 — 但**仅 macOS 14+ 可用**。macOS 13 deployment target 项目不能用。
+3. **Button action 仅设 `userScrolledUp=false` 不会自动滚动** — `onChange(of: logs.count)` 监听 count，count 未变 → 不触发 scrollTo。必须 Button action 内**显式调** `proxy.scrollTo("bottom", anchor: .bottom)`。
+
+**对策（macOS 13 兼容）**: 放弃自动 follow 检测，改**手动按钮版**：
+- 默认 `userScrolledUp = false` → auto-follow 开启，每次 `onChange(of: logs.count)` 触发 scrollTo
+- 「暂停跟随」按钮 → `userScrolledUp = true`（停止 auto-follow，用户自由滚动阅读历史）
+- 「回到底部」按钮 action 内显式 **两行**：`userScrolledUp = false` + `proxy.scrollTo("bottom", anchor: .bottom)`
+
+**升级路径**: 若项目 deployment target 提到 macOS 14+：
+```swift
+.onScrollGeometryChange(for: Bool.self) { geometry in
+  let distanceFromBottom = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
+  return distanceFromBottom > 50  // 50px 阈值视为上滑暂停
+} action: { _, isUp in
+  userScrolledUp = isUp
+}
+```
+
+**外推**: 任何 SwiftUI ScrollView 状态检测需求都先看 deployment target：13 用按钮版 / 14+ 用 onScrollGeometryChange。**不要用 DragGesture 检测 ScrollView 滚动**（trackpad 不触发）。
+
+**Evidence**: `apps/mac/Relight/UI/LogsPage.swift` 95 行手动按钮版（macOS deployment target 13.0）。merge commit `31fa14a`。
