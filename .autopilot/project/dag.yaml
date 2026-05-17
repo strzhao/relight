@@ -28,8 +28,10 @@ tasks:
     complexity: M
     depends_on:
       - 002-api-security
-    status: pending
+    status: done
     brief: tasks/003-pm2-orchestration.md
+    handoff: tasks/003-pm2-orchestration.handoff.md
+    commit: b5b3e7e+35565b7+f6b2a84
 
   - id: 004-placeholder-pages
     title: "报告页（复用 /api/daily）+ 日志页（PM2 log tail）+ 设置页（只读掩码）"

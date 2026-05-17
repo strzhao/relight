@@ -959,3 +959,49 @@ export const localhostOnly: MiddlewareHandler = async (c, next) => {
 - CORS 配合：白名单 echo back（如 `http(s)://localhost:*` / `127.0.0.1:*`），不用 `*`；空 Origin（同源 / 原生客户端无 Origin）返回 `""` falsy → Hono cors 不下发 ACAO（这是预期，原生客户端不做 CORS 检查）
 
 **Evidence**: `apps/backend/src/lib/middleware/localhost-only.ts` 37 行 + `apps/backend/src/routes/__tests__/runtime.acceptance.test.ts` 7 case A-G 覆盖 socket 全表 × method + XFF + IPv6 + 测试上下文 fallback。Wave 1.5 真实 curl 验证：本机 pid 非 null / 内网 IP 全脱敏 / XFF 仍脱敏 / POST 403 字面契约。merge commit `aee4022`。
+
+### [2026-05-17] vitest spawn mock 用 mockImplementation + setImmediate，避免 fixture timing 抢跑
+
+<!-- tags: vitest, vi-mock, child-process, spawn, mockImplementation, mockReturnValue, setImmediate, queueMicrotask, fixture, timing, eventEmitter, beforeEach, test, bug -->
+
+**Scenario**: 给 child_process.spawn 写 acceptance test，红队 fixture 用 `vi.fn() + mockReturnValue(mockChild)` + `makeMockChild()` 在 beforeEach 同步调用时通过 `queueMicrotask`（或 `setImmediate`）入队 emit data/close events。结果：11/15 cases timeout (10s)，单测体 `await app.request(...)` 永远卡死。
+
+**根因（时序分析）**:
+1. `beforeEach` 同步执行 → `makeMockChild()` → `queueMicrotask(emitFn)` 入 microtask queue（task 已 schedule）
+2. `spawnMock.mockReturnValue(child)` 设置返回值
+3. beforeEach 返回，vitest 进入 it() callback
+4. it body 首个 `await getApp()` → microtask queue **立即 fire** → `emitFn()` 跑：`child.emit("close", 0)` — **但此时蓝队 spawn handler 还没注册 listener！**emit 是 no-op
+5. 后续 `await app.request(...)` → spawn 调用 → 返回 child → 蓝队 `child.on("close", ...)` 注册 listener — **太晚了，close 已经 emit 过**
+6. handler Promise 永远不 resolve → 10s timeout
+
+`emit("error", err)` 没有 listener 时还会**抛 uncaught exception**（EventEmitter 特殊行为），日志里会看到 `Error: <message>` 但根因仍是 timing。
+
+**正确写法**：把 emit schedule 放到 `mockImplementation` 内部 — 这样只在 spawn 真实被调用时才创建 child + schedule emit，蓝队同步注册 listener 后下一个 tick emit fire 时 listener 已就位：
+
+```ts
+function setupSpawnMock(opts: { stdout?, stderr?, exitCode?, errorEvent? }): void {
+  spawnMock.mockImplementation(() => {
+    const child = new MockChild();  // 这一刻才创建
+    setImmediate(() => {            // 下一个 macrotask 才 emit
+      if (opts.stdout) child.stdout.emit("data", Buffer.from(opts.stdout));
+      if (opts.errorEvent) {
+        const err = Object.assign(new Error(opts.errorEvent.message), { code: opts.errorEvent.code });
+        child.emit("error", err);
+      } else {
+        child.emit("close", opts.exitCode ?? 0);
+      }
+    });
+    return child as unknown as ChildProcess;
+  });
+}
+
+// 测试体：
+beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
+// 不再 mockReturnValue / 不再 makeMockChild
+```
+
+**为什么 setImmediate 不 queueMicrotask**: microtask 会在 await 完成前立刻 fire（spawn 返回时蓝队下一行 `child.stdout.on(...)` 还没执行），macrotask（setImmediate）会等到当前同步代码段全部跑完，确保 listener 已注册。
+
+**外推**: 任何"sync 同步代码 + 异步事件"模式（spawn / fs.createReadStream / fetch Response.body / child_process.exec）的 mock 都遵循：emit schedule 放 mockImplementation 内 + 用 setImmediate / process.nextTick（不用 queueMicrotask）。
+
+**Evidence**: `apps/backend/src/routes/__tests__/workers-control.acceptance.test.ts` 78-115 行 `setupSpawnMock`。修复前 11/15 timeout，修复后 15/15 立即 PASS。**仅改 fixture timing，不改任何断言契约**（红队期望逻辑零变更），符合 patterns.md [2026-05-15] 类「fixture 自身 bug」处理。merge commit `b5b3e7e`。
