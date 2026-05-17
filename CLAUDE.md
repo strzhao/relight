@@ -70,7 +70,7 @@ pnpm workers:status   # 查看进程状态
 
 前台调试（不推荐生产）：`pnpm --filter @relight/backend workers`
 
-Mac 控制中心（ControlCenter.swift）已接通 GUI 触发：启动/停止/重启 3 按钮调用 `POST /api/runtime/workers/{start,stop,reload}`，按钮 disabled 状态由 `workers.status` 派生，操作前弹二次确认。
+Mac 控制中心（ControlCenter.swift）已接通 GUI 触发：启动/停止/重启 3 按钮调用 `POST /api/runtime/workers/{start,stop,reload}`，按钮 disabled 状态由 `workers.status` 派生，操作前弹二次确认。日志页（LogsPage.swift）5s 轮询 `GET /api/runtime/workers/logs?lines=200` 展示 stdout/stderr；设置页（SettingsPage.swift）拉取 `GET /api/runtime/config` 展示 7 个 env 字段（aiApiKey 服务端掩码）；报告页（ReportsPage.swift）列出最近 30 天 DailyPick 并支持一键触发精选。
 
 ## Worktree 并行开发
 
