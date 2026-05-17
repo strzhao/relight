@@ -90,6 +90,24 @@ enum WorkerControlError: LocalizedError {
     }
 }
 
+// MARK: - Workers Logs & Runtime Config Models
+
+struct WorkersLogs: Codable {
+    let stdout: [String]
+    let stderr: [String]
+}
+
+struct RuntimeConfigData: Codable {
+    let storageRoot: String
+    let aiBaseUrl: String
+    let aiModel: String
+    let aiVisionModel: String
+    let redisUrl: String
+    let databasePath: String
+    let bullmqPrefix: String
+    let aiApiKey: String
+}
+
 // MARK: - View Model
 
 @MainActor
@@ -148,6 +166,36 @@ final class RuntimeStatusViewModel: ObservableObject {
     }
 
     @MainActor
+    func fetchLogs(lines: Int = 200) async throws -> WorkersLogs {
+        let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: "\(baseURL)/api/runtime/workers/logs?lines=\(lines)") else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(ApiResponse<WorkersLogs>.self, from: data).data
+            ?? WorkersLogs(stdout: [], stderr: [])
+    }
+
+    @MainActor
+    func fetchConfig() async throws -> RuntimeConfigData {
+        let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: "\(baseURL)/api/runtime/config") else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        guard let decoded = try JSONDecoder().decode(ApiResponse<RuntimeConfigData>.self, from: data).data else {
+            throw URLError(.cannotParseResponse)
+        }
+        return decoded
+    }
+
+    @MainActor
     func controlWorker(_ action: WorkerAction) async throws -> WorkerControlResponse {
         let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: "\(baseURL)/api/runtime/workers/\(action.rawValue)") else {
@@ -200,6 +248,7 @@ enum ControlCenterSection: String, CaseIterable, Identifiable {
 
 struct ControlCenterView: View {
     @StateObject private var viewModel = RuntimeStatusViewModel()
+    @EnvironmentObject var settings: AppSettings
     @State private var selection: ControlCenterSection? = .services
 
     var body: some View {
@@ -216,11 +265,15 @@ struct ControlCenterView: View {
             case .services:
                 ServicesPage(viewModel: viewModel)
             case .reports:
-                PlaceholderPage(title: "报告", hint: "扫描/分析/精选的趋势图表 — 后续上线")
+                ReportsPage()
+                    .environmentObject(viewModel)
+                    .environmentObject(settings)
             case .logs:
-                PlaceholderPage(title: "日志", hint: "tail ~/.relight/logs/* — 后续上线")
+                LogsPage()
+                    .environmentObject(viewModel)
             case .settings:
-                PlaceholderPage(title: "设置", hint: "目前请用 ⌘, 打开系统设置窗口；后续整合到此处")
+                SettingsPage()
+                    .environmentObject(viewModel)
             }
         }
         .frame(minWidth: 720, minHeight: 480)

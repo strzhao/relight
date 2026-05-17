@@ -30,6 +30,9 @@
 		A0000000000000000000006E /* AutostartManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B; settings = {}; };
 		A0000000000000000000006F /* BeijingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C; settings = {}; };
 		A00000000000000000000070 /* ControlCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000071; settings = {}; };
+		A00000000000000000000072 /* ReportsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000075; settings = {}; };
+		A00000000000000000000073 /* LogsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000076; settings = {}; };
+		A00000000000000000000074 /* SettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000077; settings = {}; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +61,9 @@
 		A0000000000000000000006B /* AutostartManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutostartManager.swift; sourceTree = "<group>"; };
 		A0000000000000000000006C /* BeijingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeijingTime.swift; sourceTree = "<group>"; };
 		A00000000000000000000071 /* ControlCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlCenter.swift; sourceTree = "<group>"; };
+		A00000000000000000000075 /* ReportsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsPage.swift; sourceTree = "<group>"; };
+		A00000000000000000000076 /* LogsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsPage.swift; sourceTree = "<group>"; };
+		A00000000000000000000077 /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +164,9 @@
 				A00000000000000000000060 /* MenuBarContent.swift */,
 				A00000000000000000000061 /* SettingsView.swift */,
 				A00000000000000000000071 /* ControlCenter.swift */,
+				A00000000000000000000075 /* ReportsPage.swift */,
+				A00000000000000000000076 /* LogsPage.swift */,
+				A00000000000000000000077 /* SettingsPage.swift */,
 				A0000000000000000000005E /* SettingsTabs */,
 			);
 			path = UI;
@@ -268,6 +277,9 @@
 				A0000000000000000000006E /* AutostartManager.swift in Sources */,
 				A0000000000000000000006F /* BeijingTime.swift in Sources */,
 				A00000000000000000000070 /* ControlCenter.swift in Sources */,
+				A00000000000000000000072 /* ReportsPage.swift in Sources */,
+				A00000000000000000000073 /* LogsPage.swift in Sources */,
+				A00000000000000000000074 /* SettingsPage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

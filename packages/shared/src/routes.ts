@@ -5,6 +5,8 @@ export const API_ROUTES = {
     workersStart: "/api/runtime/workers/start",
     workersStop: "/api/runtime/workers/stop",
     workersReload: "/api/runtime/workers/reload",
+    workersLogs: "/api/runtime/workers/logs",
+    config: "/api/runtime/config",
   },
   photos: {
     list: "/api/photos",

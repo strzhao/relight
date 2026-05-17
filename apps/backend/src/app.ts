@@ -18,7 +18,9 @@ import {
   storageRouter,
   tagsRouter,
 } from "./routes";
+import { runtimeConfigRouter } from "./routes/runtime-config";
 import { workersControlRouter } from "./routes/workers-control";
+import { workersLogsRouter } from "./routes/workers-logs";
 
 /** 注册每日精选重复任务（每天北京时间 6:00 AM） */
 export async function registerDailyRepeatableJob(): Promise<void> {
@@ -66,6 +68,8 @@ export function createApp(): Hono {
   app.route("/api/health", healthRouter);
   app.route("/api/runtime", runtimeRouter);
   app.route("/api/runtime/workers", workersControlRouter);
+  app.route("/api/runtime/workers/logs", workersLogsRouter);
+  app.route("/api/runtime/config", runtimeConfigRouter);
   app.route("/api/photos", photosRouter);
   app.route("/api/daily", dailyRouter);
   app.route("/api/tags", tagsRouter);

@@ -603,3 +603,22 @@ export interface WorkerControlResponse {
   stderr: string;
   exitCode: number;
 }
+
+/** Workers PM2 日志（tail 最后 N 行） */
+export interface WorkersLogs {
+  stdout: string[];
+  stderr: string[];
+}
+
+/** 运行时配置（只读，敏感字段已掩码） */
+export interface RuntimeConfig {
+  storageRoot: string;
+  aiBaseUrl: string;
+  aiModel: string;
+  aiVisionModel: string;
+  redisUrl: string;
+  databasePath: string;
+  bullmqPrefix: string;
+  /** 已掩码，如 "sk-****abcd" 或 "****" */
+  aiApiKey: string;
+}
