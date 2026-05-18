@@ -1035,3 +1035,31 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**: 任何 SwiftUI ScrollView 状态检测需求都先看 deployment target：13 用按钮版 / 14+ 用 onScrollGeometryChange。**不要用 DragGesture 检测 ScrollView 滚动**（trackpad 不触发）。
 
 **Evidence**: `apps/mac/Relight/UI/LogsPage.swift` 95 行手动按钮版（macOS deployment target 13.0）。merge commit `31fa14a`。
+
+### [2026-05-19] 客户端硬编码端口反模式：常驻 web 端口冲突 → 走后端 RuntimeConfig 配置化
+
+<!-- tags: port-allocation, web-port, hardcode, configuration, runtime-config, mac-app, openweb, swiftui, env, env-example, monorepo, worktree, ops, bug, anti-pattern -->
+
+**Scenario**: Mac App `openWeb()` 硬编码 `http://localhost:3001` 跳转 web。用户本地 :3001 被另一个工程的 Remotion 视频渲染常驻占用 → 点「打开 Web」跳到 Remotion bundle 页面而非拾光相册。代码注释标 P0 遗留，根本上是「客户端硬编码运维参数」的反模式。
+
+**反模式**: 任何客户端硬编码 host/port/path 都会在多服务环境下产生意外冲突（用户机器可能同时跑别的 Next.js / Remotion / 视频渲染 / 其它 dev server）。Mac App 硬编码 :3001 让 web 端口变更必须改 Swift 代码 + 重新发版。
+
+**正确模式**: 让**后端**通过 `/api/runtime/config` 暴露所有客户端要用的运行时参数（端口、URL、特性开关），客户端 fetchConfig 后用，硬编码只作 fallback 默认值。改 web 端口只需 env override + 后端重启，**客户端零改动**。
+
+**实现要点**:
+1. backend `config.ts` 加 `webPort: process.env.WEB_PORT ?? 3601`
+2. `/api/runtime/config` 响应加该字段
+3. shared types `RuntimeConfig` 加 `webPort: number`
+4. 客户端 `@Published cachedConfig`；ViewModel 在 fetchConfig 完成时**写入缓存**；View `.onAppear { Task { _ = try? await viewModel.fetchConfig() } }` 预拉
+5. 使用点（`openWeb()`）`viewModel.cachedConfig?.webPort ?? 3601` — 缓存未就绪 fallback 与 backend 默认一致
+
+**端口分配纪律**（本项目新立，写在 .env.example 注释 + handoff）：
+- 3000 backend API（常驻）
+- 3601 web 常驻（避开 dev 区 3000-3499 + worktree 区 4001-5499）
+- 4001-4999 worktree backend（`computePort(branch)` 自动）
+- 4501-5499 worktree web（自动 `BACKEND_PORT + 500`）
+- 3001/4000 等留给其它工具（Remotion / little-ant 等用户其它工程）
+
+**外推**: 任何「客户端需要知道服务端配置」场景都走 `/api/runtime/config` 模式 — 端口、Feature flag、地区设置、A/B 桶等。**禁止**在客户端硬编码可能变动的运维参数。`.env.local` gitignored 但 `.env.example` 必须文档化默认值 + 注释解释。
+
+**Evidence**: `apps/backend/src/lib/config.ts:11` `webPort` 字段；`apps/backend/src/routes/runtime-config.ts:21` 暴露；`apps/mac/Relight/UI/ControlCenter.swift:497-505` openWeb 读 cachedConfig；`.env.example:5-8` 文档化 + 端口纪律注释。fix commit `ac31877`。
