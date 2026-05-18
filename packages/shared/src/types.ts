@@ -621,4 +621,6 @@ export interface RuntimeConfig {
   bullmqPrefix: string;
   /** 已掩码，如 "sk-****abcd" 或 "****" */
   aiApiKey: string;
+  /** 拾光 web app 常驻端口（默认 3601） */
+  webPort: number;
 }

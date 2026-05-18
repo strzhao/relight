@@ -19,6 +19,7 @@ export const runtimeConfigRouter = new Hono().get("/", async (c) => {
       databasePath: config.databasePath,
       bullmqPrefix: config.bullmqPrefix,
       aiApiKey: maskApiKey(config.ai.apiKey),
+      webPort: config.webPort,
     },
   });
 });

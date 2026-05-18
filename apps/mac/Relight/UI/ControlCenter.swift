@@ -106,6 +106,7 @@ struct RuntimeConfigData: Codable {
     let databasePath: String
     let bullmqPrefix: String
     let aiApiKey: String
+    let webPort: Int
 }
 
 // MARK: - View Model
@@ -115,6 +116,8 @@ final class RuntimeStatusViewModel: ObservableObject {
     @Published var status: RuntimeStatus?
     @Published var lastError: String?
     @Published var lastFetchAt: Date?
+    /** 缓存 RuntimeConfig（一次性加载，几乎不变；openWeb 等读 webPort 用） */
+    @Published var cachedConfig: RuntimeConfigData?
 
     private var pollingTask: Task<Void, Never>?
     private let settings: AppSettings
@@ -192,6 +195,7 @@ final class RuntimeStatusViewModel: ObservableObject {
         guard let decoded = try JSONDecoder().decode(ApiResponse<RuntimeConfigData>.self, from: data).data else {
             throw URLError(.cannotParseResponse)
         }
+        self.cachedConfig = decoded
         return decoded
     }
 
@@ -277,7 +281,11 @@ struct ControlCenterView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 480)
-        .onAppear { viewModel.startPolling() }
+        .onAppear {
+            viewModel.startPolling()
+            // 预拉 RuntimeConfig 让 cachedConfig.webPort 提前就绪给 openWeb() 用（不阻塞 UI）
+            Task { _ = try? await viewModel.fetchConfig() }
+        }
         .onDisappear { viewModel.stopPolling() }
     }
 }
@@ -494,10 +502,12 @@ struct ServicesPage: View {
     }
 
     private func openWeb() {
-        // Web 端口暂时还是固定 3001（后续 P0 把动态端口写到 runtime.json 后再读）
+        // Web 端口从 RuntimeConfig.webPort 读取（默认 3601，可由 WEB_PORT env 覆盖）。
+        // 缓存未就绪时（首次启动还没拉 config）fallback 到 3601。
         let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if let host = URL(string: baseURL)?.host {
-            let webURL = URL(string: "http://\(host):3001")!
+            let port = viewModel.cachedConfig?.webPort ?? 3601
+            let webURL = URL(string: "http://\(host):\(port)")!
             NSWorkspace.shared.open(webURL)
         }
     }
