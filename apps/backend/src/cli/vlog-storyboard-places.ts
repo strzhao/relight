@@ -338,10 +338,18 @@ const hookPicksResponseSchema = z.object({
 function buildHookShotsList(
   timelineChapters: Array<{ title: string; clips: TimelineClip[]; kind?: string }>,
   byId: Map<string, ManifestVideoEntry>,
+  chapterKinds: Array<"place" | "transit">,
 ): string {
+  // Total visible (non-empty title) chapter count — used to render "第 X/N 章".
+  // 1-based index into this visible set; hook chapter (title="") is excluded.
+  const visibleChapters = timelineChapters.filter((c) => c.title !== "");
+  const total = visibleChapters.length;
   const sections: string[] = [];
-  for (const ch of timelineChapters) {
-    if (ch.title === "") continue;
+  let visibleIdx = 0;
+  for (let i = 0; i < timelineChapters.length; i++) {
+    const ch = timelineChapters[i];
+    if (!ch || ch.title === "") continue;
+    visibleIdx++;
     const lines: string[] = [];
     for (const clip of ch.clips) {
       const baseName = path.basename(clip.source, path.extname(clip.source));
@@ -364,7 +372,11 @@ function buildHookShotsList(
       );
     }
     if (lines.length > 0) {
-      sections.push(`### 章节：${ch.title}\n${lines.join("\n")}`);
+      const kind = chapterKinds[i] ?? "place";
+      const shotCount = lines.length;
+      sections.push(
+        `### 第 ${visibleIdx}/${total} 章 · kind=${kind} · 镜头数=${shotCount} · 标题：${ch.title}\n${lines.join("\n")}`,
+      );
     }
   }
   return sections.join("\n\n");
@@ -381,9 +393,10 @@ async function pickHookFidsAI(
   timelineChapters: Array<{ title: string; clips: TimelineClip[] }>,
   byId: Map<string, ManifestVideoEntry>,
   promptVersion: string,
+  chapterKinds: Array<"place" | "transit">,
 ): Promise<HookPick[]> {
   const prompts = await loadPrompts(promptVersion, "vlog/hook");
-  const shotsList = buildHookShotsList(timelineChapters, byId);
+  const shotsList = buildHookShotsList(timelineChapters, byId, chapterKinds);
   // Count unique shots (one per fid)
   const seen = new Set<string>();
   let count = 0;
@@ -1148,7 +1161,13 @@ async function main(): Promise<void> {
   // Hook prologue: 5s cold open chosen by AI (no mechanical scoring).
   let hookPicks: HookPick[] = [];
   try {
-    hookPicks = await pickHookFidsAI(opts.theme, timelineChapters, byId, opts.promptVersion);
+    hookPicks = await pickHookFidsAI(
+      opts.theme,
+      timelineChapters,
+      byId,
+      opts.promptVersion,
+      chapters.map((c) => c.kind),
+    );
   } catch (e) {
     err(`[hook] WARN: AI hook picking failed — skipping hook. ${(e as Error).message}`);
   }

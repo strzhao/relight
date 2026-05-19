@@ -1,12 +1,12 @@
 ## 任务
 
-为以下 vlog 挑选 5 个开场 hook 镜头（每个 1 秒，共约 5 秒）。
+为以下 vlog 挑选 5 个开场 hook 镜头（每个 2 秒，共约 10 秒）。
 
 - 主题：{theme}
 - 总镜头数：{count}
 
-## 镜头清单（按章节分组）
+## 镜头清单（按章节分组，标头含 章节序号 / kind / 镜头数）
 
 {shots_list}
 
-按 system 中规则输出 JSON。
+按 system 中规则输出 JSON。**Pick #1 不得来自最末 2 章，不得来自 kind=transit。**
