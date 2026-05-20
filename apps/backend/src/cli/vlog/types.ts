@@ -17,10 +17,19 @@ const personsStatusSchema = z.enum(["ok", "no_faces", "model_unavailable", "db_u
 export { photoAnalysisResponseSchema };
 export type PhotoAnalysisResponse = z.infer<typeof photoAnalysisResponseSchema>;
 
+export const frameCaptionSchema = z.object({
+  tSec: z.number().nonnegative(),
+  caption: z.string().min(1).max(500),
+});
+export type FrameCaption = z.infer<typeof frameCaptionSchema>;
+
 export const videoAnalysisExtraSchema = z.object({
   videoNarrative: z.string().optional(),
   videoPacing: z.enum(["slow", "medium", "fast"]).optional(),
   motionScore: z.number().min(0).max(100).optional(),
+  // 由 vlog-frame-extract + skill Claude 视觉生成；每 ~20s 一帧，时间锚定的画面描述
+  // 不由 Qwen 一次性返回（Qwen 看 sprite 拼图给 narrative；这是 per-frame）
+  frameCaptions: z.array(frameCaptionSchema).optional(),
 });
 
 export const videoAnalysisResponseSchema =
