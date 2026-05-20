@@ -142,7 +142,12 @@ async function processClip(
   opts: CliOpts,
 ): Promise<ExtractedClipPlan | null> {
   const fid = path.basename(entry.filePath, path.extname(entry.filePath));
-  const dur = entry.durationSec;
+  // Frame extraction works on the **original** mp4 in sources/<baseName>.
+  // If a clip has already been trimmed (sourceTrim.status === "ok" with explicit
+  // startSec/endSec from earlier Claude/algo decisions), entry.durationSec is the
+  // post-trim length but sources/ still holds the full original. Use the original
+  // duration to plan frame times so we sample across the real source.
+  const dur = entry.sourceTrim?.originalDurationSec ?? entry.durationSec;
   if (dur < opts.minDuration) return null;
 
   const existing = entry.ai?.frameCaptions ?? [];
