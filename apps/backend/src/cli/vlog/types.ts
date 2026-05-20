@@ -136,15 +136,72 @@ export const sourceTrimSchema = z.object({
   originalDurationSec: z.number().positive(),
   trimmedAt: z.string().optional(),
   status: z.enum(["ok", "trim_failed", "skipped"]).optional(),
-  // 新增 6 个 optional 字段（向后兼容）
-  source: z.enum(["qwen", "qwen_cache", "fallback", "passthrough", "first_skip"]).optional(),
+  // source 枚举：claude = Claude 决策（决策器 skill）；algo_fallback = decisions.json 缺失走 smartTrimWindow；
+  // passthrough = 短 clip 不切；first_skip = 第一段不切（hook 段单独处理）；
+  // qwen/qwen_cache/fallback = 旧 Qwen 路径（保留枚举兼容已生成的 manifest，不再新增）。
+  source: z
+    .enum([
+      "claude",
+      "algo_fallback",
+      "passthrough",
+      "first_skip",
+      "qwen",
+      "qwen_cache",
+      "fallback",
+    ])
+    .optional(),
   position: z.enum(["first", "middle", "closing"]).optional(),
-  reason: z.string().max(500).optional(),
+  reason: z.string().max(2000).optional(),
+  confidence: z.number().min(0).max(1).optional(),
   capped: z.boolean().optional(),
   cappedFrom: z.number().positive().optional(),
-  fallbackReason: z.enum(["timeout", "invalid_json", "schema_error", "range_invalid"]).optional(),
+  fallbackReason: z
+    .enum(["timeout", "invalid_json", "schema_error", "range_invalid", "missing_in_decisions"])
+    .optional(),
 });
 export type SourceTrim = z.infer<typeof sourceTrimSchema>;
+
+// ---- trim decisions file ----
+// 由 skill 中的 Claude 决策器生成；vlog-smart-trim CLI 读它来切片，不再调 Qwen。
+export const trimDecisionEntrySchema = z
+  .object({
+    startSec: z.number().nonnegative(),
+    endSec: z.number().positive(),
+    reason: z.string().min(1).max(2000),
+    confidence: z.number().min(0).max(1).optional(),
+    framesCited: z
+      .array(
+        z.object({
+          tSec: z.number().nonnegative(),
+          rationale: z.string().max(200),
+        }),
+      )
+      .optional(),
+    gapsCited: z
+      .array(
+        z.object({
+          atSec: z.number().nonnegative(),
+          gapSec: z.number().positive(),
+          rationale: z.string().max(200),
+        }),
+      )
+      .optional(),
+    skip: z.boolean().optional(),
+  })
+  .refine((d) => d.skip === true || d.startSec < d.endSec, {
+    message: "startSec must be < endSec (unless skip=true)",
+  });
+export type TrimDecisionEntry = z.infer<typeof trimDecisionEntrySchema>;
+
+export const trimDecisionsFileSchema = z.object({
+  schemaVersion: z.literal("1"),
+  generatedAt: z.string(),
+  generatedBy: z.string().optional(),
+  totalBudgetSec: z.number().positive().optional(),
+  // key 为 fid（视频文件名去后缀），如 "dji_mimo_20260516_121336_482_1778925037165_video"
+  decisions: z.record(z.string(), trimDecisionEntrySchema),
+});
+export type TrimDecisionsFile = z.infer<typeof trimDecisionsFileSchema>;
 
 export const manifestVideoEntrySchema = videoAnalysisResultSchema.extend({
   transcript: transcriptInlineSchema.optional(),

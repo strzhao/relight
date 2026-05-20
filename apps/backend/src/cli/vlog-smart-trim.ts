@@ -1,36 +1,49 @@
 /**
- * vlog-smart-trim — Qwen 主导决策 + 代码安全网（方案 C）
+ * vlog-smart-trim — Claude 决策器 + ffmpeg 执行器
  *
  * 用法:
  *   pnpm --filter @relight/backend exec tsx src/cli/vlog-smart-trim.ts <manifestPath>
+ *       --decisions <decisionsPath>
  *       [--max-clip-sec <N>] [--force] [--concurrency <N>] [--dry-run]
- *       [--selection <path>] [--prompt-version <v>] [--closing-hard-max <sec>]
- *       [--qwen-timeout-ms <ms>]
+ *       [--selection <path>] [--closing-hard-max <sec>]
+ *
+ * 输入:
+ *   - <manifestPath>：vlog manifest.json
+ *   - <decisionsPath>：Claude 决策器（在 vlog-production skill 中）生成的 decisions.json
  *
  * 输出:
  *   - <contentDir>/sources-trimmed/<fid>.mp4（精华段视频）
  *   - manifest.json 更新（原子写）：durationSec + transcript.segments + sourceTrim 字段
  *
  * 决策树（per clip）：
- *   position=first → skip (no ffmpeg, sourceTrim.status="skipped", source="first_skip")
- *   duration ≤ softMax → passthrough (ffmpeg encode-only, source="passthrough")
- *   cache hit → use cached trim (source="qwen_cache")
- *   Qwen ok → snap+cap → ffmpeg (source="qwen")
- *   Qwen fail → smartTrimWindow fallback → ffmpeg (source="fallback")
+ *   position=first → skipped (no ffmpeg, source="first_skip")
+ *   decision.skip=true → skipped (no ffmpeg, source="claude")
+ *   decisions.json 有此 fid → 用决策 + ffmpeg + source="claude"
+ *   decisions.json 缺此 fid 且 duration ≤ softMax → passthrough (encode-only, source="passthrough")
+ *   decisions.json 缺此 fid 且需要切 → smartTrimWindow + ffmpeg + source="algo_fallback"
  */
 import fs from "node:fs/promises";
 import path from "node:path";
 import { extractClip, probeVideo } from "../lib/video/ffmpeg";
-import { shiftSegments, splitSegmentByWordGap } from "./vlog/lib/smart-trim";
 import {
   CLOSING_HARD_MAX_SEC,
+  type SmartTrimPosition,
   inferPosition,
+  shiftSegments,
+  smartTrimWindow,
   softMaxForPosition,
-  trimClipAI,
-} from "./vlog/lib/smart-trim-ai";
+  splitSegmentByWordGap,
+} from "./vlog/lib/smart-trim";
 import { err, pLimit } from "./vlog/lib/util";
-import type { BatchManifest, ManifestVideoEntry, Selection, SourceTrim } from "./vlog/types";
-import { batchManifestSchema, selectionSchema } from "./vlog/types";
+import type {
+  BatchManifest,
+  ManifestVideoEntry,
+  Selection,
+  SourceTrim,
+  TrimDecisionEntry,
+  TrimDecisionsFile,
+} from "./vlog/types";
+import { batchManifestSchema, selectionSchema, trimDecisionsFileSchema } from "./vlog/types";
 
 // =========================================================
 // CLI interface
@@ -38,32 +51,32 @@ import { batchManifestSchema, selectionSchema } from "./vlog/types";
 
 interface CliOpts {
   manifestPath: string | null;
+  decisionsPath: string | null;
   maxClipSec: number;
   force: boolean;
   concurrency: number;
   dryRun: boolean;
   selectionPath: string | null;
-  promptVersion: string;
   closingHardMax: number;
-  qwenTimeoutMs: number;
 }
 
 function parseArgs(argv: string[]): CliOpts {
   const opts: CliOpts = {
     manifestPath: null,
+    decisionsPath: null,
     maxClipSec: 120,
     force: false,
     concurrency: 2,
     dryRun: false,
     selectionPath: null,
-    promptVersion: "v2",
     closingHardMax: CLOSING_HARD_MAX_SEC,
-    qwenTimeoutMs: 30000,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a) continue;
-    if (a === "--max-clip-sec") {
+    if (a === "--decisions") {
+      opts.decisionsPath = argv[++i] ?? null;
+    } else if (a === "--max-clip-sec") {
       opts.maxClipSec = Number(argv[++i]);
     } else if (a === "--force") {
       opts.force = true;
@@ -73,12 +86,8 @@ function parseArgs(argv: string[]): CliOpts {
       opts.dryRun = true;
     } else if (a === "--selection") {
       opts.selectionPath = argv[++i] ?? null;
-    } else if (a === "--prompt-version") {
-      opts.promptVersion = argv[++i] ?? "v2";
     } else if (a === "--closing-hard-max") {
       opts.closingHardMax = Number(argv[++i]);
-    } else if (a === "--qwen-timeout-ms") {
-      opts.qwenTimeoutMs = Number(argv[++i]);
     } else if (!a.startsWith("--") && opts.manifestPath === null) {
       opts.manifestPath = a;
     }
@@ -103,61 +112,100 @@ async function trimmedFileExists(filePath: string): Promise<boolean> {
 // processEntry — per-clip decision tree
 // =========================================================
 
+interface ResolvedDecision {
+  startSec: number;
+  endSec: number;
+  source: "claude" | "algo_fallback";
+  reason?: string;
+  confidence?: number;
+  fallbackReason?: SourceTrim["fallbackReason"];
+}
+
+/** 解析 per-clip 决策来源：先看 decisions.json，缺失时走 smartTrimWindow */
+function resolveDecision(
+  fid: string,
+  entry: ManifestVideoEntry,
+  position: SmartTrimPosition,
+  decisions: Map<string, TrimDecisionEntry> | null,
+  splitSegs: ReturnType<typeof splitSegmentByWordGap>,
+  opts: CliOpts,
+): ResolvedDecision | { skip: true; reason?: string; confidence?: number } {
+  const d = decisions?.get(fid);
+  if (d) {
+    if (d.skip === true) return { skip: true, reason: d.reason, confidence: d.confidence };
+    return {
+      startSec: d.startSec,
+      endSec: d.endSec,
+      source: "claude",
+      reason: d.reason,
+      confidence: d.confidence,
+    };
+  }
+  // 算法 fallback：closing 用 closingHardMax，否则用 maxClipSec
+  const fallbackMax = position === "closing" ? opts.closingHardMax : opts.maxClipSec;
+  const win = smartTrimWindow(entry.durationSec, splitSegs, fallbackMax);
+  return {
+    startSec: win.startSec,
+    endSec: win.endSec,
+    source: "algo_fallback",
+    fallbackReason: "missing_in_decisions",
+  };
+}
+
 async function processEntry(
   entry: ManifestVideoEntry,
   contentDir: string,
   opts: CliOpts,
   selection: Selection | null,
+  decisions: Map<string, TrimDecisionEntry> | null,
 ): Promise<ManifestVideoEntry> {
   const fid = path.basename(entry.filePath, path.extname(entry.filePath));
   const baseName = path.basename(entry.filePath);
   const trimmedDir = path.join(contentDir, "sources-trimmed");
-  // 契约 C1：trimmed 文件统一 .mp4 容器
   const trimmedPath = path.join(trimmedDir, `${fid}.mp4`);
   const sourcePath = path.join(contentDir, "sources", baseName);
 
   // 1. 推断 position
   const position = inferPosition(fid, selection);
+  const softMax =
+    position === "closing" ? opts.closingHardMax : softMaxForPosition(position, opts.maxClipSec);
 
-  // 2. dry-run: 快速 first_skip check
+  // 2. dry-run: 输出预计行为
   if (opts.dryRun) {
     if (position === "first") {
       err(`[smart-trim] dry-run: fid=${fid} pos=first action=first_skip`);
       return entry;
     }
-    const softMax =
-      position === "closing" ? opts.closingHardMax : softMaxForPosition(position, opts.maxClipSec);
-    // closing 不 passthrough（总调 Qwen）
-    if (position !== "closing" && entry.durationSec <= softMax) {
+    const decision = decisions?.get(fid);
+    if (decision?.skip === true) {
+      err(`[smart-trim] dry-run: fid=${fid} pos=${position} action=claude_skip`);
+    } else if (decision) {
+      const trimDur = (decision.endSec - decision.startSec).toFixed(1);
       err(
-        `[smart-trim] dry-run: fid=${fid} pos=${position} would=passthrough dur=${entry.durationSec.toFixed(1)}`,
+        `[smart-trim] dry-run: fid=${fid} pos=${position} action=claude dur=${entry.durationSec.toFixed(1)}→${trimDur}`,
+      );
+    } else if (position !== "closing" && entry.durationSec <= softMax) {
+      err(
+        `[smart-trim] dry-run: fid=${fid} pos=${position} action=passthrough dur=${entry.durationSec.toFixed(1)}`,
       );
     } else {
       err(
-        `[smart-trim] dry-run: fid=${fid} pos=${position} would=qwen dur=${entry.durationSec.toFixed(1)} softMax=${softMax}`,
+        `[smart-trim] dry-run: fid=${fid} pos=${position} action=algo_fallback dur=${entry.durationSec.toFixed(1)} softMax=${softMax}`,
       );
     }
     return entry;
   }
 
-  // 3. 调 trimClipAI 获取决策（不做 ffmpeg）
-  const decision = await trimClipAI(entry, position, {
-    promptVersion: opts.promptVersion,
-    qwenTimeoutMs: opts.qwenTimeoutMs,
-    maxClipSec: opts.maxClipSec,
-    closingHardMaxSec: opts.closingHardMax,
-  });
-
-  // 4. first_skip → 不调 ffmpeg
-  if (decision.status === "skipped") {
+  // 3. first 段：永远 skip，不调 ffmpeg
+  if (position === "first") {
     err(
       `[smart-trim] fid=${fid} pos=first source=first_skip dur=${entry.durationSec.toFixed(1)}→skip`,
     );
     return {
       ...entry,
       sourceTrim: {
-        startSec: decision.startSec,
-        endSec: decision.endSec,
+        startSec: 0,
+        endSec: entry.durationSec,
         originalDurationSec: entry.durationSec,
         status: "skipped",
         source: "first_skip",
@@ -166,18 +214,77 @@ async function processEntry(
     };
   }
 
-  // 5. 准备 ffmpeg 切片
-  const { startSec, endSec, source, reason, capped, cappedFrom, fallbackReason } = decision;
   const originalDurationSec = entry.durationSec;
   const trimmedAt = new Date().toISOString();
-
-  // 前置处理 segments（用于 shiftSegments）
   const rawSegs = entry.transcript?.segments ?? [];
   const splitSegs = splitSegmentByWordGap(rawSegs, 1.5);
 
+  // 4. 决策来源
+  const resolved = resolveDecision(fid, entry, position, decisions, splitSegs, opts);
+
+  // 4a. claude 显式 skip
+  if ("skip" in resolved && resolved.skip) {
+    err(`[smart-trim] fid=${fid} pos=${position} source=claude action=skip`);
+    return {
+      ...entry,
+      sourceTrim: {
+        startSec: 0,
+        endSec: entry.durationSec,
+        originalDurationSec,
+        trimmedAt,
+        status: "skipped",
+        source: "claude",
+        position,
+        ...(resolved.reason !== undefined ? { reason: resolved.reason } : {}),
+        ...(resolved.confidence !== undefined ? { confidence: resolved.confidence } : {}),
+      } satisfies SourceTrim,
+    };
+  }
+
+  // 4b. middle 段且没有 claude 决策且时长 ≤ softMax → passthrough
+  const hasDecision = decisions?.has(fid) === true;
+  if (!hasDecision && position !== "closing" && entry.durationSec <= softMax) {
+    await fs.mkdir(trimmedDir, { recursive: true });
+    try {
+      await extractClip(sourcePath, 0, entry.durationSec, trimmedPath);
+      err(
+        `[smart-trim] fid=${fid} pos=${position} source=passthrough dur=${entry.durationSec.toFixed(1)}`,
+      );
+      return {
+        ...entry,
+        sourceTrim: {
+          startSec: 0,
+          endSec: entry.durationSec,
+          originalDurationSec,
+          trimmedAt,
+          status: "ok",
+          source: "passthrough",
+          position,
+        } satisfies SourceTrim,
+      };
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      err(`[smart-trim] FAILED ${fid} (passthrough): ${errMsg}`);
+      return {
+        ...entry,
+        sourceTrim: {
+          startSec: 0,
+          endSec: entry.durationSec,
+          originalDurationSec,
+          trimmedAt,
+          status: "trim_failed",
+          source: "passthrough",
+          position,
+        } satisfies SourceTrim,
+      };
+    }
+  }
+
+  // 5. 切片：来自 claude 决策 或 algo_fallback
+  const { startSec, endSec, source, reason, confidence, fallbackReason } =
+    resolved as ResolvedDecision;
   await fs.mkdir(trimmedDir, { recursive: true });
 
-  // 6. ffmpeg 裁切
   try {
     await extractClip(sourcePath, startSec, endSec, trimmedPath);
     const probe = await probeVideo(trimmedPath);
@@ -185,7 +292,7 @@ async function processEntry(
     const shiftedSegs = shiftSegments(splitSegs, startSec, actualTrimmedSec);
 
     err(
-      `[smart-trim] fid=${fid} pos=${position} source=${source} dur=${originalDurationSec.toFixed(1)}→${actualTrimmedSec.toFixed(1)} capped=${capped ?? false}`,
+      `[smart-trim] fid=${fid} pos=${position} source=${source} dur=${originalDurationSec.toFixed(1)}→${actualTrimmedSec.toFixed(1)}`,
     );
 
     const sourceTrim: SourceTrim = {
@@ -197,7 +304,7 @@ async function processEntry(
       source,
       position,
       ...(reason !== undefined ? { reason } : {}),
-      ...(capped ? { capped, cappedFrom } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
       ...(fallbackReason !== undefined ? { fallbackReason } : {}),
     };
 
@@ -217,7 +324,6 @@ async function processEntry(
     } catch {
       /* ignore */
     }
-
     return {
       ...entry,
       sourceTrim: {
@@ -262,46 +368,41 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
     }
   }
 
-  // 3. 深拷贝得到 working copy
+  // 3. 加载 decisions.json（可选）
+  let decisions: Map<string, TrimDecisionEntry> | null = null;
+  let decisionsMeta: { generatedAt?: string; generatedBy?: string; totalBudgetSec?: number } = {};
+  if (opts.decisionsPath) {
+    const decRaw = await fs.readFile(opts.decisionsPath, "utf-8");
+    const decFile: TrimDecisionsFile = trimDecisionsFileSchema.parse(JSON.parse(decRaw));
+    decisions = new Map(Object.entries(decFile.decisions));
+    decisionsMeta = {
+      generatedAt: decFile.generatedAt,
+      generatedBy: decFile.generatedBy,
+      totalBudgetSec: decFile.totalBudgetSec,
+    };
+    err(
+      `[smart-trim] decisions loaded: ${opts.decisionsPath} (${decisions.size} entries, generatedBy=${decisionsMeta.generatedBy ?? "?"}, totalBudgetSec=${decisionsMeta.totalBudgetSec ?? "?"})`,
+    );
+  } else {
+    err(
+      "[smart-trim] WARN no --decisions provided; missing clips will fall back to smartTrimWindow algorithm",
+    );
+  }
+
+  // 4. 深拷贝得到 working copy
   const workingManifest: BatchManifest = JSON.parse(JSON.stringify(manifest));
 
-  // 4. 过滤出 video entries
+  // 5. 过滤出 video entries
   const videoEntries = workingManifest.files.filter(
     (f): f is ManifestVideoEntry => f.type === "video" && f.ok,
   );
 
-  // 5. dry-run 模式：输出预计行为（由 processEntry 内部处理，此处只汇总）
+  // 6. dry-run 模式：输出预计行为（由 processEntry 内部处理）
   if (opts.dryRun) {
-    const counts = { first_skip: 0, passthrough: 0, would_qwen: 0 };
-
     for (const entry of videoEntries) {
-      const fid = path.basename(entry.filePath, path.extname(entry.filePath));
-      const position = inferPosition(fid, selection);
-      const softMax =
-        position === "closing"
-          ? opts.closingHardMax
-          : softMaxForPosition(position, opts.maxClipSec);
-
-      if (position === "first") {
-        counts.first_skip++;
-        err(`[smart-trim] dry-run: fid=${fid} pos=first action=first_skip`);
-      } else if (position !== "closing" && entry.durationSec <= softMax) {
-        // closing 不 passthrough（总调 Qwen）
-        counts.passthrough++;
-        err(
-          `[smart-trim] dry-run: fid=${fid} pos=${position} action=passthrough dur=${entry.durationSec.toFixed(1)}s`,
-        );
-      } else {
-        counts.would_qwen++;
-        err(
-          `[smart-trim] dry-run: fid=${fid} pos=${position} action=would_call_qwen dur=${entry.durationSec.toFixed(1)}s softMax=${softMax}`,
-        );
-      }
+      await processEntry(entry, contentDir, opts, selection, decisions);
     }
-
-    err(
-      `[smart-trim] dry-run summary: first_skip=${counts.first_skip} passthrough=${counts.passthrough} would_qwen=${counts.would_qwen}`,
-    );
+    err("[smart-trim] dry-run done");
     return;
   }
 
@@ -314,7 +415,7 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
 
   const promises = videoEntries.map((entry) =>
     limit(async (): Promise<TrimResult> => {
-      const updated = await processEntry(entry, contentDir, opts, selection);
+      const updated = await processEntry(entry, contentDir, opts, selection, decisions);
       processed++;
       err(`[smart-trim] ${processed}/${total} files processed`);
       return { fid: path.basename(entry.filePath), updated };
@@ -344,11 +445,11 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
 
   // 9. 汇总日志
   const summary = {
-    qwen: 0,
-    qwen_cache: 0,
-    fallback: 0,
+    claude: 0,
+    algo_fallback: 0,
     passthrough: 0,
     first_skip: 0,
+    claude_skip: 0,
     trim_failed: 0,
   };
   for (const r of results) {
@@ -358,14 +459,14 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
       summary.trim_failed++;
       continue;
     }
-    if (st.source === "qwen") summary.qwen++;
-    else if (st.source === "qwen_cache") summary.qwen_cache++;
-    else if (st.source === "fallback") summary.fallback++;
+    if (st.status === "skipped" && st.source === "claude") summary.claude_skip++;
+    else if (st.source === "claude") summary.claude++;
+    else if (st.source === "algo_fallback") summary.algo_fallback++;
     else if (st.source === "passthrough") summary.passthrough++;
     else if (st.source === "first_skip") summary.first_skip++;
   }
   err(
-    `[smart-trim] DONE qwen=${summary.qwen} qwen_cache=${summary.qwen_cache} fallback=${summary.fallback} passthrough=${summary.passthrough} first_skip=${summary.first_skip} trim_failed=${summary.trim_failed}`,
+    `[smart-trim] DONE claude=${summary.claude} algo_fallback=${summary.algo_fallback} passthrough=${summary.passthrough} first_skip=${summary.first_skip} claude_skip=${summary.claude_skip} trim_failed=${summary.trim_failed}`,
   );
 }
 
@@ -373,7 +474,7 @@ async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.manifestPath) {
     err(
-      "用法: tsx src/cli/vlog-smart-trim.ts <manifestPath> [--max-clip-sec <N>] [--force] [--concurrency <N>] [--dry-run] [--selection <path>] [--prompt-version <v>] [--closing-hard-max <sec>] [--qwen-timeout-ms <ms>]",
+      "用法: tsx src/cli/vlog-smart-trim.ts <manifestPath> --decisions <decisionsPath> [--max-clip-sec <N>] [--force] [--concurrency <N>] [--dry-run] [--selection <path>] [--closing-hard-max <sec>]",
     );
     process.exit(1);
   }

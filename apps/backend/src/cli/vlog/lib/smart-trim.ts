@@ -1,8 +1,48 @@
 /**
- * 纯算法函数：smartTrim 窗口计算 + splitSegmentByWordGap + shiftSegments 时间戳平移。
- * 从 vlog-storyboard-places.ts 抽取并改造，无副作用，可被 vitest 直接测试。
+ * 纯算法函数：smartTrim 窗口计算 + splitSegmentByWordGap + shiftSegments 时间戳平移
+ * + position 推断 + softMax 计算。无副作用，可被 vitest 直接测试。
  */
-import type { TranscriptSegment } from "../types";
+import type { Selection, TranscriptSegment } from "../types";
+
+// =========================================================
+// position 推断 + softMax 计算（原 smart-trim-ai 中的工具）
+// =========================================================
+
+export type SmartTrimPosition = "first" | "middle" | "closing";
+
+/** middle 段软上限（秒），可由 CLI 覆盖 */
+export const MIDDLE_SOFT_MAX_SEC = 120;
+
+/**
+ * closing 硬上限（秒）。closing 段算法 fallback 用这个，防止 fallback 给出整段视频。
+ */
+export const CLOSING_HARD_MAX_SEC = 600;
+
+/**
+ * 从 selection 推断 fid 在整片中的位置（first / middle / closing）。
+ *
+ *  - 无 selection → 所有 clip = middle（保守）
+ *  - effective order（排除 excluded）的第 1 个 = first，最后 1 个 = closing
+ *  - 其余 = middle
+ */
+export function inferPosition(fid: string, selection: Selection | null): SmartTrimPosition {
+  if (!selection) return "middle";
+  const excluded = new Set(selection.excluded);
+  const effectiveOrder = selection.order.filter((id) => !excluded.has(id));
+  if (effectiveOrder.length === 0) return "middle";
+  if (fid === effectiveOrder[effectiveOrder.length - 1]) return "closing";
+  if (fid === effectiveOrder[0]) return "first";
+  return "middle";
+}
+
+/** middle 用 middleSoftMax，closing 用 CLOSING_HARD_MAX_SEC */
+export function softMaxForPosition(
+  position: SmartTrimPosition,
+  middleSoftMax = MIDDLE_SOFT_MAX_SEC,
+): number {
+  if (position === "closing") return CLOSING_HARD_MAX_SEC;
+  return middleSoftMax;
+}
 
 /**
  * Find an optimal [startSec, endSec] window that fits within maxClipSec
