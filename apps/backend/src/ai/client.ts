@@ -46,10 +46,13 @@ export class RelightAIClient {
 
     // qwen3.6 是推理模型，默认输出到 reasoning_content 而非 content
     // 禁用思考模式以确保 JSON 输出在 content 字段
+    // max_tokens=4096：视觉分析 JSON 含 narrative+tags+composition+colorAnalysis+emotional 等
+    // 复合输出体量 1500-2500 tokens，1024 偏紧会让输出收敛太早（参考 smart-trim 同因 fix
+    // 详见 vlog/.autopilot/decisions.md "Qwen smart-trim maxTokens 配置" 条目）。
     const baseParams = {
       model: config.ai.visionModel,
       messages,
-      max_tokens: 1024,
+      max_tokens: 4096,
       temperature: 0.3,
       top_p: 0.9,
       chat_template_kwargs: { enable_thinking: false } as const,

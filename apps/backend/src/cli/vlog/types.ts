@@ -145,9 +145,10 @@ export const sourceTrimSchema = z.object({
   originalDurationSec: z.number().positive(),
   trimmedAt: z.string().optional(),
   status: z.enum(["ok", "trim_failed", "skipped"]).optional(),
-  // source 枚举：claude = Claude 决策（决策器 skill）；algo_fallback = decisions.json 缺失走 smartTrimWindow；
+  // source 枚举：claude = Claude override（--decisions）；algo_fallback = Qwen 失败后 smartTrimWindow；
   // passthrough = 短 clip 不切；first_skip = 第一段不切（hook 段单独处理）；
-  // qwen/qwen_cache/fallback = 旧 Qwen 路径（保留枚举兼容已生成的 manifest，不再新增）。
+  // qwen = Qwen trimClipAI 决策（生产默认路径）；qwen_cache = Qwen 缓存命中；
+  // fallback = Qwen 失败后算法 fallback（同 algo_fallback，旧名兼容）。
   source: z
     .enum([
       "claude",
@@ -160,7 +161,9 @@ export const sourceTrimSchema = z.object({
     ])
     .optional(),
   position: z.enum(["first", "middle", "closing"]).optional(),
-  reason: z.string().max(2000).optional(),
+  // Qwen reason 在 smart-trim-ai.ts 中被 .slice(0, 500) 截断；max=500 与生产保持一致。
+  // Claude decisions reason 存在 trimDecisionEntry.reason（允许 max=2000）。
+  reason: z.string().max(500).optional(),
   confidence: z.number().min(0).max(1).optional(),
   capped: z.boolean().optional(),
   cappedFrom: z.number().positive().optional(),

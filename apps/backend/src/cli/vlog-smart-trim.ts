@@ -1,26 +1,27 @@
 /**
- * vlog-smart-trim — Claude 决策器 + ffmpeg 执行器
+ * vlog-smart-trim — Qwen 主导决策（默认）+ Claude override（--decisions）+ ffmpeg 执行器
  *
  * 用法:
  *   pnpm --filter @relight/backend exec tsx src/cli/vlog-smart-trim.ts <manifestPath>
- *       --decisions <decisionsPath>
+ *       [--decisions <decisionsPath>]
  *       [--max-clip-sec <N>] [--force] [--concurrency <N>] [--dry-run]
- *       [--selection <path>] [--closing-hard-max <sec>]
+ *       [--selection <path>] [--closing-hard-max <sec>] [--qwen-timeout-ms <ms>]
  *
  * 输入:
  *   - <manifestPath>：vlog manifest.json
- *   - <decisionsPath>：Claude 决策器（在 vlog-production skill 中）生成的 decisions.json
+ *   - <decisionsPath>（可选）：Claude 决策器生成的 decisions.json；有此文件时 Claude 优先
  *
  * 输出:
  *   - <contentDir>/sources-trimmed/<fid>.mp4（精华段视频）
  *   - manifest.json 更新（原子写）：durationSec + transcript.segments + sourceTrim 字段
  *
  * 决策树（per clip）：
- *   position=first → skipped (no ffmpeg, source="first_skip")
- *   decision.skip=true → skipped (no ffmpeg, source="claude")
- *   decisions.json 有此 fid → 用决策 + ffmpeg + source="claude"
- *   decisions.json 缺此 fid 且 duration ≤ softMax → passthrough (encode-only, source="passthrough")
- *   decisions.json 缺此 fid 且需要切 → smartTrimWindow + ffmpeg + source="algo_fallback"
+ *   position=first            → skipped (no ffmpeg, source="first_skip")
+ *   decision.skip=true        → skipped (no ffmpeg, source="claude")
+ *   decisions.json 有此 fid   → 用 Claude 决策 + ffmpeg + source="claude"
+ *   缺 decision + dur > softMax → trimClipAI(Qwen) + ffmpeg + source="qwen"/"qwen_cache"
+ *   trimClipAI 失败            → smartTrimWindow fallback + ffmpeg + source="algo_fallback"
+ *   缺 decision + dur ≤ softMax → passthrough (encode-only, source="passthrough")
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -34,6 +35,7 @@ import {
   softMaxForPosition,
   splitSegmentByWordGap,
 } from "./vlog/lib/smart-trim";
+import { trimClipAI } from "./vlog/lib/smart-trim-ai";
 import { err, pLimit } from "./vlog/lib/util";
 import type {
   BatchManifest,
@@ -58,6 +60,7 @@ interface CliOpts {
   dryRun: boolean;
   selectionPath: string | null;
   closingHardMax: number;
+  qwenTimeoutMs: number;
 }
 
 function parseArgs(argv: string[]): CliOpts {
@@ -70,6 +73,7 @@ function parseArgs(argv: string[]): CliOpts {
     dryRun: false,
     selectionPath: null,
     closingHardMax: CLOSING_HARD_MAX_SEC,
+    qwenTimeoutMs: 30000,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -88,6 +92,8 @@ function parseArgs(argv: string[]): CliOpts {
       opts.selectionPath = argv[++i] ?? null;
     } else if (a === "--closing-hard-max") {
       opts.closingHardMax = Number(argv[++i]);
+    } else if (a === "--qwen-timeout-ms") {
+      opts.qwenTimeoutMs = Number(argv[++i]);
     } else if (!a.startsWith("--") && opts.manifestPath === null) {
       opts.manifestPath = a;
     }
@@ -115,40 +121,28 @@ async function trimmedFileExists(filePath: string): Promise<boolean> {
 interface ResolvedDecision {
   startSec: number;
   endSec: number;
-  source: "claude" | "algo_fallback";
+  source: SourceTrim["source"];
   reason?: string;
   confidence?: number;
+  capped?: boolean;
+  cappedFrom?: number;
   fallbackReason?: SourceTrim["fallbackReason"];
 }
 
-/** 解析 per-clip 决策来源：先看 decisions.json，缺失时走 smartTrimWindow */
-function resolveDecision(
+/** Claude override 路径：只在 decisions.json 有此 fid 时调用 */
+function resolveClaudeDecision(
   fid: string,
-  entry: ManifestVideoEntry,
-  position: SmartTrimPosition,
   decisions: Map<string, TrimDecisionEntry> | null,
-  splitSegs: ReturnType<typeof splitSegmentByWordGap>,
-  opts: CliOpts,
-): ResolvedDecision | { skip: true; reason?: string; confidence?: number } {
+): ResolvedDecision | { skip: true; reason?: string; confidence?: number } | null {
   const d = decisions?.get(fid);
-  if (d) {
-    if (d.skip === true) return { skip: true, reason: d.reason, confidence: d.confidence };
-    return {
-      startSec: d.startSec,
-      endSec: d.endSec,
-      source: "claude",
-      reason: d.reason,
-      confidence: d.confidence,
-    };
-  }
-  // 算法 fallback：closing 用 closingHardMax，否则用 maxClipSec
-  const fallbackMax = position === "closing" ? opts.closingHardMax : opts.maxClipSec;
-  const win = smartTrimWindow(entry.durationSec, splitSegs, fallbackMax);
+  if (!d) return null;
+  if (d.skip === true) return { skip: true, reason: d.reason, confidence: d.confidence };
   return {
-    startSec: win.startSec,
-    endSec: win.endSec,
-    source: "algo_fallback",
-    fallbackReason: "missing_in_decisions",
+    startSec: d.startSec,
+    endSec: d.endSec,
+    source: "claude",
+    reason: d.reason,
+    confidence: d.confidence,
   };
 }
 
@@ -190,7 +184,7 @@ async function processEntry(
       );
     } else {
       err(
-        `[smart-trim] dry-run: fid=${fid} pos=${position} action=algo_fallback dur=${entry.durationSec.toFixed(1)} softMax=${softMax}`,
+        `[smart-trim] dry-run: fid=${fid} pos=${position} action=qwen dur=${entry.durationSec.toFixed(1)} softMax=${softMax}`,
       );
     }
     return entry;
@@ -219,11 +213,11 @@ async function processEntry(
   const rawSegs = entry.transcript?.segments ?? [];
   const splitSegs = splitSegmentByWordGap(rawSegs, 1.5);
 
-  // 4. 决策来源
-  const resolved = resolveDecision(fid, entry, position, decisions, splitSegs, opts);
+  // 4. Claude override：decisions.json 有此 fid → Claude 路径
+  const claudeResolved = resolveClaudeDecision(fid, decisions);
 
   // 4a. claude 显式 skip
-  if ("skip" in resolved && resolved.skip) {
+  if (claudeResolved && "skip" in claudeResolved && claudeResolved.skip) {
     err(`[smart-trim] fid=${fid} pos=${position} source=claude action=skip`);
     return {
       ...entry,
@@ -235,15 +229,17 @@ async function processEntry(
         status: "skipped",
         source: "claude",
         position,
-        ...(resolved.reason !== undefined ? { reason: resolved.reason } : {}),
-        ...(resolved.confidence !== undefined ? { confidence: resolved.confidence } : {}),
+        ...(claudeResolved.reason !== undefined ? { reason: claudeResolved.reason } : {}),
+        ...(claudeResolved.confidence !== undefined
+          ? { confidence: claudeResolved.confidence }
+          : {}),
       } satisfies SourceTrim,
     };
   }
 
-  // 4b. middle 段且没有 claude 决策且时长 ≤ softMax → passthrough
-  const hasDecision = decisions?.has(fid) === true;
-  if (!hasDecision && position !== "closing" && entry.durationSec <= softMax) {
+  // 4b. passthrough：middle + 无 Claude 决策 + dur ≤ softMax（closing 不走此路）
+  const hasClaudeDecision = claudeResolved !== null;
+  if (!hasClaudeDecision && position !== "closing" && entry.durationSec <= softMax) {
     await fs.mkdir(trimmedDir, { recursive: true });
     try {
       await extractClip(sourcePath, 0, entry.durationSec, trimmedPath);
@@ -280,9 +276,35 @@ async function processEntry(
     }
   }
 
-  // 5. 切片：来自 claude 决策 或 algo_fallback
-  const { startSec, endSec, source, reason, confidence, fallbackReason } =
-    resolved as ResolvedDecision;
+  // 5. 决策来源：Claude override 或 Qwen（默认）
+  let resolved: ResolvedDecision;
+  if (claudeResolved && !("skip" in claudeResolved)) {
+    // 5a. Claude 决策（decisions.json hit）
+    resolved = claudeResolved;
+  } else {
+    // 5b. Qwen 路径（默认）：trimClipAI 负责 passthrough / qwen / qwen_cache / fallback
+    const aiResult = await trimClipAI(entry, position, {
+      maxClipSec: opts.maxClipSec,
+      closingHardMaxSec: opts.closingHardMax,
+      qwenTimeoutMs: opts.qwenTimeoutMs,
+    });
+
+    // trimClipAI 内部已处理 passthrough/first_skip（这里不会到达 first/passthrough，
+    // 因为上面已经处理了 first + passthrough 路径，但 trimClipAI 也会正确处理）
+    resolved = {
+      startSec: aiResult.startSec,
+      endSec: aiResult.endSec,
+      source: aiResult.source,
+      reason: aiResult.reason,
+      capped: aiResult.capped,
+      cappedFrom: aiResult.cappedFrom,
+      fallbackReason: aiResult.fallbackReason,
+    };
+  }
+
+  // 6. ffmpeg 切片
+  const { startSec, endSec, source, reason, confidence, capped, cappedFrom, fallbackReason } =
+    resolved;
   await fs.mkdir(trimmedDir, { recursive: true });
 
   try {
@@ -305,6 +327,7 @@ async function processEntry(
       position,
       ...(reason !== undefined ? { reason } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(capped ? { capped, cappedFrom } : {}),
       ...(fallbackReason !== undefined ? { fallbackReason } : {}),
     };
 
@@ -385,7 +408,7 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
     );
   } else {
     err(
-      "[smart-trim] WARN no --decisions provided; missing clips will fall back to smartTrimWindow algorithm",
+      "[smart-trim] no --decisions provided; clips without Claude override will use Qwen (trimClipAI) as default path",
     );
   }
 
@@ -446,6 +469,8 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
   // 9. 汇总日志
   const summary = {
     claude: 0,
+    qwen: 0,
+    qwen_cache: 0,
     algo_fallback: 0,
     passthrough: 0,
     first_skip: 0,
@@ -461,12 +486,14 @@ export async function runSmartTrim(manifestPath: string, opts: CliOpts): Promise
     }
     if (st.status === "skipped" && st.source === "claude") summary.claude_skip++;
     else if (st.source === "claude") summary.claude++;
+    else if (st.source === "qwen") summary.qwen++;
+    else if (st.source === "qwen_cache") summary.qwen_cache++;
     else if (st.source === "algo_fallback") summary.algo_fallback++;
     else if (st.source === "passthrough") summary.passthrough++;
     else if (st.source === "first_skip") summary.first_skip++;
   }
   err(
-    `[smart-trim] DONE claude=${summary.claude} algo_fallback=${summary.algo_fallback} passthrough=${summary.passthrough} first_skip=${summary.first_skip} claude_skip=${summary.claude_skip} trim_failed=${summary.trim_failed}`,
+    `[smart-trim] DONE claude=${summary.claude} qwen=${summary.qwen} qwen_cache=${summary.qwen_cache} algo_fallback=${summary.algo_fallback} passthrough=${summary.passthrough} first_skip=${summary.first_skip} claude_skip=${summary.claude_skip} trim_failed=${summary.trim_failed}`,
   );
 }
 
@@ -474,7 +501,7 @@ async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.manifestPath) {
     err(
-      "用法: tsx src/cli/vlog-smart-trim.ts <manifestPath> --decisions <decisionsPath> [--max-clip-sec <N>] [--force] [--concurrency <N>] [--dry-run] [--selection <path>] [--closing-hard-max <sec>]",
+      "用法: tsx src/cli/vlog-smart-trim.ts <manifestPath> [--decisions <decisionsPath>] [--max-clip-sec <N>] [--force] [--concurrency <N>] [--dry-run] [--selection <path>] [--closing-hard-max <sec>] [--qwen-timeout-ms <ms>]",
     );
     process.exit(1);
   }
