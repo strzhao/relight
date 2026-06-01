@@ -130,6 +130,93 @@ describe("ecosystem.config.cjs — PM2 配置文件契约", () => {
 });
 
 // =====================================================================
+// ecosystem.config.cjs — relight-api 条目契约
+// =====================================================================
+
+describe("ecosystem.config.cjs — relight-api 条目契约", () => {
+  /**
+   * 辅助：加载 ecosystem.config.cjs，按 name 查找指定条目。
+   * 不假设下标——契约仅约定 name，不约定位置。
+   */
+  type AppEntry = {
+    name?: string;
+    cwd?: string;
+    script?: string;
+    interpreter?: string;
+    interpreter_args?: string;
+    env?: Record<string, string | undefined>;
+  };
+
+  function loadConfig(): { apps: AppEntry[] } {
+    const require = createRequire(import.meta.url);
+    return require(ECOSYSTEM_CONFIG_PATH) as { apps: AppEntry[] };
+  }
+
+  function findApp(name: string): AppEntry | undefined {
+    const cfg = loadConfig();
+    return cfg.apps.find((a) => a.name === name);
+  }
+
+  // ── 数组长度 ──────────────────────────────────────────────────────────
+  it("apps.length === 2（workers + api 共 2 个进程）", () => {
+    const cfg = loadConfig();
+    expect(cfg.apps, "apps 数组应恰好包含 2 个条目").toHaveLength(2);
+  });
+
+  // ── relight-api 存在 ──────────────────────────────────────────────────
+  it("apps 中存在 name === 'relight-api' 的条目", () => {
+    const entry = findApp("relight-api");
+    expect(entry, "未找到 name === 'relight-api' 的条目").toBeDefined();
+  });
+
+  // ── 字段精确值 ───────────────────────────────────────────────────────
+  it("relight-api.cwd === './apps/backend'", () => {
+    const entry = findApp("relight-api");
+    expect(entry?.cwd).toBe("./apps/backend");
+  });
+
+  it("relight-api.script === 'src/index.ts'", () => {
+    const entry = findApp("relight-api");
+    expect(entry?.script).toBe("src/index.ts");
+  });
+
+  it("relight-api.interpreter === 'node'", () => {
+    const entry = findApp("relight-api");
+    expect(entry?.interpreter).toBe("node");
+  });
+
+  it("relight-api.interpreter_args === '--import tsx'", () => {
+    const entry = findApp("relight-api");
+    expect(entry?.interpreter_args).toBe("--import tsx");
+  });
+
+  it("relight-api.env.NODE_ENV === 'development'", () => {
+    const entry = findApp("relight-api");
+    expect(entry?.env?.NODE_ENV).toBe("development");
+  });
+
+  it("relight-api.env.REPO_ROOT 为非空字符串", () => {
+    const entry = findApp("relight-api");
+    expect(typeof entry?.env?.REPO_ROOT).toBe("string");
+    expect(entry?.env?.REPO_ROOT, "REPO_ROOT 不应为空字符串").not.toBe("");
+  });
+
+  it("relight-api.env.PATH 为非空字符串", () => {
+    const entry = findApp("relight-api");
+    expect(typeof entry?.env?.PATH).toBe("string");
+    expect(entry?.env?.PATH, "relight-api 的 PATH 不应为空字符串").not.toBe("");
+  });
+
+  // ── relight-workers 的 PATH 也必须非空 ───────────────────────────────
+  it("relight-workers.env.PATH 为非空字符串", () => {
+    const entry = findApp("relight-workers");
+    expect(entry, "未找到 name === 'relight-workers' 的条目").toBeDefined();
+    expect(typeof entry?.env?.PATH).toBe("string");
+    expect(entry?.env?.PATH, "relight-workers 的 PATH 不应为空字符串").not.toBe("");
+  });
+});
+
+// =====================================================================
 // workers:* 命令实际引用 pm2 验证
 // =====================================================================
 

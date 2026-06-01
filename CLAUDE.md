@@ -72,6 +72,8 @@ pnpm workers:status   # 查看进程状态
 
 Mac 控制中心（ControlCenter.swift）已接通 GUI 触发：启动/停止/重启 3 按钮调用 `POST /api/runtime/workers/{start,stop,reload}`，按钮 disabled 状态由 `workers.status` 派生，操作前弹二次确认。日志页（LogsPage.swift）5s 轮询 `GET /api/runtime/workers/logs?lines=200` 展示 stdout/stderr；设置页（SettingsPage.swift）拉取 `GET /api/runtime/config` 展示 7 个 env 字段（aiApiKey 服务端掩码）；报告页（ReportsPage.swift）列出最近 30 天 DailyPick 并支持一键触发精选。
 
+**后端 API 进程也由 PM2 编排**：`ecosystem.config.cjs` 包含 `relight-api`（`src/index.ts`，max_memory_restart 1G）和 `relight-workers` 共 2 个条目，两者 env 均注入 `PATH` 以确保开机 resurrect 时 pnpm 可被正确解析。首次部署或配置变更后执行 `pm2 start ecosystem.config.cjs && pm2 save`，即可复用系统已有的 pm2 resurrect launchd 实现开机自启，无需再次运行 `pm2 startup`。
+
 ## Worktree 并行开发
 
 用 `claude -w <name>` 创建 worktree 后，string-claude-code-plugin 会自动 install 依赖并触发本工程的 `postinstall` 钩子，自动生成 worktree 专属配置：
