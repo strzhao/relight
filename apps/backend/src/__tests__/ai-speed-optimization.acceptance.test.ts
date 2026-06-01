@@ -163,8 +163,11 @@ describe("期望 2: token 和图像 payload 收紧", () => {
     client = new RelightAIClient();
   });
 
-  describe("期望 2.1 — analyzePhoto max_tokens === 1024", () => {
-    it("analyzePhoto 首次调用 max_tokens 应为 1024（非 4096）", async () => {
+  describe("期望 2.1 — analyzePhoto max_tokens === 4096", () => {
+    // 注：早期为提速曾收紧到 1024，但视觉分析 JSON 含
+    // narrative+tags+composition+colorAnalysis+emotional 等字段，1024 会被截断
+    // （commit 2b7862d「修复 maxTokens 偏小」恢复为 4096）。
+    it("analyzePhoto 首次调用 max_tokens 应为 4096", async () => {
       mockCreate.mockResolvedValue({
         choices: [{ message: { content: '{"score": 8}' } }],
       });
@@ -174,11 +177,11 @@ describe("期望 2: token 和图像 payload 收紧", () => {
       const callArgs = mockCreate.mock.calls[0]![0] as { max_tokens?: number };
       expect(
         callArgs.max_tokens,
-        "analyzePhoto 的 max_tokens 应为 1024（照片分析不需要长输出）",
-      ).toBe(1024);
+        "analyzePhoto 的 max_tokens 应为 4096（视觉分析 JSON 较长，1024 会被截断）",
+      ).toBe(4096);
     });
 
-    it("analyzePhoto retry 降级路径 max_tokens 同样应为 1024", async () => {
+    it("analyzePhoto retry 降级路径 max_tokens 同样应为 4096", async () => {
       mockCreate.mockRejectedValueOnce(new Error("json_object error"));
       mockCreate.mockResolvedValueOnce({
         choices: [{ message: { content: '{"score": 7}' } }],
@@ -187,7 +190,7 @@ describe("期望 2: token 和图像 payload 收紧", () => {
       await client.analyzePhoto("base64data", "image/jpeg", "sys", "usr");
 
       const retryArgs = mockCreate.mock.calls[1]![0] as { max_tokens?: number };
-      expect(retryArgs.max_tokens, "retry 路径的 max_tokens 也应为 1024").toBe(1024);
+      expect(retryArgs.max_tokens, "retry 路径的 max_tokens 也应为 4096").toBe(4096);
     });
   });
 

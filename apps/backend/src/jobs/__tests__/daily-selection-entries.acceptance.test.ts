@@ -819,11 +819,15 @@ describe("daily-selection entries — 验收测试（红队）", () => {
       const m = String(today2.getMonth() + 1).padStart(2, "0");
       const d = String(today2.getDate()).padStart(2, "0");
 
+      // 年份取 Y-4..Y-8：避开第一轮候选所用的 Y-1/Y-2/Y-3（seedNCandidates 按 i%5 分散），
+      // 否则同 dirname(`photos`) + 同月日 + 同年 会与上轮 entry 撞上"事件键"(dirname::date)，
+      // 被 30 天事件键去重整批滤掉，导致本轮候选池为空、根本产不出 pick。
+      // 这里要验证的是 photo_id 级跨表去重，故让新候选拥有各不相同且不与上轮冲突的事件键。
       for (let i = 0; i < 5; i++) {
         const newId = `new-candidate-round2-${i}`;
         seedPhoto(testSqlite, {
           photoId: newId,
-          takenAt: `${today2.getFullYear() - 2}-${m}-${d}T0${i}:00:00.000Z`,
+          takenAt: `${today2.getFullYear() - 4 - i}-${m}-${d}T0${i}:00:00.000Z`,
           aestheticScore: 7.5,
         });
       }

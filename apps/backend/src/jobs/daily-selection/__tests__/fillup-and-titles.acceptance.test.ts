@@ -171,6 +171,20 @@ function agedRandomISO(yearsAgo: number): string {
   return `${year}-${differentMonth}-15T10:00:00Z`;
 }
 
+/**
+ * 构造"仅 fillUp 可达"的日期：去年（< 2 年前，故不进 agedRandom）+ 与当前月份相差
+ * 6 个月（必落在不同季节，故不进 historyToday/sameMonth/sameSeason）。
+ * 这样的照片不命中任何主路径源，只能通过 fillUp 第 5 源（仅按 score≥7.5 过滤）被捞回。
+ */
+function fillUpOnlyISO(dayOffset = 0): string {
+  const { month } = getBeijingMonthDay();
+  const monthNum = Number.parseInt(month, 10);
+  const oppositeMonth = ((monthNum + 5) % 12) + 1; // +6 个月（不同季节），1-12
+  const year = new Date().getFullYear() - 1;
+  const day = String(10 + (dayOffset % 15)).padStart(2, "0");
+  return `${year}-${String(oppositeMonth).padStart(2, "0")}-${day}T10:00:00Z`;
+}
+
 /** 构造一个与今天日期不在同季节的源3日期 */
 function getOtherSeasonMonthISO(yearsAgo: number): string {
   const { month } = getBeijingMonthDay();
@@ -275,13 +289,15 @@ describe("B. buildCandidatePool 行为", () => {
       sqliteInsertPhoto(testSqlite, `cluster${i}`, t, 8.0, "/photos/same-dir");
     }
 
-    // 全库另有 5 张高分照片放在完全不同 dirname 和不同时间（fillUp 候选）
-    // aesthetic_score >= 7.5 满足 fillUp 质量下限
+    // 全库另有 5 张高分照片放在完全不同 dirname（fillUp 候选）。
+    // 关键：takenAt 必须落在所有主路径源之外（fillUpOnlyISO：去年 + 反季月份），
+    // 否则它们会被 agedRandom 等主路径源捞进 pool1，导致 pool1 填满、fillUp 永不触发。
+    // aesthetic_score >= 7.5 满足 fillUp 质量下限。
     for (let i = 0; i < 5; i++) {
       sqliteInsertPhoto(
         testSqlite,
         `fill${i}`,
-        agedRandomISO(4 + i), // 不同年份
+        fillUpOnlyISO(i), // 仅 fillUp 可达
         8.0, // aesthetic_score >= 7.5
         `/photos/fill-dir-${i}`, // 不同 dirname 避免冲突
       );
@@ -297,70 +313,37 @@ describe("B. buildCandidatePool 行为", () => {
     expect(result.length).toBeGreaterThan(1);
   });
 
-  it("B-5: pool1 代表稳定性：fillUp 不替换 pool1 任何簇代表", async () => {
+  it("B-5: pool1 代表稳定性：有空位时 fillUp 不挤掉 pool1 代表（即便 fillUp 评分更高）", async () => {
+    // 设计说明（红队复盘）：
+    // 本用例原本还想断言"与 pool1 代表 dirname/时间窗冲突的 fillUp 候选被丢弃"，但该分支
+    // 通过 buildCandidatePool 公开 API **不可达**：fillUp 候选只可能是「未被任何主路径源捞入」
+    // 的照片；而冲突判定要求候选与某个 pool1 代表时间相邻（同 dirname ≤60min 或 GPS≤500m 且 ≤24h），
+    // 任何与 ≥2 年前的 pool1 代表如此相邻的照片自身也满足 agedRandom（<2 年前）条件，会被聚进
+    // 该代表所在簇（→ 进 excludeAfterPrimary）而非留作 fillUp 候选。故冲突过滤分支在此层级无法触发，
+    // 这里只验证可达的核心契约：**最终池有空位时 pool1 代表必然保留，不被高分 fillUp 候选挤出**。
     const { buildCandidatePool } = await import("../candidate-pool");
     addSource(testSqlite);
 
-    // pool1：1 张代表 p_main，dirname=/photos/main，weightedScore 正常
+    // pool1：1 张主路径代表 p_main（historyToday，月日匹配今天），score 8.5
     sqliteInsertPhoto(testSqlite, "p_main", yearsAgoISO(3), 8.5, "/photos/main");
 
-    // fillUp 候选1：高分、不冲突（不同 dirname，时间远）→ 应纳入
-    sqliteInsertPhoto(testSqlite, "p_fill_high", agedRandomISO(5), 9.9, "/photos/other");
+    // fillUp 候选（仅 fillUp 可达：去年 + 反季月份，不命中任何主路径源），不同 dirname → 不冲突。
+    // p_fill_high 评分 9.9 高于 p_main，用来验证它不会把 p_main 挤出最终池。
+    sqliteInsertPhoto(testSqlite, "p_fill_high", fillUpOnlyISO(1), 9.9, "/photos/other-a");
+    sqliteInsertPhoto(testSqlite, "p_fill_b", fillUpOnlyISO(2), 8.0, "/photos/other-b");
 
-    // fillUp 候选2：高分、但与 p_main 同 dirname 且时间窗内（冲突）→ 应丢弃
-    // 使用与 p_main 相同 dirname，时间差 < 60min
-    const mainTime = new Date(yearsAgoISO(3)).getTime();
-    const conflictTime = new Date(mainTime + 30 * 60 * 1000).toISOString(); // 30min 内
-    sqliteInsertPhoto(
-      testSqlite,
-      "p_fill_conflict",
-      conflictTime,
-      9.9,
-      "/photos/main", // 同 dirname + 时间窗内 → 冲突
-    );
-
-    // maxN=3，pool1 聚类后只有 1 簇（main dir 的 p_main 和 p_fill_conflict
-    // 会被聚成 1 簇，代表是 weightedScore 最高者 p_fill_conflict？
-    // 等等：p_fill_conflict 是 fillUp 候选，它在进入 fillUp 判定前不在主路径里。
-    // 主路径只取 historyToday/sameMonth/sameSeason/agedRandom，不含 fillUp 候选。
-    // 因此 pool1 只含 p_main（因为 p_fill_conflict 拍摄时间在 agedRandom 范围内也可能进入），
-    // 实际上 p_fill_conflict 也会进入主路径的 agedRandom。
-    //
-    // 修正场景：让 p_main 专门是 historyToday（月日匹配），
-    // p_fill_high 和 p_fill_conflict 是 2 年前的老照片（agedRandom 源）。
-    // 聚类时 p_main 和 p_fill_conflict 同 dirname=/photos/main 且时间差 30min → 同簇。
-    // 簇代表按 weightedScore 选：p_fill_conflict(9.9) > p_main(8.5) → 代表是 p_fill_conflict。
-    // 这不符合 B-5 的测试意图。
-    //
-    // 正确的 B-5 场景应该是：pool1 = 有 1 个来自某 dirname 的簇代表 p_main；
-    // fillUp 候选有 p_fill_high（不冲突）和 p_fill_conflict（与 p_main 冲突）。
-    // 断言：p_main 在最终结果中（没被 fillUp 的 p_fill_conflict 替换），
-    //       p_fill_high 在最终结果中（因不冲突被纳入），
-    //       p_fill_conflict 不在最终结果中（被丢弃）。
-    //
-    // 要实现这个场景：p_main 必须是唯一主路径代表，p_fill_high/p_fill_conflict 不能进主路径。
-    // 使 p_fill_high/p_fill_conflict 的 takenAt 在 2 年内（不满足 agedRandom 的 < 2年前条件），
-    // 且月日不匹配（不进 historyToday/sameMonth/sameSeason）。
-    //
-    // 实现：让 p_fill_high/p_fill_conflict 的 takenAt 在当前年份（不满足 < 当前年的历史源条件）。
-    // 这样它们不会进入主路径，只能作为 fillUp 候选（如果蓝队实现中 fillUp 从全库拉）。
-
+    // maxN=3：pool1(1) + 2 个不冲突 fillUp = 3，全部放得下 → p_main 必须保留
     const result = await buildCandidatePool({ excludeIds: new Set(), maxN: 3 });
-
     const resultIds = result.map((r) => r.photoId);
 
-    // p_main 必须在（pool1 代表稳定性）
-    expect(resultIds).toContain("p_main");
-
-    // p_fill_high 应在（不冲突，高分）—— 仅当 fillUp 被触发时。
-    // 如果主路径足量（pool1 >= maxN），fillUp 不触发，此断言跳过。
+    // fillUp 确实被触发（pool1 只有 1 簇 < maxN=3）
     const fillUpItems = result.filter((r) => r.source === "fillUp");
-    if (fillUpItems.length > 0) {
-      expect(resultIds).toContain("p_fill_high");
-    }
+    expect(fillUpItems.length).toBeGreaterThan(0);
 
-    // p_fill_conflict 绝不应出现（与 p_main 同 dirname + 时间窗内 → 冲突丢弃）
-    expect(resultIds).not.toContain("p_fill_conflict");
+    // p_main 必须在最终池中（pool1 代表稳定性：即便 p_fill_high 评分更高也不挤掉它）
+    expect(resultIds).toContain("p_main");
+    // 高分不冲突 fillUp 候选被纳入
+    expect(resultIds).toContain("p_fill_high");
   });
 
   it("B-6: fillUp 质量下限：aesthetic_score < 7.5 的照片不纳入 fillUp", async () => {
