@@ -1,2 +1,0 @@
-# 主仓库无共享 .env，端口/路径全部由 scripts/sync-worktree-env.mjs 在 postinstall 时生成
-# 此文件为占位
