@@ -595,3 +595,19 @@
 - 未来扩展：如果要加 isFamily / starred / 候选池加权时，可同模式新增 settings 键（如 `familyPersonIds` JSON 数组），或者那时再加 persons 表列承载多个标记。
 
 **Evidence**: API 契约（PUT/DELETE /api/persons/:id/self 幂等设计，DELETE cleared:boolean 而非 404）+ 21 个 acceptance test 覆盖（settings-helper 6 + persons-self 15）全绿。merge commit `6d1f4c0`。
+
+### [2026-06-02] 后端 API 纳入 PM2 开机自启：复用现有 resurrect launchd，仅 pm2 save，不跑 pm2 startup
+
+<!-- tags: pm2, ecosystem, launchd, resurrect, autostart, boot, backend-api, deployment, ops, mac-app, control-center, design -->
+
+**背景**: mac app 的"开机服务自动就绪"链路从未闭合——`SMAppService` 只让菜单栏 app 本身自启；ControlCenter 按钮调 `/api/runtime/workers/*` 需后端 API 先在跑；而后端 API 此前无任何自启机制（不在 PM2、无 launchd）。
+
+**决策**: 在 `ecosystem.config.cjs` 追加 `relight-api` 条目（与 relight-workers 同构：node + `--import tsx` 直跑 `src/index.ts`），`pm2 start ecosystem.config.cjs` + `pm2 save` 即可。
+
+**关键洞察（命名误导）**: 用户机器上 `~/Library/LaunchAgents/com.stringzhao.pm2-qwen.plist` 名为 qwen，**实际 ProgramArguments 就是通用 `pm2 resurrect`**（RunAtLoad=true，PATH 含 /opt/homebrew/bin + nvm node）。因此**不需要再跑 `pm2 startup`**——只要进程进了 `~/.pm2/dump.pm2`，现有 launchd 开机就会把 qwen + api + workers 全部 resurrect。再装 startup 反而会创建第二个 resurrect launchd → 双重启动冲突 + 需 sudo。
+
+**Trade-offs**:
+- 复用 launchd：零冲突、零提权；代价是依赖一个名字有误导性的既有 plist（已在设计文档/知识库标注其真实行为）。
+- 非破坏性验收：用 `pm2 delete relight-api && pm2 resurrect` 模拟 boot，绝不 `pm2 kill`（qwen 是用户在用的 31GB AI 服务）。
+
+**Evidence**: `ecosystem.config.cjs` relight-api 条目；6 条 det-machine 谓词全 PASS（P5 delete→resurrect 复活 API 且 qwen pid 3982 未变）；feat commit `102078f`。相关：[[pm2-env-path-boot-resurrect-spawn-enoent]]

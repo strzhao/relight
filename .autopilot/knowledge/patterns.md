@@ -1063,3 +1063,15 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**: 任何「客户端需要知道服务端配置」场景都走 `/api/runtime/config` 模式 — 端口、Feature flag、地区设置、A/B 桶等。**禁止**在客户端硬编码可能变动的运维参数。`.env.local` gitignored 但 `.env.example` 必须文档化默认值 + 注释解释。
 
 **Evidence**: `apps/backend/src/lib/config.ts:11` `webPort` 字段；`apps/backend/src/routes/runtime-config.ts:21` 暴露；`apps/mac/Relight/UI/ControlCenter.swift:497-505` openWeb 读 cachedConfig；`.env.example:5-8` 文档化 + 端口纪律注释。fix commit `ac31877`。
+
+### [2026-06-02] PM2 app env 必须显式注入 process.env.PATH，否则 boot resurrect 时 spawn 子进程 ENOENT
+
+<!-- tags: pm2, ecosystem, env, path, boot, resurrect, launchd, spawn, enoent, child-process, pnpm, homebrew, ops, bug -->
+
+**陷阱**: PM2 app 通过 `child_process.spawn('pnpm', ...)` 拉起子进程时（如 `workers-control.ts` 的 `/api/runtime/workers/start` spawn `pnpm workers:start`），**开机 launchd resurrect 路径下 PATH 极简**（不含 /opt/homebrew/bin），pnpm 解析 ENOENT。交互式 `pm2 start` 时因继承了 shell 完整 PATH 看不出问题——**只在重启/开机后暴露**。
+
+**修复**: 在 ecosystem 条目 `env` 里显式 `PATH: process.env.PATH`。`pm2 save` 时把当前完整 PATH（含 homebrew）烤进 `dump.pm2`，resurrect 时用 dump 的 env，子进程 spawn 才能解析。`REPO_ROOT: process.cwd()` 同理——在 `pm2 start` 时解析为绝对路径烤入 dump。
+
+**外推**: 任何"PM2 进程会 spawn 依赖 PATH 的命令"场景，env 都要显式带 PATH；不能假设 launchd/systemd 启动环境的 PATH 与交互 shell 一致。`workers-control.ts` 早已就此 ENOENT 写了 hint 注释（"PM2 化部署需在 ecosystem env 中显式注入 PATH"），本次落实。
+
+**Evidence**: `ecosystem.config.cjs` relight-api/relight-workers env.PATH；`apps/backend/src/routes/workers-control.ts` spawn pnpm + ENOENT hint；feat commit `102078f`。相关：[[后端-api-纳入-pm2-开机自启]]
