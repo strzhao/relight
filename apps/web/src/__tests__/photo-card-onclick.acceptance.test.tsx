@@ -8,12 +8,14 @@
  */
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import React from "react";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 
 // jsdom 缺少 IntersectionObserver，需要 mock
 beforeAll(() => {
+  // React 19 act() 需要此标志，否则渲染不会被同步 flush
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(globalThis, "IntersectionObserver", {
     writable: true,
     value: vi.fn().mockImplementation(() => ({
@@ -35,9 +37,11 @@ function renderHtml(element: React.ReactElement): string {
 async function renderInteractive(element: React.ReactElement) {
   const container = document.createElement("div");
   const root = createRoot(container);
-  root.render(element);
-  // 等待 React 并发渲染完成
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  // 用 act() 同步 flush 渲染 + effect，避免依赖固定 setTimeout(0) 在高负载下渲染未提交
+  // （此前满负载并行跑时偶发 firstElementChild 为 null / onClick 未挂载导致 flaky）
+  await act(async () => {
+    root.render(element);
+  });
   return { container, root };
 }
 
