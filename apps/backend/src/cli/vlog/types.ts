@@ -354,6 +354,18 @@ export const selectionSchema = z.object({
    */
   order: z.array(z.string()).default([]),
   groups: z.array(selectionGroupSchema).default([]),
+  /**
+   * task 008: 章节内自定义排序。chapterIdx 为章节下标，customOrder 为该章节内
+   * fileIds 的期望排列（成员集合需与章节一致才会被采用）。
+   */
+  chapterOrders: z
+    .array(
+      z.object({
+        chapterIdx: z.number().int().nonnegative(),
+        customOrder: z.array(z.string()),
+      }),
+    )
+    .default([]),
 });
 export type Selection = z.infer<typeof selectionSchema>;
 
