@@ -1,0 +1,156 @@
+name: Build and Release macOS App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-release:
+    name: Build Relight.app
+    runs-on: macos-14
+
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        working-directory: apps/mac
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Archive (Release, arm64, ad-hoc sign)
+        run: |
+          xcodebuild -project Relight.xcodeproj \
+            -scheme Relight \
+            -configuration Release \
+            -archivePath build/Relight.xcarchive \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Extract .app from archive
+        run: |
+          rm -rf Relight.app
+          cp -R build/Relight.xcarchive/Products/Applications/Relight.app Relight.app
+
+      - name: Set version from tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG" Relight.app/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TAG" Relight.app/Contents/Info.plist
+
+      - name: Verify bundle integrity
+        run: |
+          for f in \
+            "Relight.app/Contents/MacOS/Relight" \
+            "Relight.app/Contents/Info.plist"; do
+            if [ ! -e "$f" ]; then
+              echo "MISSING: $f"
+              exit 1
+            fi
+            echo "  OK: $f"
+          done
+          echo "Bundle integrity check passed."
+
+      - name: Ad-hoc code sign
+        run: codesign --force --deep --sign - Relight.app
+
+      - name: Zip .app bundle
+        run: zip -r "Relight-${{ github.ref_name }}.zip" Relight.app
+
+      - name: Move release zip to repo root
+        run: mv apps/mac/Relight-*.zip "$GITHUB_WORKSPACE/"
+        working-directory: .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 拾光 Relight ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: Relight-${{ github.ref_name }}.zip
+          body: |
+            ## 拾光 Relight ${{ github.ref_name }}
+
+            AI 驱动的照片精选桌面伴侣 —— 自动把每日精选合成为杂志版壁纸。
+
+            ### 安装步骤
+
+            Homebrew（推荐，仅 Apple Silicon）：
+            ```
+            brew tap strzhao/relight
+            brew install --cask relight
+            ```
+
+            或手动安装：
+            1. 下载下方的 `Relight-${{ github.ref_name }}.zip`
+            2. 解压，将 `Relight.app` 拖入 `Applications` 文件夹
+            3. 首次打开时，右键选择「打开」绕过 Gatekeeper 提示
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew-tap:
+    name: Update Homebrew Tap
+    needs: build-and-release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      # 默认 GITHUB_TOKEN（对本仓库有 contents:write），用于「同步 cask 回 main」。
+      # 跨仓库推送 tap 用 TAP_GITHUB_TOKEN，仅注入到那一步，互不耦合（最小权限）。
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release zip and compute sha256
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          ZIP_URL="https://github.com/strzhao/relight/releases/download/${TAG}/Relight-${TAG}.zip"
+
+          curl -fSL -o release.zip "$ZIP_URL"
+          SHA256=$(sha256sum release.zip | awk '{print $1}')
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+
+      - name: Update Cask formula
+        run: |
+          sed -i "s/version \".*\"/version \"$VERSION\"/" homebrew/Casks/relight.rb
+          sed -i "s/sha256 \".*\"/sha256 \"$SHA256\"/" homebrew/Casks/relight.rb
+
+      - name: Push to tap repo
+        run: |
+          # public 仓库 tokenless clone，token 只在 push URL 内联（不写入 .git/config）
+          git clone "https://github.com/strzhao/homebrew-relight.git" tap-repo
+          mkdir -p tap-repo/Casks
+          cp homebrew/Casks/relight.rb tap-repo/Casks/
+          cd tap-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/relight.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Update relight to v${VERSION}"
+          git push "https://x-access-token:${TAP_TOKEN}@github.com/strzhao/homebrew-relight.git" HEAD:main
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+      - name: Sync cask file back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git add homebrew/Casks/relight.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore(cask): 同步版本号到 v${VERSION}"
+          git push origin main

@@ -8,7 +8,19 @@
 - Xcode 15+ 命令行工具（`xcode-select --install`）
 - 拾光 backend 已运行（默认 `http://localhost:3000`，可在 APP 设置中修改）
 
-## 快速开始
+## 安装（Homebrew，推荐 · 仅 Apple Silicon）
+
+```bash
+brew tap strzhao/relight
+brew install --cask relight     # 首次安装
+brew upgrade --cask relight     # 更新到最新版
+```
+
+安装后在「启动台 / 应用程序」打开 Relight，首次打开若提示无法验证开发者，右键 App →「打开」即可（ad-hoc 签名）。手动下载见仓库 [Releases](https://github.com/strzhao/relight/releases)。
+
+> 发布机制：推送 `vX.Y.Z` tag → `.github/workflows/release.yml` 在 macOS runner 上 `xcodebuild archive` → GitHub Release → 自动同步 `strzhao/homebrew-relight` tap。
+
+## 快速开始（从源码构建）
 
 ### 1. 启动 backend
 

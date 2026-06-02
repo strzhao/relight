@@ -48,6 +48,29 @@ apps/backend/      后端 API + 任务队列
 packages/shared/   共享类型与 Zod Schema
 ```
 
+## 桌面 App（macOS）
+
+`apps/mac` 是「拾光」的 macOS 桌面端（菜单栏 App，自动把每日精选设为壁纸）。
+
+### 安装（Homebrew，推荐 · 仅 Apple Silicon）
+
+```bash
+brew tap strzhao/relight
+brew install --cask relight
+```
+
+更新到最新版：
+
+```bash
+brew upgrade --cask relight
+```
+
+或前往 [Releases](https://github.com/strzhao/relight/releases) 手动下载 `Relight-vX.Y.Z.zip`，解压后将 `Relight.app` 拖入 `Applications`（首次打开右键「打开」绕过 Gatekeeper）。
+
+### 发布流程
+
+向仓库推送 `vX.Y.Z` 形式的 tag 即触发 `.github/workflows/release.yml`：在 macOS runner 上 `xcodebuild archive`（Release，arm64，ad-hoc 签名）→ 打包 `Relight-vX.Y.Z.zip` → 创建 GitHub Release → 自动更新 `strzhao/homebrew-relight` tap 的 cask。
+
 ## 脚本
 
 | 命令 | 说明 |
