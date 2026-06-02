@@ -32,6 +32,7 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-06-02] 去重窗口 UTC nowDate 与 pickDate 北京日期跨天错位 → 北京凌晨段 flaky；调试陷阱：本地同时刻新旧对比因都失败而误判，须看同环境跨 commit（CI）信号 + 边界 determinism 实验；修复=三个日期统一北京时区 | tags: timezone, beijing, utc, daily-selection, getRecentPickedEventKeys, pickDate, flaky-test, ci, controlled-experiment, dedup, bug | → patterns.md
 - [2026-06-02] 每日精选 30 天去重窗口单向 lt(pickDate, now) 隐含"按日期顺序生成"假设：定时任务先产出后一天、回填前一天时回填日看不到未来已用照片 → 跨天 hero 撞图；修复=以目标日为中心的对称窗口 gte(now-30d)+lte(now+30d)+ne(now当日) | tags: daily-selection, candidate-pool, dedup, getRecentPickedEventKeys, date-window, ordering-assumption, backfill, out-of-order, hero-collision, scheduled-job, bug | → patterns.md
 - [2026-06-02] headless CI 跑 xcodebuild 两坑：scheme 必须入库 shared（xcuserdata 被 gitignore）+ runner 默认 Xcode 15.4 编不过 macOS 14 SwiftUI API（\.openSettings），需 macos-15 + setup-xcode latest-stable | tags: xcodebuild, ci, github-actions, shared-scheme, xcshareddata, xcode-version, macos-15, setup-xcode, swiftui, mac-app, release, bug | → patterns.md
 - [2026-06-02] PM2 app env 必须显式注入 process.env.PATH，否则 boot resurrect 时 spawn 子进程（pnpm）ENOENT；交互式 pm2 start 因继承 shell PATH 看不出，只在开机后暴露 | tags: pm2, ecosystem, env, path, boot, resurrect, launchd, spawn, enoent, child-process, pnpm, ops, bug | → patterns.md

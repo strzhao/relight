@@ -1102,3 +1102,16 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**：凡是"近 N 天去重 / 防重复"的时间窗口，若数据可能乱序写入（回填、补跑、并发、时区错位），单向 `<` 窗口都会漏掉"未来方向"的已有记录。该用以目标为中心的对称窗口 + 显式排除目标自身。SQLite 文本日期列 `YYYY-MM-DD` 字典序==日期序，gte/lte/ne 直接可用。
 
 **Evidence**: 真实 DB 求值 `getRecentPickedEventKeys(30, 2026-06-01).excludeIds` 修复后含 d88ef318（6-02 hero）；event-key.acceptance.test.ts +4 用例 35 passed；commit 1685df5。相关：[[2026-05-16]] 事件键去重、[[2026-05-09]] 4 源混采 30 天去重。
+
+<!-- tags: timezone, beijing, utc, daily-selection, getRecentPickedEventKeys, pickDate, flaky-test, pre-push, ci, controlled-experiment, dedup, bug -->
+## [2026-06-02] 去重窗口 UTC nowDate 与 pickDate 北京日期跨天错位 → 北京凌晨段 flaky；本地同时刻新旧对比会误判
+
+**Pattern**：`getRecentPickedEventKeys` 的窗口边界/目标日用 `now.toISOString().slice(0,10)`（**UTC** 日期）算，而 `dailyPicks.pickDate` 用 `formatPickDate`（**北京**时区）存。两者在北京 00:00–08:00（= UTC 前一日）跨天错位，`ne(pickDate, nowDate)` 把"昨天的精选"误排除出去重池。后果：(a) 定时任务（北京 6:00 = UTC 前一日 22:00）漏去重；(b) `daily-selection-entries.acceptance.test.ts` 用 `bjDate()` 写 pick_date、worker 用 UTC nowDate，在该时段非确定性失败。
+
+**调试陷阱（关键教训）**：我先用"本地同一时刻跑新旧代码、FAIL 数相同"判定"非我引入的回归"。但本地正处北京凌晨边界，新旧**都**失败，掩盖了差异。真正的受控对比是 CI：旧 commit CI 绿、新 commit CI 红——**同环境跨 commit** 才暴露我的改动（对称窗口 + UTC nowDate 的交互）放大了既存时区缺陷。教训：判断 flaky / 回归归因时，"本地同时刻新旧对比"在**时间相关 flaky** 面前无效，必须看同环境跨 commit（CI）的信号，并直接对边界条件做 determinism 实验（改成北京日期后 14/14、179/179 全过，凌晨也稳定）。
+
+**修复**：窗口三个日期统一用北京日期 `new Date(ms + 8*3600_000).toISOString().slice(0,10)`，与 pickDate 对齐。override 回填路径（pickNow=日期 T04:00Z）北京日期与原 UTC 日期一致，不影响既有结论。
+
+**外推**：凡"按日期去重/比较"的逻辑，写入侧与查询侧必须用**同一时区**取日期；混用 UTC slice 与 localized date 会埋下只在某 UTC 小时段触发的 flaky。pre-push 全量套件还有负载相关 flaky（如 health `memory.used==total-free`，单跑必过、全量偶挂），CI 隔离环境才是权威门。
+
+**Evidence**: CI 26836763659(41cc618) FAIL 2 → 26837111164(71c8057) SUCCESS；commit 71c8057；本地凌晨 daily-selection 相关 179/179 全过。相关：[[2026-06-02]] 去重窗口单向假设撞图。
