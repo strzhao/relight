@@ -345,6 +345,130 @@ describe("Part 2: getRecentPickedEventKeys 集成测试", () => {
     // 非空时有元素
     expect(result.excludeIds.size).toBeGreaterThan(0);
   });
+
+  // -----------------------------------------------------------------------
+  // 对称窗口回归用例（新增）
+  // -----------------------------------------------------------------------
+
+  /**
+   * EK-W1: 未来方向去重（核心回归 bug）
+   *
+   * 设 D = "2026-06-01T04:00:00Z"（今天）。
+   * 插入 pickDate="2026-06-02"（明天）的精选，hero=futureHero，members=[futureMember]。
+   * 修复前（单向窗口）：pickDate > D → 不在窗口 → excludeIds 不含这两 ID → bug。
+   * 修复后（对称窗口）：|2026-06-02 − 2026-06-01| = 1 ≤ 30 且 ≠ 今天 → 纳入 → 断言通过。
+   */
+  it("EK-W1: 未来方向去重 — tomorrow 的精选 hero+member 出现在 excludeIds（核心回归）", async () => {
+    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+    addSource();
+
+    const D = new Date("2026-06-01T04:00:00Z");
+
+    // 插入 futureHero 和 futureMember 照片（taken_at 随意，excludeIds 不依赖它）
+    insertPhoto("futureHero", "/Future/futureHero.jpg", "2026-06-02T10:00:00Z");
+    insertPhoto("futureMember", "/Future/futureMember.jpg", "2026-06-02T10:05:00Z");
+
+    // pickDate = D + 1 天 = "2026-06-02"
+    addDailyPick("pick-future", "futureHero", "2026-06-02", [
+      { photoId: "futureMember", caption: "future member" },
+    ]);
+
+    const { excludeIds } = await getRecentPickedEventKeys(30, D);
+
+    // 断言：修复后的对称窗口必须把 futureHero 和 futureMember 纳入 excludeIds
+    expect(excludeIds.has("futureHero")).toBe(true);
+    expect(excludeIds.has("futureMember")).toBe(true);
+  });
+
+  /**
+   * EK-W2: 当天精选不自我排除
+   *
+   * pickDate = D 当天（"2026-06-01"），hero=todayHero。
+   * 语义：今天正在生成精选，不应把今天自己排除在候选之外。
+   * 断言 excludeIds.has("todayHero") === false。
+   */
+  it("EK-W2: 当天精选不纳入 excludeIds（避免自我排除）", async () => {
+    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+    addSource();
+
+    const D = new Date("2026-06-01T04:00:00Z");
+
+    insertPhoto("todayHero", "/Today/todayHero.jpg", "2026-06-01T08:00:00Z");
+
+    // pickDate 等于 D 当天
+    addDailyPick("pick-today", "todayHero", "2026-06-01", []);
+
+    const { excludeIds } = await getRecentPickedEventKeys(30, D);
+
+    // 今天的精选不应排除（pickDate === now当日 → 跳过）
+    expect(excludeIds.has("todayHero")).toBe(false);
+  });
+
+  /**
+   * EK-W3: 对称右边界 — D+30 命中，D+31 不命中
+   *
+   * D = "2026-06-01T04:00:00Z"
+   * pickDate = D + 30 天 → |diff| = 30 ≤ 30 → 应命中
+   * pickDate = D + 31 天 → |diff| = 31 > 30 → 不命中
+   */
+  it("EK-W3: 对称右边界 — D+30 天精选命中；D+31 天精选不命中", async () => {
+    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+    addSource();
+
+    const D = new Date("2026-06-01T04:00:00Z");
+
+    // D + 30 天
+    const day30Future = new Date(D.getTime() + 30 * 86400_000).toISOString().slice(0, 10);
+    // D + 31 天
+    const day31Future = new Date(D.getTime() + 31 * 86400_000).toISOString().slice(0, 10);
+
+    insertPhoto("hero_plus30", "/FuturePlus30/hero.jpg", null);
+    insertPhoto("hero_plus31", "/FuturePlus31/hero.jpg", null);
+
+    addDailyPick("pick-plus30", "hero_plus30", day30Future, []);
+    addDailyPick("pick-plus31", "hero_plus31", day31Future, []);
+
+    const { excludeIds } = await getRecentPickedEventKeys(30, D);
+
+    // D+30 天：|diff|=30 ≤ 30 且 ≠ 今天 → 命中
+    expect(excludeIds.has("hero_plus30")).toBe(true);
+
+    // D+31 天：|diff|=31 > 30 → 不命中
+    expect(excludeIds.has("hero_plus31")).toBe(false);
+  });
+
+  /**
+   * EK-W4: 过去方向回归 — D−5 天命中，D−31 天不命中
+   *
+   * D = "2026-06-01T04:00:00Z"
+   * pickDate = D − 5 天 → |diff| = 5 ≤ 30 → 命中（保持原有行为）
+   * pickDate = D − 31 天 → |diff| = 31 > 30 → 不命中（原有行为）
+   */
+  it("EK-W4: 过去方向回归 — D−5 天命中；D−31 天不命中", async () => {
+    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+    addSource();
+
+    const D = new Date("2026-06-01T04:00:00Z");
+
+    // D − 5 天
+    const day5Past = new Date(D.getTime() - 5 * 86400_000).toISOString().slice(0, 10);
+    // D − 31 天
+    const day31Past = new Date(D.getTime() - 31 * 86400_000).toISOString().slice(0, 10);
+
+    insertPhoto("hero_minus5", "/Past5/hero.jpg", null);
+    insertPhoto("hero_minus31", "/Past31/hero.jpg", null);
+
+    addDailyPick("pick-minus5", "hero_minus5", day5Past, []);
+    addDailyPick("pick-minus31", "hero_minus31", day31Past, []);
+
+    const { excludeIds } = await getRecentPickedEventKeys(30, D);
+
+    // D−5 天：|diff|=5 ≤ 30 → 命中
+    expect(excludeIds.has("hero_minus5")).toBe(true);
+
+    // D−31 天：|diff|=31 > 30 → 不命中
+    expect(excludeIds.has("hero_minus31")).toBe(false);
+  });
 });
 
 // =========================================================================

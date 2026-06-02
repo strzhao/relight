@@ -11,7 +11,7 @@
  */
 
 import path from "node:path";
-import { and, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, lte, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
 import { haversineMeters } from "../../lib/geo";
 import { getSettingValue } from "../../lib/settings";
@@ -108,17 +108,24 @@ export async function getRecentPickedEventKeys(
   daysBack = 30,
   now: Date = new Date(),
 ): Promise<{ eventKeys: Set<string>; excludeIds: Set<string> }> {
-  const cutoff = new Date(now.getTime() - daysBack * 86400_000).toISOString().slice(0, 10);
+  const cutoffBefore = new Date(now.getTime() - daysBack * 86400_000).toISOString().slice(0, 10);
+  const cutoffAfter = new Date(now.getTime() + daysBack * 86400_000).toISOString().slice(0, 10);
   const nowDate = now.toISOString().slice(0, 10);
 
-  // 扫描 daily_picks（旧格式）— 仅 cutoff <= pick_date < nowDate（不含未来）
+  // 扫描 daily_picks（旧格式）— 对称窗口 [cutoffBefore, cutoffAfter]，排除目标日自身
   const pickRows = await db
     .select({
       photoId: schema.dailyPicks.photoId,
       members: schema.dailyPicks.members,
     })
     .from(schema.dailyPicks)
-    .where(and(gte(schema.dailyPicks.pickDate, cutoff), lt(schema.dailyPicks.pickDate, nowDate)));
+    .where(
+      and(
+        gte(schema.dailyPicks.pickDate, cutoffBefore),
+        lte(schema.dailyPicks.pickDate, cutoffAfter),
+        ne(schema.dailyPicks.pickDate, nowDate),
+      ),
+    );
 
   const excludeIds = new Set<string>();
   for (const r of pickRows) {
@@ -140,7 +147,13 @@ export async function getRecentPickedEventKeys(
       schema.dailyPicks,
       sql`${schema.dailyPicks.id} = ${schema.dailyPickEntries.dailyPickId}`,
     )
-    .where(and(gte(schema.dailyPicks.pickDate, cutoff), lt(schema.dailyPicks.pickDate, nowDate)));
+    .where(
+      and(
+        gte(schema.dailyPicks.pickDate, cutoffBefore),
+        lte(schema.dailyPicks.pickDate, cutoffAfter),
+        ne(schema.dailyPicks.pickDate, nowDate),
+      ),
+    );
 
   for (const r of entryRows) {
     excludeIds.add(r.photoId);
