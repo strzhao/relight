@@ -1075,3 +1075,17 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**: 任何"PM2 进程会 spawn 依赖 PATH 的命令"场景，env 都要显式带 PATH；不能假设 launchd/systemd 启动环境的 PATH 与交互 shell 一致。`workers-control.ts` 早已就此 ENOENT 写了 hint 注释（"PM2 化部署需在 ecosystem env 中显式注入 PATH"），本次落实。
 
 **Evidence**: `ecosystem.config.cjs` relight-api/relight-workers env.PATH；`apps/backend/src/routes/workers-control.ts` spawn pnpm + ENOENT hint；feat commit `102078f`。相关：[[后端-api-纳入-pm2-开机自启]]
+
+### [2026-06-02] headless CI 跑 xcodebuild 两坑：scheme 必须入库 shared + runner 默认 Xcode 太旧编不过 macOS 14 SwiftUI API
+
+<!-- tags: xcodebuild, ci, github-actions, shared-scheme, xcshareddata, xcode-version, macos-15, setup-xcode, swiftui, openSettings, mac-app, release, bug -->
+
+为 mac App 配 release workflow 时踩两个 CI-only 坑（本地全绿）：
+
+**坑1 — scheme 未共享**：Xcode 本地会自动生成 scheme（`xcodebuild -list` 能看到 `Relight`），但它在 **gitignored 的 `xcuserdata/`** 里。headless CI checkout 后 `xcodebuild -scheme Relight` 找不到。修复：提交 shared scheme 到 `Relight.xcodeproj/xcshareddata/xcschemes/Relight.xcscheme`（BlueprintIdentifier 从 project.pbxproj 的 PBXNativeTarget UUID 取，ArchiveAction buildConfiguration=Release）。
+
+**坑2 — runner 默认 Xcode 太旧**：`macos-14` runner 默认 Xcode 15.4 (Swift 5.10) 编 `@Environment(\.openSettings)`（macOS 14 SwiftUI API）报 `error: generic parameter 'T' could not be inferred` / `cannot infer key path type`，archive 退出码 65；本地 Xcode 26.5 正常。修复：`runs-on: macos-15` + `maxim-lobanov/setup-xcode@v1` with `xcode-version: latest-stable`。
+
+**外推**：mac App 的 CI 构建——(a) 务必把 scheme 入库为 shared；(b) 别信 runner 默认 Xcode，按 App 用到的 SDK/API 明确 pin Xcode 版本。另：本地 `pnpm test` 因 PM2 workers 在跑（抢 BullMQ 任务）+ 真实 SQLite/Redis 数据，acceptance 测试假超时失败；CI（隔离 Redis service + clean checkout）才是权威门，pre-push 失败先判断是否环境污染再决定 --no-verify。
+
+**Evidence**: release run 26827193970（Xcode 15.4 archive FAIL exit 65）→ 26827389722（macos-15 + latest Xcode PASS 52s）；`apps/mac/Relight.xcodeproj/xcshareddata/xcschemes/Relight.xcscheme`；commit 7f013da。相关：[[macos-app-发布机制-github-release-homebrew]]

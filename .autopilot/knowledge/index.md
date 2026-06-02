@@ -1,6 +1,7 @@
 # Knowledge Index
 
 ## Decisions
+- [2026-06-02] macOS App 发布机制：GitHub Release + Homebrew cask tap；私有源码仓库做 brew 分发必须改公开（cask url 须匿名可下载，私有 release 资产匿名 404） | tags: release, github-actions, homebrew, cask, tap, xcodebuild, mac-app, distribution, private-repo, public, deployment, design | → decisions.md
 - [2026-06-02] 后端 API 纳入 PM2 开机自启：复用现有 resurrect launchd（命名误导的 pm2-qwen.plist 实为通用 resurrect），仅 pm2 save 不跑 pm2 startup | tags: pm2, ecosystem, launchd, resurrect, autostart, boot, backend-api, deployment, ops, mac-app, design | → decisions.md
 - [2026-05-16] 事件键（dirname::takenAt 同日）前置去重替代 prompt 标题软约束：qwen-vl 忽略 soft constraint → 规则方案 8→2 | tags: daily-selection, candidate-pool, event-key, dedup, title-duplication, rule-based, design | → decisions.md
 - [2026-05-15] candidate-pool 触底回填第 5 源 fillUp：聚类压缩 < maxN 时启动兜底，pool1 代表 pin 住，避免 entries 断崖 | tags: daily-selection, candidate-pool, fillUp, fallback, theme-conflict, primary-candidate-source, type-narrowing, pool1-stability, design | → decisions.md
@@ -31,6 +32,7 @@
 - [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
 
 ## Patterns
+- [2026-06-02] headless CI 跑 xcodebuild 两坑：scheme 必须入库 shared（xcuserdata 被 gitignore）+ runner 默认 Xcode 15.4 编不过 macOS 14 SwiftUI API（\.openSettings），需 macos-15 + setup-xcode latest-stable | tags: xcodebuild, ci, github-actions, shared-scheme, xcshareddata, xcode-version, macos-15, setup-xcode, swiftui, mac-app, release, bug | → patterns.md
 - [2026-06-02] PM2 app env 必须显式注入 process.env.PATH，否则 boot resurrect 时 spawn 子进程（pnpm）ENOENT；交互式 pm2 start 因继承 shell PATH 看不出，只在开机后暴露 | tags: pm2, ecosystem, env, path, boot, resurrect, launchd, spawn, enoent, child-process, pnpm, ops, bug | → patterns.md
 - [2026-05-15] 红队 acceptance fixture 自身 bug：contract-checker + qa-reviewer 双重证实实现正确时走 review-accept gate，不修测试不破坏实现 | tags: vitest, acceptance-test, fixture, red-team, anti-rationalization, autopilot, contract-checker, bug | → patterns.md
 - [2026-05-15] candidate-pool / 主流程加新 SQL JOIN 必须同步补所有 acceptance fixture 表 DDL | tags: vitest, acceptance-test, fixture, schema, sql-join, no-such-table, daily-selection, bug | → patterns.md

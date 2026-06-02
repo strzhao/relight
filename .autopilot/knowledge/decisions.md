@@ -611,3 +611,15 @@
 - 非破坏性验收：用 `pm2 delete relight-api && pm2 resurrect` 模拟 boot，绝不 `pm2 kill`（qwen 是用户在用的 31GB AI 服务）。
 
 **Evidence**: `ecosystem.config.cjs` relight-api 条目；6 条 det-machine 谓词全 PASS（P5 delete→resurrect 复活 API 且 qwen pid 3982 未变）；feat commit `102078f`。相关：[[pm2-env-path-boot-resurrect-spawn-enoent]]
+
+### [2026-06-02] macOS App 发布机制：GitHub Release + Homebrew cask tap；私有源码仓库做 brew 分发必须改公开
+
+<!-- tags: release, github-actions, homebrew, cask, tap, xcodebuild, mac-app, distribution, private-repo, public, deployment, design -->
+
+参考 claude-code-buddy 为「拾光」mac App 实现 tag 驱动发布：推送 `vX.Y.Z` → `.github/workflows/release.yml` 在 macOS runner `xcodebuild archive`（Release/arm64/ad-hoc）→ 打包 `Relight-vX.Y.Z.zip` → GitHub Release → job2 下载算 sha256 → 更新 `strzhao/homebrew-relight` tap 的 cask → sync 回 main。relight 用 Xcode 工程（archive 自动产出完整 .app），比 buddy 的 SwiftPM 流程简单；无 CLI 故 cask 去掉 `binary` 行；用户确认仅 arm64。
+
+**关键决策（私有 → 公开）**：buddy 是 public 仓库，relight 原为 **private**。Homebrew cask 的 `url` 必须**匿名可下载**，私有仓库 release 资产对匿名请求返回 **404**（CI job2 的 `curl` 与本地匿名 curl 都 404，但带 auth 的 `gh release download` 能下）。用户选择把 relight 改为 public（`gh repo edit --visibility public --accept-visibility-change-consequences`）而非把资产托管到公开 tap 仓库。改公开后匿名下载 200，brew 全链路打通。
+
+**least-privilege token**：job2 checkout 用默认 `GITHUB_TOKEN`（对本仓库 contents:write，承担 sync-back-to-main），跨仓库推 tap 仅在该步注入 `TAP_GITHUB_TOKEN`；附带收益：GITHUB_TOKEN 的 push 不触发 ci.yml，消除冗余 CI run。建议后续把 TAP token 换成仅限 homebrew-relight 的 fine-grained PAT。
+
+**Evidence**: `.github/workflows/release.yml`、`homebrew/Casks/relight.rb`、tap 仓库 `strzhao/homebrew-relight`；release v0.1.0 资产 sha256 f9f66841…；`brew install --cask relight` → /Applications/Relight.app 0.1.0；commit 7f013da + cask-sync 538f052。相关：[[headless-ci-xcodebuild-shared-scheme-xcode-version]]
