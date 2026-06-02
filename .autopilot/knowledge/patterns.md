@@ -1089,3 +1089,16 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**：mac App 的 CI 构建——(a) 务必把 scheme 入库为 shared；(b) 别信 runner 默认 Xcode，按 App 用到的 SDK/API 明确 pin Xcode 版本。另：本地 `pnpm test` 因 PM2 workers 在跑（抢 BullMQ 任务）+ 真实 SQLite/Redis 数据，acceptance 测试假超时失败；CI（隔离 Redis service + clean checkout）才是权威门，pre-push 失败先判断是否环境污染再决定 --no-verify。
 
 **Evidence**: release run 26827193970（Xcode 15.4 archive FAIL exit 65）→ 26827389722（macos-15 + latest Xcode PASS 52s）；`apps/mac/Relight.xcodeproj/xcshareddata/xcschemes/Relight.xcscheme`；commit 7f013da。相关：[[macos-app-发布机制-github-release-homebrew]]
+
+<!-- tags: daily-selection, candidate-pool, dedup, getRecentPickedEventKeys, date-window, ordering-assumption, backfill, out-of-order, hero-collision, scheduled-job, bug -->
+## [2026-06-02] 每日精选 30 天去重窗口单向 `lt(pickDate, now)` 隐含"按日期顺序生成"假设 → 乱序回填时跨天 hero 撞图
+
+**现象**：6-01 与 6-02 两天精选的 rank0 hero（即同步进 daily_picks 主记录 + 合成壁纸的那张）是同一张高分老照片，其余 rank 不同。
+
+**根因**：`candidate-pool.ts:getRecentPickedEventKeys(daysBack, now)` 的去重窗口是 `gte(pickDate, now-30d) AND lt(pickDate, now当日)`——**单向、只看严格早于目标日**。定时任务（北京每天 6:00）先生成了 6-02 并选中该照片；事后回填 6-01 时 `nowDate="2026-06-01"`，谓词 `pickDate < "2026-06-01"` 把已存在的 6-02（未来方向）排除在去重池外，于是 6-01 重复选中同一张。本质：窗口隐含"精选总是按日期递增顺序生成"，任何乱序（回填历史日期/手动重跑/补漏）都触发。
+
+**修复**：改为以目标日为中心的**对称窗口** `gte(now-30d) AND lte(now+30d) AND ne(now当日)`。`ne` 不可省——重跑当天精选时当天旧记录不应自我排除（否则强制换图）。两处 where（daily_picks 扫描 + daily_pick_entries JOIN 扫描）同步改。
+
+**外推**：凡是"近 N 天去重 / 防重复"的时间窗口，若数据可能乱序写入（回填、补跑、并发、时区错位），单向 `<` 窗口都会漏掉"未来方向"的已有记录。该用以目标为中心的对称窗口 + 显式排除目标自身。SQLite 文本日期列 `YYYY-MM-DD` 字典序==日期序，gte/lte/ne 直接可用。
+
+**Evidence**: 真实 DB 求值 `getRecentPickedEventKeys(30, 2026-06-01).excludeIds` 修复后含 d88ef318（6-02 hero）；event-key.acceptance.test.ts +4 用例 35 passed；commit 1685df5。相关：[[2026-05-16]] 事件键去重、[[2026-05-09]] 4 源混采 30 天去重。
