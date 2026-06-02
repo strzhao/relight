@@ -108,9 +108,13 @@ export async function getRecentPickedEventKeys(
   daysBack = 30,
   now: Date = new Date(),
 ): Promise<{ eventKeys: Set<string>; excludeIds: Set<string> }> {
-  const cutoffBefore = new Date(now.getTime() - daysBack * 86400_000).toISOString().slice(0, 10);
-  const cutoffAfter = new Date(now.getTime() + daysBack * 86400_000).toISOString().slice(0, 10);
-  const nowDate = now.toISOString().slice(0, 10);
+  // 窗口边界与目标日均按北京日期计算，与 dailyPicks.pickDate（formatPickDate 用北京时区）
+  // 保持一致。若改用 UTC 日期（now.toISOString()），在北京凌晨时段（= UTC 前一日）会与
+  // pickDate 跨天错位，导致 ne(pickDate, nowDate) 误把"昨天的精选"排除出去重池。
+  const toBeijingDate = (ms: number) => new Date(ms + 8 * 3600_000).toISOString().slice(0, 10);
+  const cutoffBefore = toBeijingDate(now.getTime() - daysBack * 86400_000);
+  const cutoffAfter = toBeijingDate(now.getTime() + daysBack * 86400_000);
+  const nowDate = toBeijingDate(now.getTime());
 
   // 扫描 daily_picks（旧格式）— 对称窗口 [cutoffBefore, cutoffAfter]，排除目标日自身
   const pickRows = await db
