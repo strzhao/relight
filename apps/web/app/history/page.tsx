@@ -47,7 +47,7 @@ export default function HistoryPage() {
   const showError = error && picks.length === 0;
 
   return (
-    <main className="paper-grain mx-auto min-h-screen max-w-4xl px-5 pt-14 pb-32 sm:px-8 sm:pt-20 lg:pt-24">
+    <main className="paper-grain mx-auto min-h-screen max-w-5xl px-5 pt-14 pb-32 sm:px-8 sm:pt-20 lg:pt-24">
       {/* Masthead — folio number, title, subtitle, then a hairline rule */}
       <header className="mb-12 sm:mb-16">
         <div className="flex items-baseline justify-between gap-4">
@@ -136,16 +136,21 @@ function SkeletonList() {
     <ul className="divide-y divide-foreground/8 border-foreground/8 border-y">
       {Array.from({ length: 5 }).map((_, i) => (
         // 静态占位列表 — 仅用于初次加载视觉占位，无需 stable id
-        // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders
-        <li key={i} className="flex gap-x-7 py-9 lg:gap-x-9">
-          <div className="aspect-square w-20 animate-pulse bg-foreground/5 sm:w-22 lg:w-24" />
-          <div className="hidden w-32 flex-col gap-2 sm:flex lg:w-36">
-            <div className="h-12 w-16 animate-pulse bg-foreground/5" />
-            <div className="h-3 w-14 animate-pulse bg-foreground/5" />
-          </div>
-          <div className="flex flex-1 flex-col gap-3">
-            <div className="h-3 w-32 animate-pulse bg-foreground/5" />
-            <div className="h-6 w-3/4 animate-pulse bg-foreground/5" />
+        <li
+          // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders
+          key={i}
+          className="grid grid-cols-1 gap-y-5 py-7 sm:gap-y-6 sm:py-9 lg:grid-cols-[55%_1fr] lg:gap-x-9 lg:gap-y-0 lg:py-11"
+        >
+          <div
+            className="w-full max-h-64 sm:max-h-60 lg:max-h-72 animate-pulse bg-foreground/5"
+            style={{ aspectRatio: "1.3333333333333333" }}
+          />
+          <div className="flex flex-col justify-center gap-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="h-5 w-28 animate-pulse bg-foreground/5" />
+              <div className="h-4 w-20 animate-pulse bg-foreground/5" />
+            </div>
+            <div className="h-7 w-3/4 animate-pulse bg-foreground/5" />
             <div className="h-3 w-full animate-pulse bg-foreground/5" />
             <div className="h-3 w-5/6 animate-pulse bg-foreground/5" />
           </div>
