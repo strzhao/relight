@@ -5,8 +5,8 @@ import sharp from "sharp";
 import { convertHeicToJpeg, isHeicBuffer } from "./heic";
 import { extractFrames } from "./video/ffmpeg";
 
-const THUMBNAIL_WIDTH = 400;
-const THUMBNAIL_HEIGHT = 400;
+const THUMBNAIL_WIDTH = 800;
+const THUMBNAIL_HEIGHT = 800;
 
 /** 视频扩展名（与 storage adapter 一致） */
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]);
@@ -43,7 +43,7 @@ export async function generateThumbnail(
       const jpegBuffer = await convertHeicToJpeg(imageBuffer, {
         maxWidth: THUMBNAIL_WIDTH,
         maxHeight: THUMBNAIL_HEIGHT,
-        quality: 80,
+        quality: 85,
       });
       await fs.writeFile(outputPath, jpegBuffer);
       return outputPath;
@@ -52,7 +52,7 @@ export async function generateThumbnail(
 
   await sharp(imageBuffer)
     .resize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 80 })
+    .jpeg({ quality: 85 })
     .toFile(outputPath);
 
   return outputPath;

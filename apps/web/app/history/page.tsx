@@ -142,7 +142,7 @@ function SkeletonList() {
           className="grid grid-cols-1 gap-y-5 py-7 sm:gap-y-6 sm:py-9 lg:grid-cols-[55%_1fr] lg:gap-x-9 lg:gap-y-0 lg:py-11"
         >
           <div
-            className="w-full max-h-64 sm:max-h-60 lg:max-h-72 animate-pulse bg-foreground/5"
+            className="w-auto max-w-full max-h-[28rem] animate-pulse bg-foreground/5"
             style={{ aspectRatio: "1.3333333333333333" }}
           />
           <div className="flex flex-col justify-center gap-3">

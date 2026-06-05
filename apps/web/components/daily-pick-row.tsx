@@ -96,7 +96,7 @@ export function DailyPickRow({ pick, index }: DailyPickRowProps) {
       >
         {/* Photo — natural ratio, larger on all breakpoints */}
         <figure
-          className="relative w-full max-h-64 sm:max-h-60 lg:max-h-72 overflow-hidden bg-muted ring-1 ring-foreground/10 transition-all duration-150 group-hover:shadow-[0_18px_42px_-18px_oklch(0.155_0.006_95_/_0.45)] group-hover:ring-foreground/20"
+          className="relative w-auto max-w-full max-h-[28rem] overflow-hidden bg-muted ring-1 ring-foreground/10 transition-all duration-150 group-hover:shadow-[0_18px_42px_-18px_oklch(0.155_0.006_95_/_0.45)] group-hover:ring-foreground/20"
           style={{ aspectRatio: String(aspectRatio) }}
         >
           {thumbBroken ? (
