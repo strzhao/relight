@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import OSLog
+import UserNotifications
 
 actor WallpaperCoordinator {
   private let client: RelightClient
@@ -32,11 +33,13 @@ actor WallpaperCoordinator {
       let pick = try await client.fetchTodayPick()
       guard let photo = pick.photo else {
         logger.warning("today pick has no photo")
+        await sendNotification(title: "壁纸未更新", body: "今日精选暂无数据，请等待每日精选任务完成后重试")
         return
       }
 
       // 图片 + 已有合成图 URL → 分屏下载合成图
       if !photo.isVideo, pick.composedImageUrl != nil {
+        var failedScreens = 0
         for screen in NSScreen.screens {
           let scale = screen.backingScaleFactor
           let w = Int(screen.frame.width * scale)
@@ -54,11 +57,17 @@ actor WallpaperCoordinator {
               try NSWorkspace.shared.setDesktopImageURL(originalURL, for: screen, options: imageOptions)
             } catch {
               logger.error("screen \(screen.localizedName) 原图也失败: \(String(describing: error))")
+              failedScreens += 1
             }
           }
         }
         await MainActor.run { [pick] in settings.lastAppliedPickDate = pick.pickDate }
         logger.info("壁纸已更新（合成图路径）: \(pick.pickDate)")
+        if failedScreens > 0 {
+          await sendNotification(title: "壁纸部分更新", body: "\(failedScreens) 个屏幕设置失败，已为其余屏幕更新壁纸")
+        } else {
+          await sendNotification(title: "壁纸已更新", body: "今日精选 — \(pick.pickDate)")
+        }
         return
       }
 
@@ -68,10 +77,33 @@ actor WallpaperCoordinator {
       let url = try await engine.apply(photo: photo, sourceURL: sourceURL, on: NSScreen.screens)
       await MainActor.run { [pick] in settings.lastAppliedPickDate = pick.pickDate }
       logger.info("壁纸已更新: \(pick.pickDate) \(photo.isVideo ? "video" : "image") → \(url.path)")
+      await sendNotification(title: "壁纸已更新", body: "今日精选 — \(pick.pickDate)")
     } catch RelightError.noPickAvailable {
       logger.warning("当天精选未生成")
+      await sendNotification(title: "壁纸未更新", body: "当天精选尚未生成，请稍后再试")
     } catch {
       logger.error("刷新壁纸失败: \(String(describing: error))")
+      await sendNotification(title: "壁纸更新失败", body: error.localizedDescription)
+    }
+  }
+
+  /// 发送本地用户通知（所有结果路径都通知，确保用户感知）
+  private func sendNotification(title: String, body: String) async {
+    let center = UNUserNotificationCenter.current()
+    let content = UNMutableNotificationContent()
+    content.title = title
+    content.body = body
+    content.sound = .default
+    let request = UNNotificationRequest(
+      identifier: "wallpaper-\(Date().timeIntervalSince1970)",
+      content: content,
+      trigger: nil  // 立即送达
+    )
+    do {
+      try await center.add(request)
+      logger.info("通知已发送: \(title) — \(body)")
+    } catch {
+      logger.error("发送通知失败: \(error.localizedDescription)")
     }
   }
 
@@ -87,14 +119,14 @@ actor WallpaperCoordinator {
     }
   }
 
-  /// 后台 Timer（每小时检查；07:00 后未应用今天则触发）
+  /// 后台 Timer（每小时检查；01:00 后未应用今天则触发）
   func startScheduler() async {
     while !Task.isCancelled {
       try? await Task.sleep(for: .seconds(3600))
       let today = BeijingTime.todayString()
       let comp = BeijingTime.nowComponents()
       let last = await MainActor.run { settings.lastAppliedPickDate }
-      if (comp.hour ?? 0) >= 7 && last != today {
+      if (comp.hour ?? 0) >= 1 && last != today {
         logger.info("scheduler tick: triggering refreshNow")
         await refreshNow()
       }

@@ -295,13 +295,15 @@ function HeroContentMulti({
   }, []);
 
   const startInterval = useCallback(() => {
-    if (!isMultiple) return;
-    stopInterval();
-    intervalRef.current = setInterval(() => {
-      const next = (currentIdxRef.current + 1) % total;
-      transitionTo(next);
-    }, AUTO_ROTATE_MS);
-  }, [isMultiple, total, stopInterval, transitionTo]);
+    // 临时禁用自动轮播
+    return;
+    // if (!isMultiple) return;
+    // stopInterval();
+    // intervalRef.current = setInterval(() => {
+    //   const next = (currentIdxRef.current + 1) % total;
+    //   transitionTo(next);
+    // }, AUTO_ROTATE_MS);
+  }, []);
 
   // 手动 nav：切换后重置自动计时
   const navGoTo = useCallback(
@@ -608,11 +610,9 @@ function EntrySeriesStrip({
   ];
 
   return (
-    // biome-ignore lint/a11y/useFocusableInteractive: 容器只负责 ARIA 分组，焦点流转由内部 button 承接
     <div
       className="flex gap-2 overflow-x-auto pb-1"
       data-testid="entry-series-strip"
-      // biome-ignore lint/a11y/useSemanticElements: 视觉是横向滚动的图片缩略图列表，<select> 无法承载自定义渲染
       role="listbox"
       aria-label="系列照片"
       style={{ scrollbarWidth: "none" }}
@@ -624,7 +624,6 @@ function EntrySeriesStrip({
           <button
             key={item.photoId}
             type="button"
-            // biome-ignore lint/a11y/useSemanticElements: listbox 内的 button + role=option 是有意的可点击缩略图
             role="option"
             aria-selected={isActive}
             data-testid="entry-series-thumb"

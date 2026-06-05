@@ -22,13 +22,13 @@ import { runtimeConfigRouter } from "./routes/runtime-config";
 import { workersControlRouter } from "./routes/workers-control";
 import { workersLogsRouter } from "./routes/workers-logs";
 
-/** 注册每日精选重复任务（每天北京时间 6:00 AM） */
+/** 注册每日精选重复任务（每天北京时间凌晨 0:00） */
 export async function registerDailyRepeatableJob(): Promise<void> {
   await dailyQueue.add(
     "daily-selection-cron",
     {},
     {
-      repeat: { pattern: "0 6 * * *", tz: "Asia/Shanghai" },
+      repeat: { pattern: "0 0 * * *", tz: "Asia/Shanghai" },
       jobId: "daily-selection-cron",
     },
   );

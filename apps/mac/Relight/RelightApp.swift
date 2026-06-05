@@ -1,12 +1,15 @@
 import SwiftUI
 import OSLog
 import ImageIO
+import UserNotifications
 
 @main
 struct RelightApp: App {
     @StateObject private var settings = AppSettings.shared
     @StateObject private var commandBus = MenuBarCommandBus()
     @StateObject private var healthMonitor = MenuBarHealthMonitor()
+
+    fileprivate static let logger = Logger(subsystem: "app.relight.mac", category: "RelightApp")
 
     // 单例式持有 coordinator/autostart，避免 actor 在 init 内被 capture self 问题
     fileprivate static var sharedCoordinator: WallpaperCoordinator?
@@ -39,6 +42,17 @@ struct RelightApp: App {
         Task.detached {
             await coordinator.bootstrapOnLaunch()
             await coordinator.startScheduler()
+        }
+
+        // 启动时请求通知权限（壁纸更新结果需要通知用户）
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                Self.logger.error("通知权限请求失败: \(error.localizedDescription)")
+            } else if granted {
+                Self.logger.info("通知权限已授予")
+            } else {
+                Self.logger.warning("通知权限被拒绝")
+            }
         }
 
         // 启动时同步 autostart 状态（首次注册可能弹系统授权）

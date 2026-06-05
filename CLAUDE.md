@@ -101,7 +101,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 ### 后端架构 (apps/backend)
 
-**入口**: `src/index.ts` → 启动 `@hono/node-server`，监听 `config.port` (默认 3000)，启动时注册每日精选定时任务（每天北京时间 6:00 AM）。
+**入口**: `src/index.ts` → 启动 `@hono/node-server`，监听 `config.port` (默认 3000)，启动时注册每日精选定时任务（每天北京时间凌晨 0:00）。
 **应用工厂**: `src/app.ts` 的 `createApp()` 组装所有路由，测试可直接调用无需网络。
 
 **路由** (`src/routes/`): 每个文件导出一个 `new Hono()` 子路由:
@@ -175,7 +175,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                    解析 JSON → upsert tags / photoTags / photoAnalyses
                                     ↓
-                        daily-selection job (每天早 6:00 定时)
+                        daily-selection job (每天凌晨 0:00 定时)
                                     ↓
                    候选池: 4 源混采 + 跨表去重 (daily_picks ∪ daily_pick_entries.members)
                                     ↓

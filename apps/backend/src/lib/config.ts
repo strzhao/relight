@@ -7,7 +7,7 @@ export const config = {
    * dev `pnpm --filter @relight/backend dev` cwd=apps/backend，fallback ../.. 命中根 */
   repoRoot: process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
   port: Number.parseInt(process.env.PORT ?? "3000", 10),
-  /** 拾光 web app 常驻端口（避开 3000-3499 dev / 4001-5499 worktree 区） */
+  /** 拾光 web app 常驻端口（默认 3601，worktree 通过 WEB_PORT env 覆盖） */
   webPort: Number.parseInt(process.env.WEB_PORT ?? "3601", 10),
   databasePath: process.env.DATABASE_PATH ?? "./data/relight.db",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",

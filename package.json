@@ -23,7 +23,11 @@
     "workers:stop": "pm2 stop relight-workers",
     "workers:reload": "pm2 reload relight-workers",
     "workers:logs": "pm2 logs relight-workers --lines 100",
-    "workers:status": "pm2 status"
+    "workers:status": "pm2 status",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop relight-api relight-workers relight-web",
+    "pm2:reload": "pm2 reload relight-api relight-workers relight-web",
+    "pm2:status": "pm2 status"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
