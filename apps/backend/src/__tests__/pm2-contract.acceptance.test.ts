@@ -158,9 +158,9 @@ describe("ecosystem.config.cjs — relight-api 条目契约", () => {
   }
 
   // ── 数组长度 ──────────────────────────────────────────────────────────
-  it("apps.length === 2（workers + api 共 2 个进程）", () => {
+  it("apps.length === 3（workers + api + web 共 3 个进程）", () => {
     const cfg = loadConfig();
-    expect(cfg.apps, "apps 数组应恰好包含 2 个条目").toHaveLength(2);
+    expect(cfg.apps, "apps 数组应恰好包含 3 个条目").toHaveLength(3);
   });
 
   // ── relight-api 存在 ──────────────────────────────────────────────────
@@ -170,9 +170,9 @@ describe("ecosystem.config.cjs — relight-api 条目契约", () => {
   });
 
   // ── 字段精确值 ───────────────────────────────────────────────────────
-  it("relight-api.cwd === './apps/backend'", () => {
+  it("relight-api.cwd 指向 apps/backend 目录", () => {
     const entry = findApp("relight-api");
-    expect(entry?.cwd).toBe("./apps/backend");
+    expect(entry?.cwd).toBe(path.join(REPO_ROOT, "apps/backend"));
   });
 
   it("relight-api.script === 'src/index.ts'", () => {
