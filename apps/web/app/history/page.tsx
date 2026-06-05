@@ -139,13 +139,13 @@ function SkeletonList() {
         <li
           // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders
           key={i}
-          className="grid grid-cols-1 gap-y-5 py-7 sm:gap-y-6 sm:py-9 lg:grid-cols-[55%_1fr] lg:gap-x-9 lg:gap-y-0 lg:py-11"
+          className="grid grid-cols-1 gap-y-5 py-7 sm:gap-y-6 sm:py-9 lg:grid-cols-[55%_1fr] lg:items-start lg:gap-x-9 lg:gap-y-0 lg:py-11"
         >
           <div
             className="w-auto max-w-full max-h-[28rem] animate-pulse bg-foreground/5"
             style={{ aspectRatio: "1.3333333333333333" }}
           />
-          <div className="flex flex-col justify-center gap-3">
+          <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-4">
               <div className="h-5 w-28 animate-pulse bg-foreground/5" />
               <div className="h-4 w-20 animate-pulse bg-foreground/5" />

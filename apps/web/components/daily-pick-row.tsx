@@ -92,7 +92,7 @@ export function DailyPickRow({ pick, index }: DailyPickRowProps) {
     <li>
       <Link
         href={`/photos/${pick.photoId}`}
-        className="group grid grid-cols-1 gap-y-5 py-7 sm:gap-y-6 sm:py-9 lg:grid-cols-[55%_1fr] lg:gap-x-9 lg:gap-y-0 lg:py-11"
+        className="group grid grid-cols-1 gap-y-5 py-7 sm:gap-y-6 sm:py-9 lg:grid-cols-[55%_1fr] lg:items-start lg:gap-x-9 lg:gap-y-0 lg:py-11"
       >
         {/* Photo — natural ratio, larger on all breakpoints */}
         <figure
@@ -115,7 +115,7 @@ export function DailyPickRow({ pick, index }: DailyPickRowProps) {
         </figure>
 
         {/* Text area */}
-        <div className="flex min-w-0 flex-col justify-center">
+        <div className="flex min-w-0 flex-col">
           {/* Top row: date (left) + issue mark & score (right) */}
           <div className="mb-3 flex items-center justify-between gap-4">
             <div className="inline-flex items-baseline gap-1.5 text-[10px] tracking-[0.22em] text-muted-foreground uppercase">
@@ -148,7 +148,7 @@ export function DailyPickRow({ pick, index }: DailyPickRowProps) {
           </h2>
 
           <p
-            className="font-serif-sc mt-3 line-clamp-2 max-w-[58ch] text-[0.95rem] leading-[1.7] text-foreground/65 lg:text-[1rem]"
+            className="font-serif-sc mt-3 line-clamp-4 max-w-[58ch] text-[0.95rem] leading-[1.7] text-foreground/65 lg:text-[1rem]"
             style={{ textWrap: "pretty" }}
           >
             {pick.narrative}
