@@ -19,6 +19,7 @@ export const API_ROUTES = {
   },
   daily: {
     today: "/api/daily/today",
+    select: "/api/daily/today/select",
     list: "/api/daily",
     detail: (id: string) => `/api/daily/${id}`,
   },

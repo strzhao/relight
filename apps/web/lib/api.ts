@@ -52,6 +52,14 @@ export function getDailyPick(id: string) {
   return fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.detail(id));
 }
 
+/** 手动设置今日精选主照片（弱操作）。Flat export for test mocking. */
+export function selectDailyPick(photoId: string) {
+  return fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.select, {
+    method: "POST",
+    body: JSON.stringify({ photoId }),
+  });
+}
+
 export const api = {
   health: () => fetchApi<{ status: string }>(API_ROUTES.health),
 
@@ -97,6 +105,7 @@ export const api = {
 
   daily: {
     today: () => fetchApi<ApiResponse<DailyPick>>(API_ROUTES.daily.today),
+    select: (photoId: string) => selectDailyPick(photoId),
     list: (params?: URLSearchParams) =>
       fetchApi<PaginatedResponse<DailyPick>>(`${API_ROUTES.daily.list}?${params ?? ""}`),
   },

@@ -1,7 +1,7 @@
 "use client";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { getApiUrl, getTodayPick } from "@/lib/api";
+import { getApiUrl, getTodayPick, selectDailyPick } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   API_ROUTES,
@@ -128,7 +128,13 @@ export function DailyHero({ dailyPick, initialEntryIndex = 0 }: DailyHeroProps) 
       ) : state.status === "error" ? (
         <HeroFrame variant="error" message={state.message} />
       ) : (
-        <HeroContent pick={state.pick} initialEntryIndex={initialEntryIndex} />
+        <HeroContent
+          pick={state.pick}
+          initialEntryIndex={initialEntryIndex}
+          onPhotoIdChange={(photoId) =>
+            setState({ status: "content", pick: { ...state.pick, photoId } })
+          }
+        />
       )}
     </div>
   );
@@ -137,9 +143,11 @@ export function DailyHero({ dailyPick, initialEntryIndex = 0 }: DailyHeroProps) 
 function HeroContent({
   pick,
   initialEntryIndex = 0,
+  onPhotoIdChange,
 }: {
   pick: DailyPick;
   initialEntryIndex?: number;
+  onPhotoIdChange?: (photoId: string) => void;
 }) {
   const entries = pick.entries ?? [];
 
@@ -148,7 +156,14 @@ function HeroContent({
     return <HeroContentLegacy pick={pick} />;
   }
 
-  return <HeroContentMulti pick={pick} entries={entries} initialIdx={initialEntryIndex} />;
+  return (
+    <HeroContentMulti
+      pick={pick}
+      entries={entries}
+      initialIdx={initialEntryIndex}
+      onPhotoIdChange={onPhotoIdChange}
+    />
+  );
 }
 
 /**
@@ -214,10 +229,12 @@ function HeroContentMulti({
   pick,
   entries,
   initialIdx = 0,
+  onPhotoIdChange,
 }: {
   pick: DailyPick;
   entries: DailyPickEntry[];
   initialIdx?: number;
+  onPhotoIdChange?: (photoId: string) => void;
 }) {
   const total = entries.length;
   const isMultiple = total > 1;
@@ -520,6 +537,29 @@ function HeroContentMulti({
           narrative={currentEntry.narrative}
           yearsAgo={yearsAgo}
         />
+        {/* 弱化「设为壁纸」按钮：仅在当前展示的 entry 不是主精选时显示 */}
+        {currentEntry.photoId !== pick.photoId && (
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              aria-label="将此照片设为今日壁纸源"
+              onClick={async () => {
+                try {
+                  const res = await selectDailyPick(currentEntry.photoId);
+                  if (res.success && res.data) {
+                    onPhotoIdChange?.(currentEntry.photoId);
+                  }
+                } catch {
+                  // 弱操作失败不打扰用户，按钮保持原样
+                }
+              }}
+              data-testid="select-wallpaper-btn"
+              className="text-[11px] tracking-[0.2em] text-[var(--muted-foreground)]/25 transition-colors duration-200 hover:text-[var(--muted-foreground)]/60 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/20 uppercase cursor-pointer"
+            >
+              设为壁纸
+            </button>
+          </div>
+        )}
         <FolioFooter year={year} />
       </div>
     </section>

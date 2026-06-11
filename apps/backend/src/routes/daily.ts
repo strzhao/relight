@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { access, readFile } from "node:fs/promises";
+import { selectDailyPickSchema } from "@relight/shared";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
@@ -277,6 +278,103 @@ export const dailyRouter = new Hono()
     }
 
     const data = await buildPickResponse(pick);
+    return c.json({ success: true, data });
+  })
+
+  /**
+   * 手动设置今日精选主照片（弱操作）
+   * POST /api/daily/today/select
+   *
+   * 接受 { photoId }，仅 UPDATE dailyPicks.photo_id，保持 entries 不变
+   * 前置条件：今日 AI 已产出 entries（无记录时返回 404）
+   * 幂等：重复调用同一 photoId 无副作用
+   * 后置：setImmediate 异步重新合成壁纸（不阻塞响应）
+   */
+  .post("/today/select", async (c) => {
+    // 校验请求体
+    const body = await c.req.json().catch(() => null);
+    if (!body) {
+      return c.json({ success: false, error: "请求体不能为空" }, 400);
+    }
+    const parsed = selectDailyPickSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        { success: false, error: parsed.error.issues[0]?.message ?? "参数格式错误" },
+        400,
+      );
+    }
+    const { photoId } = parsed.data;
+
+    // 校验照片存在性
+    const photoRows = await db.select().from(schema.photos).where(eq(schema.photos.id, photoId));
+    const heroPhoto = photoRows[0];
+    if (!heroPhoto) {
+      return c.json({ success: false, error: "照片不存在" }, 404);
+    }
+
+    // 生成北京时间 YYYY-MM-DD 格式的日期字符串
+    const now = new Date();
+    const shanghai = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+    const pickDate = `${shanghai.getFullYear()}-${String(shanghai.getMonth() + 1).padStart(2, "0")}-${String(shanghai.getDate()).padStart(2, "0")}`;
+
+    // 查询今日记录
+    const pickRows = await db
+      .select()
+      .from(schema.dailyPicks)
+      .where(eq(schema.dailyPicks.pickDate, pickDate))
+      .limit(1);
+
+    const pick = pickRows[0];
+    if (!pick) {
+      return c.json({ success: false, error: "今日暂无精选记录，请等待 AI 生成" }, 404);
+    }
+
+    // 幂等：同一 photoId 无需更新
+    if (pick.photoId === photoId) {
+      const data = await buildPickResponse(pick);
+      return c.json({ success: true, data });
+    }
+
+    // UPDATE dailyPicks.photo_id，清除旧壁纸路径（触发重新合成）
+    await db
+      .update(schema.dailyPicks)
+      .set({ photoId, composedImagePath: null })
+      .where(eq(schema.dailyPicks.id, pick.id));
+
+    // 重新查询更新后的记录
+    const updatedRows = await db
+      .select()
+      .from(schema.dailyPicks)
+      .where(eq(schema.dailyPicks.id, pick.id));
+    const updatedPick = updatedRows[0];
+    if (!updatedPick) {
+      return c.json({ success: false, error: "更新后无法获取精选记录" }, 500);
+    }
+
+    // 异步重新合成壁纸（不阻塞响应）
+    setImmediate(async () => {
+      try {
+        const { composeAndSave } = await import("../lib/wallpaper/composer");
+        const outPath = await composeAndSave({
+          pick: { ...updatedPick, composedImageUrl: null },
+          photo: heroPhoto,
+          width: 5120,
+          height: 2880,
+          cacheKey: "default",
+        });
+        // 回写 composedImagePath
+        await db
+          .update(schema.dailyPicks)
+          .set({ composedImagePath: outPath })
+          .where(eq(schema.dailyPicks.id, updatedPick.id));
+      } catch (err) {
+        console.warn(
+          `[daily/select] 异步壁纸合成失败 pickDate=${pickDate} photoId=${photoId}: ${(err as Error).message}`,
+        );
+      }
+    });
+
+    const data = await buildPickResponse(updatedPick);
     return c.json({ success: true, data });
   })
 

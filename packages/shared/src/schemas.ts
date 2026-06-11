@@ -87,6 +87,11 @@ export const mergePersonSchema = z.object({
   targetPersonId: z.string().min(1),
 });
 
+/** 手动设置每日精选主照片 */
+export const selectDailyPickSchema = z.object({
+  photoId: z.string().min(1, "photoId 不能为空"),
+});
+
 export type CreateStorageSource = z.infer<typeof createStorageSourceSchema>;
 export type UpdateSettings = z.infer<typeof updateSettingsSchema>;
 export type ScanNow = z.infer<typeof scanNowSchema>;
@@ -99,3 +104,4 @@ export type SetRepresentative = z.infer<typeof setRepresentativeSchema>;
 export type UpdatePerson = z.infer<typeof updatePersonSchema>;
 export type SetPersonRepresentative = z.infer<typeof setPersonRepresentativeSchema>;
 export type MergePerson = z.infer<typeof mergePersonSchema>;
+export type SelectDailyPickBody = z.infer<typeof selectDailyPickSchema>;
