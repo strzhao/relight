@@ -1115,3 +1115,11 @@ beforeEach(() => { setupSpawnMock({ stdout: "ok", exitCode: 0 }); });
 **外推**：凡"按日期去重/比较"的逻辑，写入侧与查询侧必须用**同一时区**取日期；混用 UTC slice 与 localized date 会埋下只在某 UTC 小时段触发的 flaky。pre-push 全量套件还有负载相关 flaky（如 health `memory.used==total-free`，单跑必过、全量偶挂），CI 隔离环境才是权威门。
 
 **Evidence**: CI 26836763659(41cc618) FAIL 2 → 26837111164(71c8057) SUCCESS；commit 71c8057；本地凌晨 daily-selection 相关 179/179 全过。相关：[[2026-06-02]] 去重窗口单向假设撞图。
+
+### [2026-06-12] 弱操作/小概率操作的 UI 降权设计：不用 toast/确认框/强按钮
+<!-- tags: ui-design, weak-interaction, manual-override, daily-selection, interaction-design -->
+**Scenario**: 为自动化流程添加手动干预入口时，该操作频率极低且非核心路径。
+
+**Lesson**: 弱操作的 UI 强度应与其重要性成正比——使用极淡文字链接（低透明度 CSS 变量、无背景/边框/圆角）、hover 才微微显现、点击后静默完成（无 toast/确认框/spinner），操作失败也静默忽略不打断用户。强 UI（品牌色按钮、确认对话框、全局通知）反向信号：让用户误以为这是高频必需操作。
+
+**Evidence**: autopilot run session 9850684c — 用户明确反馈"按钮不需要强化，做弱一些，这个是弱操作，小概率操作"。实现：`text-[var(--muted-foreground)]/25` 默认几乎不可见，hover `/60`，`transition-colors duration-200`，catch 块为空静默降级，无 toast/AlertDialog/Spinner。commit f7b7504。
