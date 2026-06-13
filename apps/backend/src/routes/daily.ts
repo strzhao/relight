@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { selectDailyPickSchema } from "@relight/shared";
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
 
@@ -335,10 +335,40 @@ export const dailyRouter = new Hono()
       return c.json({ success: true, data });
     }
 
-    // UPDATE dailyPicks.photo_id，清除旧壁纸路径（触发重新合成）
+    // 查询 dailyPickEntries 中是否有匹配的 entry（用于同步文案）
+    const matchingEntryRows = await db
+      .select({
+        title: schema.dailyPickEntries.title,
+        narrative: schema.dailyPickEntries.narrative,
+        score: schema.dailyPickEntries.score,
+        members: schema.dailyPickEntries.members,
+      })
+      .from(schema.dailyPickEntries)
+      .where(
+        and(
+          eq(schema.dailyPickEntries.dailyPickId, pick.id),
+          eq(schema.dailyPickEntries.photoId, photoId),
+        ),
+      )
+      .limit(1);
+
+    const matchingEntry = matchingEntryRows[0];
+
+    // UPDATE dailyPicks.photo_id，同步匹配 entry 的文案（如有），清除旧壁纸路径（触发重新合成）
     await db
       .update(schema.dailyPicks)
-      .set({ photoId, composedImagePath: null })
+      .set({
+        photoId,
+        composedImagePath: null,
+        ...(matchingEntry
+          ? {
+              title: matchingEntry.title,
+              narrative: matchingEntry.narrative,
+              score: matchingEntry.score,
+              members: matchingEntry.members,
+            }
+          : {}),
+      })
       .where(eq(schema.dailyPicks.id, pick.id));
 
     // 重新查询更新后的记录

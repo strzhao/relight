@@ -141,6 +141,8 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **HEIC 支持** (`src/lib/heic.ts`): 通过 `heic-decode` (WASM，纯 JS，无原生依赖) 将 HEIC/HEIF 解码为 RGBA 像素数据，再经 sharp resize + JPEG 编码。导出 `isHeicFile(filePath)` 和 `heicFileToJpeg(buffer, options?)` / `convertHeicToJpeg(buffer, options?)`。macOS 上 sharp 预编译的 libvips 不包含 HEIC 解码支持，因此选择 heic-decode 而非依赖 sharp。
 
+**RAW/DNG 支持** (`src/lib/raw.ts`): 通过 `dcraw -e -c` 提取 RAW 文件（.dng）中的相机内嵌 JPEG 预览，不进行 RAW 冲印，速度快（< 1 秒）。导出 `extractRawPreview(filePath)` 和 `RAW_EXTENSIONS`。dcraw 需通过 `brew install dcraw` 安装，路径 `/opt/homebrew/bin/dcraw`。analyze-photo 和 daily-selection 的 processSingleEntry 均通过此模块处理 DNG 文件，避免 sharp 无法解码 RAW 格式的降级。
+
 **缩略图生成** (`src/lib/thumbnail.ts`): 800px max (`fit: "inside"`)，quality 85，HEIC 文件先经 heic-decode 解码。输出统一 `.jpg` 扩展名。
 
 **壁纸合成器** (`src/lib/wallpaper/`):

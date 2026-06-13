@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { Job } from "bullmq";
 import { eq, sql } from "drizzle-orm";
 import pLimit from "p-limit";
@@ -7,6 +8,7 @@ import { loadPrompts } from "../ai/prompts";
 import { parseDailyMembersResponse, parseDailyNarrateResponse } from "../ai/response-parser";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
+import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
 import { createStorageAdapter } from "../storage";
 import { buildCandidatePool, getRecentPickedEventKeys } from "./daily-selection/candidate-pool";
 import type { ClusteredCandidate } from "./daily-selection/cluster";
@@ -121,19 +123,29 @@ async function processSingleEntry(
         .jpeg({ quality: 85 })
         .toBuffer();
     } else {
-      buffer = await adapter.getFileBuffer(candidate.filePath);
-      const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
-      if (isHeicBuffer(buffer)) {
-        buffer = await convertHeicToJpeg(buffer, {
-          maxWidth: 2048,
-          maxHeight: 2048,
-          quality: 85,
-        });
-      } else {
+      const ext = path.extname(candidate.filePath).toLowerCase();
+      if (RAW_EXTENSIONS.has(ext)) {
+        log(`[rank=${rank}] DNG 文件，提取 JPEG 预览`);
+        buffer = await extractRawPreview(candidate.filePath);
         buffer = await sharp(buffer)
           .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
           .jpeg({ quality: 85 })
           .toBuffer();
+      } else {
+        buffer = await adapter.getFileBuffer(candidate.filePath);
+        const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
+        if (isHeicBuffer(buffer)) {
+          buffer = await convertHeicToJpeg(buffer, {
+            maxWidth: 2048,
+            maxHeight: 2048,
+            quality: 85,
+          });
+        } else {
+          buffer = await sharp(buffer)
+            .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+        }
       }
     }
 

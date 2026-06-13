@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
 import type { TagCategory } from "@relight/shared";
 import type { Job } from "bullmq";
@@ -10,6 +9,7 @@ import { loadPrompts } from "../ai/prompts";
 import { parseAnalysisResponse } from "../ai/response-parser";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
+import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
 import { detectVideoCapability } from "../lib/video/ffmpeg";
 import { analyzeVideoForAI } from "../lib/video/index";
 import { createStorageAdapter } from "../storage";
@@ -32,11 +32,6 @@ const AI_SUPPORTED_EXTENSIONS = new Set([
 
 /** 视频格式（走视频分支） */
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]);
-
-/** 需要 dcraw 提取 JPEG 预览的 RAW 格式 */
-const RAW_EXTENSIONS = new Set([".dng"]);
-
-const DCRAW_PATH = "/opt/homebrew/bin/dcraw";
 
 interface AnalyzeJobData {
   photoId: string;
@@ -749,35 +744,4 @@ async function calibrateBurstRepresentative(
   }
 }
 
-/**
- * 使用 dcraw -e -c 提取 RAW 文件中的嵌入 JPEG 预览。
- * dcraw -e 仅提取相机内嵌的 JPEG 预览，不进行 RAW 冲印，
- * 速度快（< 1 秒），输出标准 JPEG 可直接用于 AI 分析。
- */
-async function extractRawPreview(filePath: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      DCRAW_PATH,
-      ["-e", "-c", filePath],
-      {
-        encoding: "buffer",
-        maxBuffer: 200 * 1024 * 1024, // 200MB 上限
-        timeout: 30_000,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const stderrMsg = stderr
-            ? Buffer.isBuffer(stderr)
-              ? stderr.toString("utf8")
-              : stderr
-            : "";
-          reject(
-            new Error(`dcraw 提取预览失败: ${error.message}${stderrMsg ? ` — ${stderrMsg}` : ""}`),
-          );
-          return;
-        }
-        resolve(stdout as Buffer);
-      },
-    );
-  });
-}
+// extractRawPreview moved to lib/raw.ts
