@@ -20,32 +20,28 @@ struct MenuBarContent: View {
                 Task {
                     do {
                         let pick = try await client.fetchTodayPick()
-                        guard let photo = pick.photo, !photo.isVideo,
-                              pick.composedImageUrl != nil else { semaphore.signal(); return }
-                        cache.clearComposedCache(for: pick.pickDate)
-                        // 为每个屏幕分辨率下载壁纸
+                        // composedImageUrl 可能在手动选择后被清空（等待重合成），
+                        // 不依赖它——直接按屏幕分辨率调 wallpaper API，服务端会自动合成
+                        let pickDate = pick.pickDate
+                        cache.clearComposedCache(for: pickDate)
                         var wallpaperPaths: [String] = []
                         for screen in NSScreen.screens {
                             let scale = screen.backingScaleFactor
                             let w = Int(screen.frame.width * scale)
                             let h = Int(screen.frame.height * scale)
                             if let url = try? await client.downloadComposedWallpaper(
-                                pickDate: pick.pickDate, width: w, height: h) {
+                                pickDate: pickDate, width: w, height: h) {
                                 wallpaperPaths.append(url.path)
                             }
                         }
-                        // 用 AppleScript 设置所有 Space 的壁纸（setDesktopImageURL 只影响当前 Space）
-                        await MainActor.run {
-                            for path in wallpaperPaths {
-                                let src = "tell application \"System Events\" to tell every desktop to set picture to \"\(path)\""
-                                if let script = NSAppleScript(source: src) {
-                                    var error: NSDictionary?
-                                    script.executeAndReturnError(&error)
-                                    if let error { print("壁纸设置失败: \(error)") }
-                                }
-                            }
-                            AppSettings.shared.lastAppliedPickDate = pick.pickDate
+                        for path in wallpaperPaths {
+                            let proc = Process()
+                            proc.launchPath = "/usr/bin/osascript"
+                            proc.arguments = ["-e", "tell application \"System Events\" to tell every desktop to set picture to \"\(path)\""]
+                            proc.launch()
+                            proc.waitUntilExit()
                         }
+                        await MainActor.run { AppSettings.shared.lastAppliedPickDate = pickDate }
                     } catch { }
                     semaphore.signal()
                 }
