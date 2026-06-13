@@ -22,10 +22,16 @@ struct MenuBarContent: View {
                 for screen in NSScreen.screens {
                     let s = screen.backingScaleFactor
                     let w = Int(screen.frame.width * s); let h = Int(screen.frame.height * s)
-                    guard let url = try? await client.downloadComposedWallpaper(
-                        pickDate: pickDate, width: w, height: h) else { continue }
+                    // ⚠️ 每次下载到唯一文件名，绕过 macOS 同名文件图片缓存
+                    let ts = Int(Date().timeIntervalSince1970 * 1000)
+                    let uniqueName = "\(pickDate)_\(w)x\(h)_\(ts).jpg"
+                    let wallpaperURL = cache.composedDir.appendingPathComponent(uniqueName)
+                    // 直接通过 API 下载（不走 writeComposed，避免共用文件名）
+                    guard let apiURL = URL(string: "http://localhost:3000/api/daily/\(pickDate)/wallpaper?width=\(w)&height=\(h)"),
+                          let (data, _) = try? await URLSession(configuration: .ephemeral).data(from: apiURL),
+                          (try? data.write(to: wallpaperURL)) != nil else { continue }
                     await MainActor.run {
-                        try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
+                        try? NSWorkspace.shared.setDesktopImageURL(wallpaperURL, for: screen, options: [
                             .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
                             .allowClipping: false,
                             .fillColor: NSColor(srgbRed: 0.972, green: 0.961, blue: 0.929, alpha: 1.0),
