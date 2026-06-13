@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { db, schema } from "../db";
 import { analyzeQueue } from "../jobs/queues";
 import { convertHeicToJpeg, isHeicBuffer } from "../lib/heic";
+import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
 import { createStorageAdapter } from "../storage";
 
 /** 把秒数（含小数）格式化为 WebVTT 时间戳 HH:MM:SS.mmm */
@@ -259,6 +260,13 @@ export const photosRouter = new Hono()
       // HEIC 转码为 JPEG（按 magic byte 判断，兼容扩展名错配）
       if (isHeicBuffer(buffer)) {
         buffer = await convertHeicToJpeg(buffer);
+        contentType = "image/jpeg";
+      }
+
+      // DNG/RAW 提取内嵌 JPEG 预览（浏览器无法渲染 RAW 格式）
+      const ext = path.extname(photo.filePath).toLowerCase();
+      if (RAW_EXTENSIONS.has(ext)) {
+        buffer = await extractRawPreview(fullPath);
         contentType = "image/jpeg";
       }
 
