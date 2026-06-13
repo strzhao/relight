@@ -4,9 +4,15 @@ final class RelightClient {
     private let settings: AppSettings
     private let urlSession: URLSession
 
-    init(settings: AppSettings = .shared, urlSession: URLSession = .shared) {
+    init(settings: AppSettings = .shared, urlSession: URLSession? = nil) {
         self.settings = settings
-        self.urlSession = urlSession
+        if let urlSession {
+            self.urlSession = urlSession
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 30
+            self.urlSession = URLSession(configuration: config)
+        }
     }
 
     func fetchTodayPick() async throws -> DailyPick {
