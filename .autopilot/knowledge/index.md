@@ -1,100 +1,128 @@
 # Knowledge Index
 
-## Decisions
-- [2026-06-02] macOS App 发布机制：GitHub Release + Homebrew cask tap；私有源码仓库做 brew 分发必须改公开（cask url 须匿名可下载，私有 release 资产匿名 404） | tags: release, github-actions, homebrew, cask, tap, xcodebuild, mac-app, distribution, private-repo, public, deployment, design | → decisions.md
-- [2026-06-02] 后端 API 纳入 PM2 开机自启：复用现有 resurrect launchd（命名误导的 pm2-qwen.plist 实为通用 resurrect），仅 pm2 save 不跑 pm2 startup | tags: pm2, ecosystem, launchd, resurrect, autostart, boot, backend-api, deployment, ops, mac-app, design | → decisions.md
-- [2026-05-16] 事件键（dirname::takenAt 同日）前置去重替代 prompt 标题软约束：qwen-vl 忽略 soft constraint → 规则方案 8→2 | tags: daily-selection, candidate-pool, event-key, dedup, title-duplication, rule-based, design | → decisions.md
-- [2026-05-15] candidate-pool 触底回填第 5 源 fillUp：聚类压缩 < maxN 时启动兜底，pool1 代表 pin 住，避免 entries 断崖 | tags: daily-selection, candidate-pool, fillUp, fallback, theme-conflict, primary-candidate-source, type-narrowing, pool1-stability, design | → decisions.md
-- [2026-05-15] narrate prompt {recent_titles} 软约束 + 「避免重复标题」准则：跨日 title 去重零额外 AI 调用 | tags: daily-selection, narrate-prompt, title-deduplication, soft-constraint, recent-titles, query-recent-titles, ai-prompt-engineering, design | → decisions.md
-- [2026-05-15] 撤销 narrate 命名人物注入：第二人称「你」呼告体优于硬塞具体称呼 | tags: daily-selection, narrate-prompt, person-injection, second-person, product-tone, reversal, scope-control, ai-prompt-engineering | → decisions.md
-- [2026-05-15] 用人物识别优化每日精选：选叙事增强单路径（仅传命名 nickname 数组给 narrate prompt） **[已撤销 5-15]** | tags: daily-selection, face-recognition, narrate-prompt, person-injection, scope-control, design, superseded | → decisions.md
-- [2026-05-15] self 标记用 settings.selfPersonId 单 key，不加 persons.isSelf 列 | tags: settings, schema-design, single-value-pointer, isSelf, persons, design | → decisions.md
-- [2026-05-14] 单 centroid → Apple 多原型方案：每 person 1-5 个 sub-prototype + max(cosine) 匹配 | tags: face-clustering, multi-prototype, exemplar, apple-photos, cross-age, cross-appearance, kmeans, arcface, centroid, design, architecture | → decisions.md
-- [2026-05-13] 人脸聚类引入 qwen 语义属性 + 临界硬过滤 + JSON 字段预留未来扩展 | tags: face-recognition, face-clustering, qwen-vl, semantic-attributes, hybrid-clustering, cosine-threshold, json-schema, schema-version, future-proof, design, architecture | → decisions.md
-- [2026-05-12] 人脸识别选 ONNX Runtime + SCRFD-500M + ArcFace MBF 纯本地方案，设计偏离 2.5G → 500M（公开 ONNX 镜像无 2.5G） | tags: face-recognition, onnx, scrfd, arcface, local-inference, privacy, coreml, model-selection, design, architecture | → decisions.md
-- [2026-05-11] photos 表加 GPS+EXIF meta 14 列 + cluster GPS 谓词 + narrate prompt 注入坐标 | tags: gps, exif, exifr, schema-migration, cluster, union-find, daily-selection, narrate-prompt, location-awareness, ai-vision, geographical-context | → decisions.md
-- [2026-05-10] daily-selection top N 主题去重 + maxN 从 20 降到 12（质量优先于数量） | tags: daily-selection, candidate-pool, theme-dedup, cluster, maxN, quality-over-quantity, dirname-time-window, design | → decisions.md
-- [2026-05-10] apps/web 拆分双 tsconfig — 生产严格 + 测试松弛，恢复 noUncheckedIndexedAccess | tags: tsconfig, typescript, strict, noUncheckedIndexedAccess, test-infra, dom-api, monorepo, design | → decisions.md
-- [2026-05-09] 每日精选改为 4 源平等加权混采 + 久远度温和加成 + 30 天去重 + AI 二次评选关联 members | tags: daily-selection, candidate-pool, age-weight, dedup, multi-photo, ai-clustering, design, architecture | → decisions.md
-- [2026-05-08] 后端图片合成选 Satori + Resvg 而非无头浏览器 | tags: image-composition, satori, resvg, chromium, server-rendering, daily-selection, design | → decisions.md
-- [2026-05-06] 视频 AI 分析采用多帧雪碧图 + Whisper 转录 + 视频专属 prompt | tags: video, ai-vision, whisper, sprite, ffmpeg, scene-cut, design, multi-modal | → decisions.md
-- [2026-05-01] 技术选型从通用最佳实践调整为用户 workspace 惯例 | tags: tech-stack, backend, orm, conventions, design | → decisions.md
-- [2026-05-02] AI 分析质量验收采用纯规则自动化评分，非 AI 评估 AI | tags: ai, evaluation, testing, design | → decisions.md
-- [2026-05-04] photos 表使用复合 UNIQUE(storage_source_id, file_path) 而非单列 file_path | tags: database, unique-constraint, drizzle, schema-design | → decisions.md
-- [2026-05-04] cleanupOrphans 必须在 listFiles 后、第一个提前返回前执行 | tags: backend, scan, architecture, orphan-cleanup, placement | → decisions.md
-- [2026-05-04] 全屏照片查看器选择自定义 Lightbox 而非 Radix Dialog | tags: lightbox, radix-ui, dialog, frontend, a11y, design | → decisions.md
-- [2026-05-04] DNG/RAW 使用 dcraw -e 提取嵌入 JPEG 预览而非 RAW 冲印 | tags: raw, dng, dcraw, ai-vision, image-processing, design | → decisions.md
-- [2026-05-04] 格式门：AI 分析跳过不支持的格式用 return 而非 throw | tags: backend, bullmq, retry, format-gate, design | → decisions.md
-- [2026-05-04] analyze-photo Worker concurrency 匹配 llama-server --parallel 槽位数 | tags: backend, bullmq, worker, concurrency, llama-cpp, performance | → decisions.md
-- [2026-05-05] 每日精选采用两阶段 AI 流水线 — 文本评选 + 视觉叙事，最小化图片 token 成本 | tags: ai, daily-selection, cost-optimization, two-stage-pipeline, architecture | → decisions.md
-- [2026-05-05] worktree 环境采用 sync 脚本 + postinstall 钩子，端口算法与插件字节级一致 | tags: worktree, parallel-development, postinstall, port-allocation, bullmq-prefix, design | → decisions.md
-- [2026-05-05] 历史数据修复优先用一次性 SQL UPDATE 而非双路径 fallback | tags: database, migration, backfill, fallback, sql, design | → decisions.md
-- [2026-05-07] 常驻 worker 进程必须把 git commit + uptime 暴露给观测层 | tags: worker, supervisor, observability, deployment, ops, design | → decisions.md
+> 知识库已按领域拆分到 `domains/` 目录。`decisions.md` 和 `patterns.md` 保留为精简时间线索引。
 
-## Patterns
-- [2026-06-12] 弱操作/小概率操作的 UI 降权设计：不用 toast/确认框/强按钮，极淡文字链接 + hover 微显 + 失败静默 | tags: ui-design, weak-interaction, manual-override, daily-selection, interaction-design | → patterns.md
-- [2026-06-02] 去重窗口 UTC nowDate 与 pickDate 北京日期跨天错位 → 北京凌晨段 flaky；调试陷阱：本地同时刻新旧对比因都失败而误判，须看同环境跨 commit（CI）信号 + 边界 determinism 实验；修复=三个日期统一北京时区 | tags: timezone, beijing, utc, daily-selection, getRecentPickedEventKeys, pickDate, flaky-test, ci, controlled-experiment, dedup, bug | → patterns.md
-- [2026-06-02] 每日精选 30 天去重窗口单向 lt(pickDate, now) 隐含"按日期顺序生成"假设：定时任务先产出后一天、回填前一天时回填日看不到未来已用照片 → 跨天 hero 撞图；修复=以目标日为中心的对称窗口 gte(now-30d)+lte(now+30d)+ne(now当日) | tags: daily-selection, candidate-pool, dedup, getRecentPickedEventKeys, date-window, ordering-assumption, backfill, out-of-order, hero-collision, scheduled-job, bug | → patterns.md
-- [2026-06-02] headless CI 跑 xcodebuild 两坑：scheme 必须入库 shared（xcuserdata 被 gitignore）+ runner 默认 Xcode 15.4 编不过 macOS 14 SwiftUI API（\.openSettings），需 macos-15 + setup-xcode latest-stable | tags: xcodebuild, ci, github-actions, shared-scheme, xcshareddata, xcode-version, macos-15, setup-xcode, swiftui, mac-app, release, bug | → patterns.md
-- [2026-06-02] PM2 app env 必须显式注入 process.env.PATH，否则 boot resurrect 时 spawn 子进程（pnpm）ENOENT；交互式 pm2 start 因继承 shell PATH 看不出，只在开机后暴露 | tags: pm2, ecosystem, env, path, boot, resurrect, launchd, spawn, enoent, child-process, pnpm, ops, bug | → patterns.md
-- [2026-05-15] 红队 acceptance fixture 自身 bug：contract-checker + qa-reviewer 双重证实实现正确时走 review-accept gate，不修测试不破坏实现 | tags: vitest, acceptance-test, fixture, red-team, anti-rationalization, autopilot, contract-checker, bug | → patterns.md
-- [2026-05-15] candidate-pool / 主流程加新 SQL JOIN 必须同步补所有 acceptance fixture 表 DDL | tags: vitest, acceptance-test, fixture, schema, sql-join, no-such-table, daily-selection, bug | → patterns.md
-- [2026-05-15] narrate 第二人称"你"+ 画面人物注入：AI 仍偶尔把"你"映射到画面里的人 | tags: ai, narrate-prompt, second-person, soft-constraint, prompt-engineering, daily-selection, bug | → patterns.md
-- [2026-05-14] ArcFace MobileFaceNet 边缘正例 cosine 分布陷阱：聚类粗筛阈值不能凭"安全裕量"推理 | tags: face-clustering, arcface, mobilefacenet, cosine-threshold, coarse-filter, embedding-distribution, prototype, recall, autopilot-verification, bug | → patterns.md
-- [2026-05-14] flex item `align-items: center` + 子元素 aspectRatio + max-h-full = 祖先 overflow-hidden 隐式裁剪 | tags: flexbox, css, align-items, aspect-ratio, max-height, overflow-hidden, frontend, daily-hero, bug, layout | → patterns.md
-- [2026-05-14] Satori 不保留 CSS object-fit 字面，必须用几何断言验证 contain/cover | tags: satori, svg, object-fit, server-side-rendering, geometric-assertion, wallpaper, image-composition, test, design | → patterns.md
-- [2026-05-14] 人脸增量聚类的「centroid 雪球 + 垃圾桶 cluster」陷阱与三件套修复（quality 分级 + LOW 不拉 centroid + mergeThreshold 0.85） | tags: face-clustering, incremental-clustering, centroid-drift, quality-aware, snowball, garbage-cluster, embedding, arcface, bug, algorithm | → patterns.md
-- [2026-05-13] 批量危险脚本（清空/全量入队）必须 `--help` + `--yes` 二次确认 | tags: cli, dangerous-operation, bullmq, queue, safety, dry-run, confirmation, batch-job, bug, ops | → patterns.md
-- [2026-05-13] vitest `vi.mock` 路径以测试文件位置为基准（不是实现文件） | tags: vitest, vi-mock, relative-path, hoisted, module-resolution, test-infra, blue-red, bug | → patterns.md
-- [2026-05-12] HF 模型下载 URL 必须先 WebFetch /api/models/{org}/{repo}/tree/main 验证路径，猜路径 401/404 浪费多轮 | tags: huggingface, model-download, onnx, webfetch, hf-api, url-discovery, multi-source, bug | → patterns.md
-- [2026-05-12] Biome `lint/correctness/noEmptyCharacterClassInRegex` 拒绝 `[^]`，要用 `[\s\S]` 等价替代 | tags: biome, regex, lint, character-class, jsdom, ssr-html-match, test, bug | → patterns.md
-- [2026-05-10] vitest fake timer + React 19 createRoot 不兼容 — setup 需 act+flushSync polyfill | tags: vitest, react-19, fake-timer, create-root, flush-sync, act, scheduler, polyfill, test-infra, bug | → patterns.md
-- [2026-05-10] jsdom 不实现 setPointerCapture + `<img>` 默认 draggable 吞 mousedown — UI 交互必须 e2e | tags: jsdom, pointer-events, set-pointer-capture, native-drag, img, draggable, e2e, playwright, ui-interaction, bug | → patterns.md
-- [2026-05-09] React SSR `{value} 文本` 在输出 HTML 中插入 `<!-- -->` 注释，破坏文本正则匹配 | tags: react, ssr, render-to-string, comment-marker, regex, jsx, expression-container, test, bug | → patterns.md
-- [2026-05-09] 红队 vi.mock 平铺导出 vs 蓝队 `api` 对象——TDD 契约对齐策略 | tags: vitest, vi-mock, tdd, blue-red, contract-drift, ssr, react, mock-shape, hook-vs-prop, design | → patterns.md
-- [2026-05-09] drizzle async transaction 在 better-sqlite3 上抛 `Transaction function cannot return a promise` | tags: drizzle, better-sqlite3, transaction, sync, async, orm, bug, multi-step-update | → patterns.md
-- [2026-05-08] Drizzle `onConflictDoNothing()` 配 `.returning()` 时同冲突返回空数组 | tags: drizzle, sqlite, onconflict, returning, orm, bug | → patterns.md
-- [2026-05-08] tsup 打包后 ESM `import.meta.url` 相对路径基准在 dev/prod 不同步 | tags: esm, import-meta-url, tsup, dev-vs-prod, asset-path, build, bug | → patterns.md
-- [2026-05-08] Satori 的 `jsxImportSource` 子路径必须精确到子包根 | tags: satori, jsx, jsx-runtime, esm, typescript, jsximportsource, bug | → patterns.md
-- [2026-05-06] DB file_path 可能是绝对路径时用 path.resolve 而非 path.join | tags: path, file-system, nas, smb, storage, route, bug | → patterns.md
-- [2026-05-06] BullMQ Job mock 必须含 log/updateProgress 等接口方法 | tags: bullmq, vitest, mock, job, testing, integration | → patterns.md
-- [2026-05-06] 视频 daily-selection 阶段 2 必须读 cover JPEG 而非整视频文件 | tags: video, daily-selection, sharp, oom, cover-frame, ai-vision, performance, design | → patterns.md
-- [2026-05-06] Whisper CLI 必须从 outputDir/<stem>.json 文件读，绝不解析 stdout | tags: whisper, cli, child-process, json, stdout, ai, transcribe, bug | → patterns.md
-- [2026-05-06] worktree symlink + lint-staged stash 失败 → skip-worktree 隐藏虚假 deletion | tags: worktree, lint-staged, husky, git, symlink, stash | → patterns.md
-- [2026-05-01] pnpm 原生模块构建需在 package.json 中声明 onlyBuiltDependencies | tags: pnpm, native-modules, build | → patterns.md
-- [2026-05-01] Vitest workspace 模式需在根级别安装 vitest | tags: vitest, monorepo, testing | → patterns.md
-- [2026-05-01] Biome 1.9.4 使用 organizeImports 顶层键，非 assist | tags: biome, linting, config | → patterns.md
-- [2026-05-02] BullMQ 重试配置在 Queue.defaultJobOptions 而非 Worker 构造函数 | tags: bullmq, queue, worker, retry | → patterns.md
-- [2026-05-03] @tanstack/react-virtual sentinel 必须放在虚拟容器内部而非作为虚拟项 | tags: react, virtual-scroll, tanstack-virtual, frontend | → patterns.md
-- [2026-05-04] IntersectionObserver 在 React 中的生命周期管理——避免级联加载循环 | tags: react, intersectionobserver, infinite-scroll, ref, useeffect, cascade | → patterns.md
-- [2026-05-04] sharp 处理网络/SMB 挂载路径文件时先 readFile 读入 Buffer | tags: sharp, smb, network-path, seek-error, image-processing | → patterns.md
-- [2026-05-04] macOS SMB 挂载持久化 — LaunchAgent 周期保活 + nsmb.conf 调优 | tags: macos, smb, nas, mount, launchagent, shell | → patterns.md
-- [2026-05-04] HEIC 文件可能伪装：扩展名 .heic 实际为 JPEG 内容 | tags: heic, jpeg, content-detection, format-disguise, sharp | → patterns.md
-- [2026-05-04] DB 与文件系统反向校验时需加安全阀防止存储断连误删 | tags: backend, scan, safety, orphan-cleanup, storage, nas | → patterns.md
-- [2026-05-04] Biome a11y 规则豁免应使用 biome.json overrides 而非内联注释 | tags: biome, a11y, linting, config, lightbox | → patterns.md
-- [2026-05-04] SSE 进度追踪使用 DB 轮询 + QueueEvents 双向更新模式 | tags: sse, bullmq, queue-events, progress, db-polling, pattern | → patterns.md
-- [2026-05-04] Next.js rewrites 不转发 SSE 流，EventSource 必须直连后端 | tags: nextjs, sse, eventsource, proxy, rewrite, cors | → patterns.md
-- [2026-05-05] HEIC 检测必须在 sharp resize 之前执行——sharp 预编译 libvips 不含 HEIC 解码 | tags: heic, sharp, image-processing, code-order, bug | → patterns.md
-- [2026-05-05] qwen3 在 llama.cpp 上禁用思考模式必须用 chat_template_kwargs，thinking 字段是 vLLM 方言 | tags: qwen3, llama-cpp, thinking-mode, openai-api, ai, performance, bug | → patterns.md
-- [2026-05-05] sharp resize 必须显式 withoutEnlargement: true，否则小图被放大反优化 | tags: sharp, image-resize, withoutEnlargement, ai-payload, code-quality, bug | → patterns.md
-- [2026-05-04] 扫描收录与 AI 分析使用两层扩展名过滤，分离关注点 | tags: backend, scan, extension-filter, two-layer, separation-of-concerns | → patterns.md
-- [2026-05-04] 非 HEIC 图片在 AI 视觉分析前用 sharp 缩小尺寸减少 payload | tags: ai, vision, sharp, image-resize, performance, base64 | → patterns.md
-- [2026-05-05] Next.js dev server 不读 .env.local 的 PORT，必须靠包装脚本预注入 | tags: nextjs, dev-server, env-loading, port-binding, dotenv | → patterns.md
-- [2026-05-05] pnpm workspace 子进程加载子包依赖时 cwd 必须在子包目录 | tags: pnpm, workspace, dotenv, child-process, node-modules-resolution | → patterns.md
-- [2026-05-05] worktree 中 e2e 测试需切到不同端口启动 dev server，主仓库进程不会同步代码 | tags: worktree, e2e, playwright, nextjs, dev-server, port | → patterns.md
-- [2026-05-07] ESM 模块顶层 await 阻塞 vitest `await import()` → 测试 5s 超时 | tags: vitest, esm, top-level-await, dynamic-import, redis, ioredis, worker, bug | → patterns.md
-- [2026-05-07] PM2 reload 中断 in-flight job 是预期行为，配 retry-failed 工具是正确处理 | tags: pm2, supervisor, bullmq, worker, kill-timeout, reload, sigkill | → patterns.md
-- [2026-05-07] xcodebuild ad-hoc 签名打包不能加 CODE_SIGNING_ALLOWED=NO | tags: xcodebuild, mac, code-signing, ad-hoc, hardened-runtime, gatekeeper, archive, bug | → patterns.md
-- [2026-05-07] Release+Hardened Runtime+LSUIElement APP 的 stdout 在 terminal 调用时会被吞 | tags: macos, swiftui, hardened-runtime, lsuielement, stdout, release-build, debug-vs-release, code-signing | → patterns.md
-- [2026-05-08] macOS App 行为异常先比 binary mtime vs 源码 mtime — DerivedData/build/dist/Applications 三路径独立易错位 | tags: macos, xcode, debug, derived-data, stale-build, swiftui, lsuielement, scene, debugging-pattern, bug | → patterns.md
-- [2026-05-08] IntersectionObserver 监听条件渲染节点必须用 callback ref，不能用 useRef + useEffect | tags: react, intersectionobserver, callback-ref, conditional-rendering, useeffect, infinite-scroll, bug | → patterns.md
-- [2026-05-08] Playwright page.route glob 中 `?` 是单字符通配符，匹配 query string 必须用 `*` | tags: playwright, page-route, glob, minimatch, mock, query-string, e2e, bug | → patterns.md
-- [2026-05-10] 每日精选首页从「单 hero + 关联 members」升级为「20 entries 全展示 + 每条目独立系列」 | tags: daily-selection, multi-entries, schema-design, dual-write, daily-pick-entries, ui-redesign, architecture | → decisions.md
-- [2026-05-10] Next.js `useRouter()` 在 SSR / vitest renderToString 上下文抛 invariant，URL 同步改用 `history.replaceState` | tags: nextjs, app-router, useRouter, useSearchParams, ssr, vitest, render-to-string, invariant, history-api, bug | → patterns.md
-- [2026-05-17] BullMQ `getRepeatableJobs()` 返回的 id 是哈希而非用户 jobId，按 name 匹配 | tags: bullmq, repeatable-job, getRepeatableJobs, job-id, scheduler, cron, observability, bug | → patterns.md
-- [2026-05-17] 项目用传统 pbxproj 文件引用，新增 .swift 必须手工改 4 个 section（单文件集中策略） | tags: macos, xcode, pbxproj, file-reference, swiftui, build-target, project-convention | → patterns.md
-- [2026-05-17] SwiftUI MenuBarExtra Image 默认不自动 .template，必须显式 .renderingMode(.template) + .accessibilityLabel | tags: swiftui, menubarextra, image, renderingmode, template, macos, dark-mode, status-icon, accessibility | → patterns.md
-- [2026-05-17] Hono Node adapter 安全 localhost-only middleware：只读 c.env.incoming.socket.remoteAddress，弃用 XFF（c.req.raw 无 socket），无 socket → localhost 仅 TCP 模式安全 | tags: hono, middleware, security, localhost-only, x-forwarded-for, xff, socket, remoteAddress, node-server, conninfo, cors, owasp | → patterns.md
-- [2026-05-17] vitest spawn mock 用 mockImplementation + setImmediate，避免 fixture timing 抢跑 spawn handler listener 注册 | tags: vitest, vi-mock, child-process, spawn, mockImplementation, setImmediate, queueMicrotask, fixture, timing, eventEmitter, beforeEach, bug | → patterns.md
-- [2026-05-17] SwiftUI ScrollView auto-follow 在 macOS 13 deployment target 不能用 DragGesture（trackpad 不触发），降级手动按钮；onScrollGeometryChange 仅 macOS 14+；「回到底部」必须显式调 proxy.scrollTo | tags: swiftui, scrollview, scrollviewreader, draggesture, trackpad, macos, deployment-target, auto-follow, log-viewer, ui-degradation | → patterns.md
-- [2026-05-19] 客户端硬编码端口反模式：常驻 web 端口冲突 → 走后端 RuntimeConfig 配置化，客户端 @Published cachedConfig 缓存；端口纪律 3000/3601/4001-4999/4501-5499 分段 | tags: port-allocation, web-port, hardcode, configuration, runtime-config, mac-app, openweb, swiftui, env, env-example, monorepo, worktree, ops, bug, anti-pattern | → patterns.md
+## 领域文件
+
+| 领域 | 文件 | 内容 |
+|------|------|------|
+| 每日精选 | [domains/daily-selection.md](domains/daily-selection.md) | 候选池、去重、fillUp、事件键、多条目、UI 降权 |
+| 人脸识别 | [domains/face-recognition.md](domains/face-recognition.md) | ONNX/SCRFD/ArcFace 选型、语义聚类、多原型、centroid 陷阱 |
+| 后端基础设施 | [domains/backend-infra.md](domains/backend-infra.md) | 扫描、格式门、Worker 并发、观测、安全阀、危险脚本 |
+| 前端 | [domains/frontend.md](domains/frontend.md) | React/CSS 陷阱、IntersectionObserver、SSR、Next.js |
+| 测试 | [domains/testing.md](domains/testing.md) | Vitest 模式、红队 fixture、jsdom 限制、mock 技巧 |
+| macOS App | [domains/mac-app.md](domains/mac-app.md) | SwiftUI、Xcode、MenuBarExtra、壁纸、签名、发布 |
+| AI 提示词 | [domains/ai-prompt.md](domains/ai-prompt.md) | qwen3 思考模式、narrate 工程、Whisper、视频分析 |
+| 图片处理 | [domains/image-processing.md](domains/image-processing.md) | RAW/DNG、HEIC、EXIF、sharp、Satori 合成 |
+| 发布与运维 | [domains/release-ops.md](domains/release-ops.md) | PM2、Worktree、CI/CD、Homebrew、端口管理 |
+| 数据库 | [domains/database.md](domains/database.md) | Schema 设计、Migration、Drizzle 陷阱、技术选型 |
+
+## 全局时间线索引
+
+### 决策 (decisions.md)
+
+- [2026-06-02] macOS App 发布机制 → [release-ops](domains/release-ops.md)
+- [2026-06-02] 后端 API 纳入 PM2 开机自启 → [backend-infra](domains/backend-infra.md)
+- [2026-05-16] 事件键前置去重 → [daily-selection](domains/daily-selection.md)
+- [2026-05-15] fillUp 第 5 源触底回填 → [daily-selection](domains/daily-selection.md)
+- [2026-05-15] narrate prompt 软约束 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-15] 撤销 narrate 人物注入 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-15] self settings.selfPersonId → [face-recognition](domains/face-recognition.md)
+- [2026-05-14] Apple 多原型方案 → [face-recognition](domains/face-recognition.md)
+- [2026-05-13] qwen 语义属性 + 临界硬过滤 → [face-recognition](domains/face-recognition.md)
+- [2026-05-12] ONNX + SCRFD + ArcFace 选型 → [face-recognition](domains/face-recognition.md)
+- [2026-05-11] GPS+EXIF 14 列 + cluster GPS → [image-processing](domains/image-processing.md)
+- [2026-05-10] top N 主题去重 + maxN 12 → [daily-selection](domains/daily-selection.md)
+- [2026-05-10] 20 entries 全展示升级 → [daily-selection](domains/daily-selection.md)
+- [2026-05-10] apps/web 双 tsconfig → [frontend](domains/frontend.md)
+- [2026-05-09] 4 源平等加权混采 → [daily-selection](domains/daily-selection.md)
+- [2026-05-08] Satori + Resvg 壁纸合成 → [image-processing](domains/image-processing.md)
+- [2026-05-07] Worker git commit + uptime → [backend-infra](domains/backend-infra.md)
+- [2026-05-06] 视频 AI 多帧雪碧图 + Whisper → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-05] 两阶段 AI 流水线 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-05] worktree sync + postinstall → [release-ops](domains/release-ops.md)
+- [2026-05-05] 历史数据 SQL UPDATE 修复 → [database](domains/database.md)
+- [2026-05-04] 复合 UNIQUE 约束 → [database](domains/database.md)
+- [2026-05-04] cleanupOrphans 执行位置 → [backend-infra](domains/backend-infra.md)
+- [2026-05-04] 自定义 Lightbox → [frontend](domains/frontend.md)
+- [2026-05-04] DNG/RAW dcraw -e → [image-processing](domains/image-processing.md)
+- [2026-05-04] 格式门 return 非 throw → [backend-infra](domains/backend-infra.md)
+- [2026-05-04] Worker concurrency → [backend-infra](domains/backend-infra.md)
+- [2026-05-04] EXIF TIFF 解析器 → [image-processing](domains/image-processing.md)
+- [2026-05-02] AI 纯规则自动化评分 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-01] 技术选型调整 → [database](domains/database.md)
+
+### 模式 (patterns.md)
+
+- [2026-06-13] 新增图片路径同步 RAW/DNG → [image-processing](domains/image-processing.md)
+- [2026-06-13] 主实体 UPDATE 同步派生字段 → [daily-selection](domains/daily-selection.md)
+- [2026-06-13] MenuBarExtra Task.detached → [mac-app](domains/mac-app.md)
+- [2026-06-13] macOS 同名文件壁纸缓存 → [mac-app](domains/mac-app.md)
+- [2026-06-13] URLSession ephemeral → [mac-app](domains/mac-app.md)
+- [2026-06-13] Xcode 增量编译 clean build → [mac-app](domains/mac-app.md)
+- [2026-06-13] NSAppleScript → Process() → [mac-app](domains/mac-app.md)
+- [2026-06-13] 壁纸双缓存失效 → [image-processing](domains/image-processing.md)
+- [2026-06-12] 弱操作 UI 降权设计 → [daily-selection](domains/daily-selection.md)
+- [2026-06-02] 去重窗口时区跨天 → [daily-selection](domains/daily-selection.md)
+- [2026-06-02] 30 天去重对称窗口 → [daily-selection](domains/daily-selection.md)
+- [2026-06-02] PM2 env PATH 注入 → [release-ops](domains/release-ops.md)
+- [2026-06-02] CI xcodebuild 双坑 → [release-ops](domains/release-ops.md)
+- [2026-05-19] 客户端硬编码端口反模式 → [release-ops](domains/release-ops.md)
+- [2026-05-17] BullMQ getRepeatableJobs → [backend-infra](domains/backend-infra.md)
+- [2026-05-17] pbxproj 4-section → [mac-app](domains/mac-app.md)
+- [2026-05-17] MenuBarExtra Image .template → [mac-app](domains/mac-app.md)
+- [2026-05-17] Hono localhost-only → [backend-infra](domains/backend-infra.md)
+- [2026-05-17] spawn mock timing → [testing](domains/testing.md)
+- [2026-05-17] ScrollView DragGesture → [mac-app](domains/mac-app.md)
+- [2026-05-15] 红队 fixture 自身 bug → [testing](domains/testing.md)
+- [2026-05-15] JOIN → fixture DDL 漂移 → [testing](domains/testing.md)
+- [2026-05-15] narrate 第二人称 AI 偏离 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-14] ArcFace 边缘正例分布 → [face-recognition](domains/face-recognition.md)
+- [2026-05-14] flex align-items 裁剪 → [frontend](domains/frontend.md)
+- [2026-05-14] Satori object-fit 几何 → [image-processing](domains/image-processing.md)
+- [2026-05-14] centroid 雪球陷阱 → [face-recognition](domains/face-recognition.md)
+- [2026-05-13] 危险脚本规范 → [backend-infra](domains/backend-infra.md)
+- [2026-05-13] vi.mock 路径基准 → [testing](domains/testing.md)
+- [2026-05-12] HF 模型 URL 验证 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-12] Biome [^] → [\s\S] → [testing](domains/testing.md)
+- [2026-05-11] exifr reviveValues → [image-processing](domains/image-processing.md)
+- [2026-05-10] fake timer + React 19 → [testing](domains/testing.md)
+- [2026-05-10] jsdom pointer capture → [testing](domains/testing.md)
+- [2026-05-10] useRouter SSR invariant → [frontend](domains/frontend.md)
+- [2026-05-09] React SSR 注释标记 → [frontend](domains/frontend.md)
+- [2026-05-09] vi.mock vs api 对象 → [testing](domains/testing.md)
+- [2026-05-09] drizzle async transaction → [database](domains/database.md)
+- [2026-05-08] Drizzle onConflictDoNothing → [database](domains/database.md)
+- [2026-05-08] tsup import.meta.url → [image-processing](domains/image-processing.md)
+- [2026-05-08] macOS stale build → [mac-app](domains/mac-app.md)
+- [2026-05-08] callback ref vs useRef → [frontend](domains/frontend.md)
+- [2026-05-08] Playwright page.route glob → [testing](domains/testing.md)
+- [2026-05-07] ESM 顶层 await → [release-ops](domains/release-ops.md)
+- [2026-05-07] PM2 reload in-flight → [release-ops](domains/release-ops.md)
+- [2026-05-07] xcodebuild 签名 → [mac-app](domains/mac-app.md)
+- [2026-05-07] Release stdout → [mac-app](domains/mac-app.md)
+- [2026-05-06] path.resolve vs path.join → [database](domains/database.md)
+- [2026-05-06] BullMQ Job mock → [testing](domains/testing.md)
+- [2026-05-06] 视频 daily-selection cover → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-06] Whisper stdout vs 文件 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-06] worktree symlink lint-staged → [release-ops](domains/release-ops.md)
+- [2026-05-05] qwen3 思考模式 → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-05] sharp withoutEnlargement → [image-processing](domains/image-processing.md)
+- [2026-05-05] HEIC 在 sharp 之前 → [image-processing](domains/image-processing.md)
+- [2026-05-05] Next.js .env.local PORT → [frontend](domains/frontend.md)
+- [2026-05-05] pnpm 子进程 cwd → [release-ops](domains/release-ops.md)
+- [2026-05-04] 两层扩展名过滤 → [backend-infra](domains/backend-infra.md)
+- [2026-05-04] 非 HEIC sharp resize → [ai-prompt](domains/ai-prompt.md)
+- [2026-05-04] SMB 挂载持久化 → [release-ops](domains/release-ops.md)
+- [2026-05-04] HEIC 伪装 JPEG → [image-processing](domains/image-processing.md)
+- [2026-05-04] Sharp SMB Buffer → [image-processing](domains/image-processing.md)
+- [2026-05-04] IntersectionObserver 级联 → [frontend](domains/frontend.md)
+- [2026-05-04] 安全阀 NAS 断连 → [backend-infra](domains/backend-infra.md)
+- [2026-05-04] Biome a11y overrides → [testing](domains/testing.md)
+- [2026-05-04] SSE DB 轮询 → [backend-infra](domains/backend-infra.md)
+- [2026-05-04] Next.js rewrites SSE → [frontend](domains/frontend.md)
+- [2026-05-03] tanstack virtual sentinel → [frontend](domains/frontend.md)
+- [2026-05-02] BullMQ 重试 Queue 侧 → [backend-infra](domains/backend-infra.md)
+- [2026-05-01] pnpm onlyBuiltDependencies → [release-ops](domains/release-ops.md)
+- [2026-05-01] Vitest workspace 根安装 → [testing](domains/testing.md)
+- [2026-05-01] Biome organizeImports → [testing](domains/testing.md)
