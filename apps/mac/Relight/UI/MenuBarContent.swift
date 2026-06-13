@@ -23,24 +23,26 @@ struct MenuBarContent: View {
                         guard let photo = pick.photo, !photo.isVideo,
                               pick.composedImageUrl != nil else { semaphore.signal(); return }
                         cache.clearComposedCache(for: pick.pickDate)
-                        var urls: [(URL, NSScreen)] = []
+                        // 为每个屏幕分辨率下载壁纸
+                        var wallpaperPaths: [String] = []
                         for screen in NSScreen.screens {
                             let scale = screen.backingScaleFactor
                             let w = Int(screen.frame.width * scale)
                             let h = Int(screen.frame.height * scale)
                             if let url = try? await client.downloadComposedWallpaper(
                                 pickDate: pick.pickDate, width: w, height: h) {
-                                urls.append((url, screen))
+                                wallpaperPaths.append(url.path)
                             }
                         }
-                        // setDesktopImageURL 必须在主线程调用
+                        // 用 AppleScript 设置所有 Space 的壁纸（setDesktopImageURL 只影响当前 Space）
                         await MainActor.run {
-                            for (url, screen) in urls {
-                                try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
-                                    .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
-                                    .allowClipping: false,
-                                    .fillColor: NSColor(srgbRed: 0.972, green: 0.961, blue: 0.929, alpha: 1.0),
-                                ])
+                            for path in wallpaperPaths {
+                                let src = "tell application \"System Events\" to tell every desktop to set picture to \"\(path)\""
+                                if let script = NSAppleScript(source: src) {
+                                    var error: NSDictionary?
+                                    script.executeAndReturnError(&error)
+                                    if let error { print("壁纸设置失败: \(error)") }
+                                }
                             }
                             AppSettings.shared.lastAppliedPickDate = pick.pickDate
                         }
