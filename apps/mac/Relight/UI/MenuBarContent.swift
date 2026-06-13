@@ -23,21 +23,27 @@ struct MenuBarContent: View {
                         guard let photo = pick.photo, !photo.isVideo,
                               pick.composedImageUrl != nil else { semaphore.signal(); return }
                         cache.clearComposedCache(for: pick.pickDate)
+                        var urls: [(URL, NSScreen)] = []
                         for screen in NSScreen.screens {
                             let scale = screen.backingScaleFactor
                             let w = Int(screen.frame.width * scale)
                             let h = Int(screen.frame.height * scale)
-                            do {
-                                let url = try await client.downloadComposedWallpaper(
-                                    pickDate: pick.pickDate, width: w, height: h)
-                                try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
+                            if let url = try? await client.downloadComposedWallpaper(
+                                pickDate: pick.pickDate, width: w, height: h) {
+                                urls.append((url, screen))
+                            }
+                        }
+                        // setDesktopImageURL 必须在主线程调用
+                        await MainActor.run {
+                            for (url, screen) in urls {
+                                try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
                                     .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
                                     .allowClipping: false,
                                     .fillColor: NSColor(srgbRed: 0.972, green: 0.961, blue: 0.929, alpha: 1.0),
                                 ])
-                            } catch { }
+                            }
+                            AppSettings.shared.lastAppliedPickDate = pick.pickDate
                         }
-                        await MainActor.run { AppSettings.shared.lastAppliedPickDate = pick.pickDate }
                     } catch { }
                     semaphore.signal()
                 }
