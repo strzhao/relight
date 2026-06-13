@@ -20,26 +20,20 @@ struct MenuBarContent: View {
                 Task {
                     do {
                         let pick = try await client.fetchTodayPick()
-                        // composedImageUrl 可能在手动选择后被清空（等待重合成），
-                        // 不依赖它——直接按屏幕分辨率调 wallpaper API，服务端会自动合成
                         let pickDate = pick.pickDate
                         cache.clearComposedCache(for: pickDate)
-                        var wallpaperPaths: [String] = []
                         for screen in NSScreen.screens {
                             let scale = screen.backingScaleFactor
                             let w = Int(screen.frame.width * scale)
                             let h = Int(screen.frame.height * scale)
                             if let url = try? await client.downloadComposedWallpaper(
                                 pickDate: pickDate, width: w, height: h) {
-                                wallpaperPaths.append(url.path)
+                                let proc = Process()
+                                proc.launchPath = "/usr/bin/osascript"
+                                proc.arguments = ["-e", "tell application \"System Events\" to tell every desktop to set picture to \"\(url.path)\""]
+                                proc.launch()
+                                proc.waitUntilExit()
                             }
-                        }
-                        for path in wallpaperPaths {
-                            let proc = Process()
-                            proc.launchPath = "/usr/bin/osascript"
-                            proc.arguments = ["-e", "tell application \"System Events\" to tell every desktop to set picture to \"\(path)\""]
-                            proc.launch()
-                            proc.waitUntilExit()
                         }
                         await MainActor.run { AppSettings.shared.lastAppliedPickDate = pickDate }
                     } catch { }
