@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir, unlink } from "node:fs/promises";
+import path from "node:path";
 import { selectDailyPickSchema } from "@relight/shared";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db";
+import { config } from "../lib/config";
 
 type PhotoRow = typeof schema.photos.$inferSelect;
 type DailyPickRow = typeof schema.dailyPicks.$inferSelect;
@@ -370,6 +372,19 @@ export const dailyRouter = new Hono()
           : {}),
       })
       .where(eq(schema.dailyPicks.id, pick.id));
+
+    // 清除该日期所有维度的壁纸缓存文件（Mac App 按屏幕尺寸请求，
+    // 仅设 composedImagePath=null 无法清除 3840x2160 等维度缓存）
+    const composedDir = path.join(config.storageRoot, "daily-composed");
+    try {
+      const files = await readdir(composedDir);
+      const staleFiles = files.filter((f) => f.startsWith(`${pickDate}_`));
+      if (staleFiles.length > 0) {
+        await Promise.all(staleFiles.map((f) => unlink(path.join(composedDir, f))));
+      }
+    } catch {
+      // 缓存目录不存在或清理失败不阻塞主流程
+    }
 
     // 重新查询更新后的记录
     const updatedRows = await db
