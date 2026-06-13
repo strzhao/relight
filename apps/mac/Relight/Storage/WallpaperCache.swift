@@ -39,6 +39,17 @@ final class WallpaperCache {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// 清除指定日期的所有本地合成壁纸缓存（用户手动选择新照片后调用）
+    func clearComposedCache(for pickDate: String) {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: composedDir, includingPropertiesForKeys: nil) else {
+            return
+        }
+        for url in contents where url.lastPathComponent.hasPrefix("\(pickDate)_") {
+            try? fm.removeItem(at: url)
+        }
+    }
+
     func writeComposed(pickDate: String, width: Int, height: Int, data: Data) throws -> URL {
         let url = composedDir.appendingPathComponent("\(pickDate)_\(width)x\(height).jpg")
         do {

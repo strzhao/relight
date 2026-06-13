@@ -39,6 +39,8 @@ actor WallpaperCoordinator {
 
       // 图片 + 已有合成图 URL → 分屏下载合成图
       if !photo.isVideo, pick.composedImageUrl != nil {
+        // 用户手动触发或定时刷新：清除本地壁纸缓存，强制从服务端重新下载
+        WallpaperCache.shared.clearComposedCache(for: pick.pickDate)
         var failedScreens = 0
         for screen in NSScreen.screens {
           let scale = screen.backingScaleFactor
