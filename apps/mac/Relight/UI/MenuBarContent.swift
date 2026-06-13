@@ -13,33 +13,26 @@ struct MenuBarContent: View {
             .disabled(true)
         Divider()
         Button("立即更新壁纸") {
-            DispatchQueue.global().async {
+            Task.detached {
                 let client = RelightClient()
                 let cache = WallpaperCache.shared
-                let semaphore = DispatchSemaphore(value: 0)
-                Task {
-                    do {
-                        let pick = try await client.fetchTodayPick()
-                        let pickDate = pick.pickDate
-                        cache.clearComposedCache(for: pickDate)
-                        for screen in NSScreen.screens {
-                            let scale = screen.backingScaleFactor
-                            let w = Int(screen.frame.width * scale)
-                            let h = Int(screen.frame.height * scale)
-                            if let url = try? await client.downloadComposedWallpaper(
-                                pickDate: pickDate, width: w, height: h) {
-                                let proc = Process()
-                                proc.launchPath = "/usr/bin/osascript"
-                                proc.arguments = ["-e", "tell application \"System Events\" to tell every desktop to set picture to \"\(url.path)\""]
-                                proc.launch()
-                                proc.waitUntilExit()
-                            }
-                        }
-                        await MainActor.run { AppSettings.shared.lastAppliedPickDate = pickDate }
-                    } catch { }
-                    semaphore.signal()
+                guard let pick = try? await client.fetchTodayPick() else { return }
+                let pickDate = pick.pickDate
+                cache.clearComposedCache(for: pickDate)
+                for screen in NSScreen.screens {
+                    let s = screen.backingScaleFactor
+                    let w = Int(screen.frame.width * s); let h = Int(screen.frame.height * s)
+                    guard let url = try? await client.downloadComposedWallpaper(
+                        pickDate: pickDate, width: w, height: h) else { continue }
+                    await MainActor.run {
+                        try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
+                            .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+                            .allowClipping: false,
+                            .fillColor: NSColor(srgbRed: 0.972, green: 0.961, blue: 0.929, alpha: 1.0),
+                        ])
+                    }
                 }
-                semaphore.wait()
+                await MainActor.run { AppSettings.shared.lastAppliedPickDate = pickDate }
             }
         }
         Divider()
