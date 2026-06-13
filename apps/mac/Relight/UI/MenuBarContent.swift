@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import OSLog
 
 private let logger = Logger(subsystem: "app.relight.mac", category: "MenuBarContent")
@@ -12,12 +13,30 @@ struct MenuBarContent: View {
             .disabled(true)
         Divider()
         Button("立即更新壁纸") {
-            Task {
-                if let cb = commandBus.onRefreshNow {
-                    await cb()
-                } else {
-                    logger.warning("refreshNow callback not wired")
-                }
+            // 直接在这里执行更新逻辑
+            Task.detached {
+                let client = RelightClient()
+                do {
+                    let pick = try await client.fetchTodayPick()
+                    guard let photo = pick.photo, !photo.isVideo,
+                          pick.composedImageUrl != nil else { return }
+                    WallpaperCache.shared.clearComposedCache(for: pick.pickDate)
+                    for screen in NSScreen.screens {
+                        let scale = screen.backingScaleFactor
+                        let w = Int(screen.frame.width * scale)
+                        let h = Int(screen.frame.height * scale)
+                        if let url = try? await client.downloadComposedWallpaper(
+                            pickDate: pick.pickDate, width: w, height: h
+                        ) {
+                            try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
+                                .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+                                .allowClipping: false,
+                                .fillColor: NSColor(srgbRed: 0.972, green: 0.961, blue: 0.929, alpha: 1.0),
+                            ])
+                        }
+                    }
+                    await MainActor.run { AppSettings.shared.lastAppliedPickDate = pick.pickDate }
+                } catch { }
             }
         }
         Divider()

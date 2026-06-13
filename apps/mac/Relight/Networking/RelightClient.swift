@@ -37,10 +37,6 @@ final class RelightClient {
     }
 
     func downloadComposedWallpaper(pickDate: String, width: Int, height: Int) async throws -> URL {
-        if let cached = WallpaperCache.shared.findCachedComposed(pickDate: pickDate, width: width, height: height) {
-            return cached
-        }
-
         let baseURL = settings.apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: "\(baseURL)/api/daily/\(pickDate)/wallpaper?width=\(width)&height=\(height)") else {
             throw RelightError.invalidResponse(statusCode: 0, body: "无效的壁纸合成图 URL")

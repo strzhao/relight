@@ -38,6 +38,11 @@ struct RelightApp: App {
         Self.sharedCoordinator = coordinator
         Self.sharedAutostart = autostart
 
+        // 直接在 init 中设置回调
+        commandBus.onRefreshNow = { [coordinator] in
+            await coordinator.refreshNow()
+        }
+
         // 启动 bootstrap + scheduler
         Task.detached {
             await coordinator.bootstrapOnLaunch()
@@ -63,11 +68,7 @@ struct RelightApp: App {
         MenuBarExtra {
             MenuBarContent()
                 .environmentObject(commandBus)
-                .task {
-                    // 每次 task 重新 wire（即使被多次调用也是设置同一 closure）
-                    commandBus.onRefreshNow = {
-                        await Self.sharedCoordinator?.refreshNow()
-                    }
+                .onAppear {
                     healthMonitor.start()
                 }
         } label: {
