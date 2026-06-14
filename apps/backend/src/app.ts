@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { dailyQueue } from "./jobs/queues";
+import { db, schema } from "./db";
+import { dailyQueue, scanQueue } from "./jobs/queues";
 import { AppError } from "./lib/errors";
 import { localhostOnly } from "./lib/middleware/localhost-only";
 import {
@@ -32,6 +34,25 @@ export async function registerDailyRepeatableJob(): Promise<void> {
       jobId: "daily-selection-cron",
     },
   );
+}
+
+/** 注册扫描重复任务（每天北京时间凌晨 2:00，避开每日精选 0:00） */
+export async function registerScanRepeatableJob(): Promise<void> {
+  const sources = await db
+    .select({ id: schema.storageSources.id })
+    .from(schema.storageSources)
+    .where(eq(schema.storageSources.enabled, true));
+
+  for (const source of sources) {
+    await scanQueue.add(
+      `scan-cron:${source.id}`,
+      { storageSourceId: source.id },
+      {
+        repeat: { pattern: "0 2 * * *", tz: "Asia/Shanghai" },
+        jobId: `scan-cron:${source.id}`,
+      },
+    );
+  }
 }
 
 export function createApp(): Hono {

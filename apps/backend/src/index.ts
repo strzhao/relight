@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createApp, registerDailyRepeatableJob } from "./app";
+import { createApp, registerDailyRepeatableJob, registerScanRepeatableJob } from "./app";
 import { config } from "./lib/config";
 import { detectVideoCapability } from "./lib/video/ffmpeg";
 import { detectWhisperCapability } from "./lib/video/transcribe";
@@ -9,6 +9,11 @@ const app = createApp();
 // 注册每日精选定时任务
 registerDailyRepeatableJob().catch((err) => {
   console.error("[relight] 注册每日精选定时任务失败:", err);
+});
+
+// 注册扫描定时任务
+registerScanRepeatableJob().catch((err) => {
+  console.error("[relight] 注册扫描定时任务失败:", err);
 });
 
 // 启动能力检测（fail-soft，不阻塞进程）
