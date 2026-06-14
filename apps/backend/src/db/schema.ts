@@ -269,6 +269,23 @@ export const analyzeBatchJobs = sqliteTable("analyze_batch_jobs", {
     .references(() => analyzeBatches.id, { onDelete: "cascade" }),
 });
 
+/** 插件任务 */
+export const pluginTasks = sqliteTable("plugin_tasks", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  pluginId: text("plugin_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  params: text("params"), // JSON string
+  result: text("result"), // JSON string
+  error: text("error"),
+  startedAt: text("started_at"),
+  finishedAt: text("finished_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 /** 设置 (key-value) */
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

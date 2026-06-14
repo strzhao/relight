@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Activity, Heart, Image, LayoutDashboard } from "lucide-react";
+import { Activity, Heart, Image, LayoutDashboard, Puzzle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,6 +10,7 @@ const navItems = [
   { href: "/admin/photos", label: "照片管理", icon: Image },
   { href: "/admin/queues", label: "队列监控", icon: Activity },
   { href: "/admin/health", label: "系统健康", icon: Heart },
+  { href: "/admin/plugins", label: "插件", icon: Puzzle },
 ];
 
 export function AdminSidebar() {

@@ -70,6 +70,20 @@ export interface UnifiedPhotosParams {
   minScore?: number;
 }
 
+/** 插件列表项类型 */
+export interface PluginListItem {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  params: { key: string; label: string; type: string; required?: boolean }[];
+}
+
+/** 获取插件列表 */
+export function getPlugins(): Promise<PluginListItem[]> {
+  return serverFetch<PluginListItem[]>(API_ROUTES.plugins.list);
+}
+
 /** 获取统一照片列表 */
 export function getUnifiedPhotos(params: UnifiedPhotosParams): Promise<UnifiedPhotosResponse> {
   const sp = new URLSearchParams();

@@ -247,4 +247,28 @@ export const api = {
         method: "DELETE",
       }),
   },
+
+  plugins: {
+    /** 插件列表 */
+    list: () => fetchApi<ApiResponse<unknown[]>>(API_ROUTES.plugins.list),
+    /** 插件详情 + 最近任务 */
+    detail: (id: string) => fetchApi<ApiResponse<unknown>>(API_ROUTES.plugins.detail(id)),
+    /** 任务列表 */
+    tasks: (id: string, page = 1, pageSize = 10) => {
+      const sp = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      return fetchApi<ApiResponse<unknown>>(`${API_ROUTES.plugins.tasks(id)}?${sp}`);
+    },
+    /** 单任务详情 */
+    taskDetail: (pluginId: string, taskId: string) =>
+      fetchApi<ApiResponse<unknown>>(API_ROUTES.plugins.taskDetail(pluginId, taskId)),
+    /** 任务关联照片 */
+    taskPhotos: (pluginId: string, taskId: string) =>
+      fetchApi<ApiResponse<unknown>>(API_ROUTES.plugins.taskPhotos(pluginId, taskId)),
+    /** 触发运行 */
+    run: (id: string, params: Record<string, string>) =>
+      fetchApi<ApiResponse<{ taskId: string }>>(API_ROUTES.plugins.run(id), {
+        method: "POST",
+        body: JSON.stringify(params),
+      }),
+  },
 };

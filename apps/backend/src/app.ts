@@ -13,6 +13,7 @@ import {
   healthRouter,
   personsRouter,
   photosRouter,
+  pluginsRouter,
   queuesRouter,
   runtimeRouter,
   scanRouter,
@@ -102,6 +103,7 @@ export function createApp(): Hono {
   app.route("/api/analyze", analyzeRouter);
   app.route("/api/bursts", burstsRouter);
   app.route("/api/persons", personsRouter);
+  app.route("/api/plugins", pluginsRouter);
 
   return app;
 }

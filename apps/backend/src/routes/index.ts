@@ -11,3 +11,4 @@ export { storageRouter } from "./storage";
 export { analyzeRouter } from "./analyze";
 export { burstsRouter } from "./bursts";
 export { personsRouter } from "./persons";
+export { pluginsRouter } from "./plugins";

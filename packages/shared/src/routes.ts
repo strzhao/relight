@@ -73,4 +73,13 @@ export const API_ROUTES = {
     avatarUpload: (id: string) => `/api/persons/${id}/avatar`,
     avatarImage: (id: string) => `/api/persons/${id}/avatar.jpg`,
   },
+  plugins: {
+    list: "/api/plugins",
+    detail: (id: string) => `/api/plugins/${id}`,
+    tasks: (id: string) => `/api/plugins/${id}/tasks`,
+    taskDetail: (pluginId: string, taskId: string) => `/api/plugins/${pluginId}/tasks/${taskId}`,
+    taskPhotos: (pluginId: string, taskId: string) =>
+      `/api/plugins/${pluginId}/tasks/${taskId}/photos`,
+    run: (id: string) => `/api/plugins/${id}/run`,
+  },
 } as const;
