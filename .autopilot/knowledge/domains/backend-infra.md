@@ -69,3 +69,15 @@
 <!-- tags: cli, dangerous-operation, bullmq, queue, safety, dry-run, confirmation, batch-job, bug, ops -->
 
 **Lesson**: 任何"清空 DB / 批量入队 / 全量重跑"的脚本必须：(1) `--help` 显式打印用法；(2) 危险默认值需 `--yes` 二次确认；(3) 打印 dry-run summary；(4) 清空前 JSON 备份。
+
+### [2026-06-14] 扫描定时采用 BullMQ repeatable job 复用现有模式
+
+<!-- tags: scan, cron, bullmq, scheduling, repeatable-job, design -->
+
+**Background**: 扫描（scan-storage）之前完全依赖手动 API 触发，导致照片索引断档（最近一次扫描是 5 月 5 日，6 月新照片全未入库）。
+
+**Choice**: 在 `app.ts` 中新增 `registerScanRepeatableJob()`，为每个启用的存储源注册 BullMQ repeatable job（cron `0 2 * * * Asia/Shanghai`），完全复用 `registerDailyRepeatableJob()` 的代码模式（import queue → add with repeat pattern → jobId 唯一 → index.ts 启动调用 + .catch 错误处理）。
+
+**Alternatives rejected**: (1) 系统 cron / launchd — 引入新的调度层，与现有 BullMQ 基础设施不一致，且难以区分不同 storage source；(2) PM2 cron_restart — PM2 没有内建 cron，需借助 `--cron` 参数或外部脚本；(3) chokidar / fs.watch 文件监控 — NAS SMB 挂载不支持 fsevents，轮询开销大。
+
+**Trade-offs**: 增量扫描依赖 SHA256 去重，每日扫描即使无新文件也需遍历全部文件列表（6549 个 `stat` + hash 比较），凌晨 2 点执行避免与 AI 分析任务（依赖 Qwen 推理槽位）和每日精选（0 点）冲突。

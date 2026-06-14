@@ -21,6 +21,7 @@
 
 ### 决策 (decisions.md)
 
+- [2026-06-14] 扫描定时 BullMQ repeatable job → [backend-infra](domains/backend-infra.md)
 - [2026-06-02] macOS App 发布机制 → [release-ops](domains/release-ops.md)
 - [2026-06-02] 后端 API 纳入 PM2 开机自启 → [backend-infra](domains/backend-infra.md)
 - [2026-05-16] 事件键前置去重 → [daily-selection](domains/daily-selection.md)
@@ -54,6 +55,7 @@
 
 ### 模式 (patterns.md)
 
+- [2026-06-14] SQLite 时间字符串比较空格 vs T 分隔符 → [database](domains/database.md)
 - [2026-06-13] 新增图片路径同步 RAW/DNG → [image-processing](domains/image-processing.md)
 - [2026-06-13] 主实体 UPDATE 同步派生字段 → [daily-selection](domains/daily-selection.md)
 - [2026-06-13] MenuBarExtra Task.detached → [mac-app](domains/mac-app.md)

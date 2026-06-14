@@ -4,6 +4,24 @@
 
 ---
 
+### [2026-06-14] SQLite 时间字符串比较陷阱：空格 vs T 分隔符
+<!-- tags: sqlite, time-format, string-comparison, iso-8601, cli -->
+
+**Scenario**: CLI 接受 ISO 8601 时间参数（`YYYY-MM-DDTHH:MM:SS+08:00`），DB 存的是空格分隔格式（`YYYY-MM-DD HH:MM:SS`），在 SQLite 中用 `>=` / `<` 做字符串比较。
+
+**Lesson**: SQLite 字符串比较按字节序逐位进行。`' '`（空格，ASCII 0x20）< `'T'`（ASCII 0x54），因此 `'2026-05-03 09:31:26' < '2026-05-03T07:00:00+08:00'` 为真——所有 DB 行都被判为小于 CLI 传入的 startTime，导致查询返回 0 行。
+
+**Evidence**: `discover-dianping-photos.ts` 最初直接用 ISO 8601 参数查询 → 28 张应匹配的照片返回 0。修复：添加 `toDbFmt()` 将 ISO 8601 转为 `YYYY-MM-DD HH:MM:SS` 格式后再传入 SQL，时间比较恢复正常。
+
+**Fix 模式**：
+```ts
+const toDbFormat = (iso: string): string => {
+  const d = new Date(iso);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+```
+
 ## 架构决策
 
 ### [2026-05-04] photos 表使用复合 UNIQUE(storage_source_id, file_path) 而非单列 file_path
