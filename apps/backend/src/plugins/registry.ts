@@ -37,7 +37,7 @@ async function dianpingClusterRun(params: Record<string, string>): Promise<unkno
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,
       },
-      (error: ExecFileException | null, stdout: string, stderr: string) => {
+      (error, stdout, stderr) => {
         if (error && !stdout) {
           reject(new Error(stderr || error.message));
           return;
