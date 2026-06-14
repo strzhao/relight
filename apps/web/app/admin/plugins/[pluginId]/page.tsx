@@ -64,6 +64,137 @@ interface TaskDisplayInfo {
   photoCount: number;
   clustersFound: number;
   firstPhotoPath: string | null;
+  restaurantName: string | null;
+}
+
+// 常见描述性标签（非餐厅名），从餐厅名候选中排除
+const DESCRIPTOR_TAGS = new Set([
+  "美食",
+  "食物",
+  "暖色调",
+  "冷色调",
+  "低饱和",
+  "高饱和",
+  "特写",
+  "纪实",
+  "写实",
+  "日常生活",
+  "室内",
+  "户外",
+  "食欲",
+  "聚餐",
+  "木质桌面",
+  "瓷盘",
+  "陶瓷碗",
+  "砂锅",
+  "丰盛",
+  "生活气息",
+  "家常",
+  "温馨",
+  "欢快",
+  "宁静",
+  "怀旧",
+  "复古",
+  "胶片感",
+  "自然光",
+  "中式菜肴",
+  "中式餐饮",
+  "中式面食",
+  "手机界面",
+  "手机截图",
+  "UI界面",
+  "信息图表",
+  "白色背景",
+  "极简UI",
+  "数字生活",
+  "商业",
+  "优惠",
+  "预订",
+  "菜单",
+  "食物缩略图",
+  "木质纹理",
+  "酱汁",
+  "葱花",
+  "蒜瓣",
+  "洋葱",
+  "米饭",
+  "牛肉",
+  "鸡肉",
+  "红烧肉",
+  "春笋",
+  "鳝鱼饭",
+  "煲仔饭",
+  "黄鳝",
+  "蔬菜",
+  "海鲜",
+  "日常",
+  "随性",
+  "轻松",
+  "快乐",
+  "童真",
+  "呆萌",
+  "孤独",
+  "忧郁",
+  "平静",
+  "单人",
+  "单人肖像",
+  "儿童",
+  "亲子",
+  "女性",
+  "年轻女性",
+  "背影",
+  "剪影",
+  "建筑",
+  "车辆",
+  "花卉",
+  "植物",
+  "城市街景",
+  "老城小巷",
+  "夜景",
+  "日落",
+  "黄昏",
+  "中文",
+  "文字",
+  "路牌",
+  "书法",
+  "水墨画",
+  "中国风",
+  "餐厅",
+  "餐饮",
+]);
+
+function extractRestaurantName(result: Record<string, unknown>): string | null {
+  try {
+    const photos = result.photos as Array<{ tags?: string[] }> | undefined;
+    if (!photos?.length) return null;
+
+    // 策略1: 优先从截图照片中找（大众点评APP截图最可能有餐厅名）
+    const screenshotTags = new Set(["手机截图", "UI界面", "手机界面"]);
+    const screenshotPhotos = photos.filter((p) =>
+      (p.tags ?? []).some((t) => screenshotTags.has(t)),
+    );
+    const targetPhotos = screenshotPhotos.length > 0 ? screenshotPhotos : photos;
+
+    // 收集候选标签：非描述性 + 2-6个汉字
+    const tagCounts = new Map<string, number>();
+    for (const p of targetPhotos) {
+      for (const tag of p.tags ?? []) {
+        if (!DESCRIPTOR_TAGS.has(tag) && /^[一-鿿]{2,6}$/.test(tag)) {
+          tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+        }
+      }
+    }
+
+    // 截图来源：出现 ≥1 次即可；普通来源：≥2 次
+    const minCount = screenshotPhotos.length > 0 ? 1 : 2;
+    const candidates = [...tagCounts.entries()]
+      .filter(([, count]) => count >= minCount)
+      .sort((a, b) => b[1] - a[1]);
+
+    return candidates[0]?.[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function parseTaskDisplayInfo(task: TaskRecord): TaskDisplayInfo | null {
@@ -80,6 +211,7 @@ function parseTaskDisplayInfo(task: TaskRecord): TaskDisplayInfo | null {
       photoCount: r.stats?.selected ?? r.photos?.length ?? 0,
       clustersFound: r.stats?.clustersFound ?? 0,
       firstPhotoPath: r.photos?.[0]?.outputPath ?? null,
+      restaurantName: extractRestaurantName(r),
     };
   } catch {
     return null;
@@ -321,9 +453,19 @@ export default function PluginDetailPage() {
                         </div>
                       </div>
                       <CardContent className="pt-4 space-y-2">
+                        {/* Restaurant name — 最醒目的信息 */}
+                        {info?.restaurantName ? (
+                          <h4 className="text-base font-bold truncate" title={info.restaurantName}>
+                            {info.restaurantName}
+                          </h4>
+                        ) : info ? (
+                          <h4 className="text-base font-bold text-muted-foreground truncate">
+                            {info.gpsLat != null ? `${info.gpsLat}, ${info.gpsLng}` : "未知餐厅"}
+                          </h4>
+                        ) : null}
                         {/* Time */}
-                        <div className="flex items-center gap-2 text-sm">
-                          <Clock className="size-3.5 text-muted-foreground shrink-0" />
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Clock className="size-3.5 shrink-0" />
                           <span className="truncate">
                             {info
                               ? `${formatTime(info.timeStart)} ~ ${formatTime(info.timeEnd)}`
@@ -332,16 +474,16 @@ export default function PluginDetailPage() {
                         </div>
                         {/* GPS */}
                         {info?.gpsLat != null && (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <MapPin className="size-3.5 shrink-0" />
-                            <span className="truncate">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <MapPin className="size-3 shrink-0" />
+                            <span className="truncate font-mono">
                               {info.gpsLat}, {info.gpsLng}
                             </span>
                           </div>
                         )}
                         {/* Stats */}
                         {info && (
-                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
                             <span>{info.photoCount} 张照片</span>
                             <span>·</span>
                             <span>{info.clustersFound} 个聚类</span>
