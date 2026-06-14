@@ -73,6 +73,41 @@ export const pluginsRouter = new Hono()
     if (!task) return c.json({ success: false, error: "任务不存在" }, 404);
     return c.json({ success: true, data: task });
   })
+  // GET /api/plugins/:id/tasks/:taskId/photos/:index — 服务单张照片文件
+  .get("/:id/tasks/:taskId/photos/:index", async (c) => {
+    const [task] = await db
+      .select()
+      .from(schema.pluginTasks)
+      .where(
+        and(
+          eq(schema.pluginTasks.id, c.req.param("taskId")),
+          eq(schema.pluginTasks.pluginId, c.req.param("id")),
+        ),
+      )
+      .limit(1);
+
+    if (!task?.result) return c.json({ success: false, error: "任务或结果不存在" }, 404);
+
+    try {
+      const result = JSON.parse(task.result);
+      const idx = Number(c.req.param("index"));
+      const photo = result.photos?.[idx];
+      if (!photo?.outputPath) return c.json({ success: false, error: "照片不存在" }, 404);
+
+      const { readFile, access } = await import("node:fs/promises");
+      try {
+        await access(photo.outputPath);
+      } catch {
+        return c.json({ success: false, error: "文件不存在" }, 404);
+      }
+      const buf = await readFile(photo.outputPath);
+      return new Response(buf, {
+        headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=3600" },
+      });
+    } catch {
+      return c.json({ success: false, error: "读取照片失败" }, 500);
+    }
+  })
   // GET /api/plugins/:id/tasks/:taskId/photos — 任务关联的照片列表
   .get("/:id/tasks/:taskId/photos", async (c) => {
     const [task] = await db

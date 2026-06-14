@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { API_ROUTES } from "@relight/shared";
-import { Loader2, Utensils } from "lucide-react";
+import { Clock, Image, Loader2, MapPin, Utensils } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { ChangeEvent } from "react";
@@ -53,6 +53,50 @@ function getResultPhotoCount(result: string | null): number {
     return parsed?.stats?.selected ?? parsed?.photos?.length ?? 0;
   } catch {
     return 0;
+  }
+}
+
+interface TaskDisplayInfo {
+  timeStart: string;
+  timeEnd: string;
+  gpsLat: number | null;
+  gpsLng: number | null;
+  photoCount: number;
+  clustersFound: number;
+  firstPhotoPath: string | null;
+}
+
+function parseTaskDisplayInfo(task: TaskRecord): TaskDisplayInfo | null {
+  if (!task.result) return null;
+  try {
+    const r = JSON.parse(task.result);
+    const selectedCluster = r.clusters?.find((c: { isSelected: boolean }) => c.isSelected);
+    const gps = selectedCluster?.gpsCenter;
+    return {
+      timeStart: r.timeWindow?.start ?? "",
+      timeEnd: r.timeWindow?.end ?? "",
+      gpsLat: gps ? Math.round(gps.lat * 10000) / 10000 : null,
+      gpsLng: gps ? Math.round(gps.lng * 10000) / 10000 : null,
+      photoCount: r.stats?.selected ?? r.photos?.length ?? 0,
+      clustersFound: r.stats?.clustersFound ?? 0,
+      firstPhotoPath: r.photos?.[0]?.outputPath ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) {
+      // Try "YYYY-MM-DD HH:MM:SS" format
+      const parts = iso.split(" ");
+      return parts[1] ?? iso;
+    }
+    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return iso;
   }
 }
 
@@ -232,71 +276,111 @@ export default function PluginDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Task history */}
-          <Card>
-            <CardHeader>
-              <h3 className="font-semibold">历史任务</h3>
-            </CardHeader>
-            <CardContent>
-              {tasks.length === 0 ? (
-                <div className="rounded-lg border py-8 text-center text-sm text-muted-foreground">
-                  暂无任务记录
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b bg-muted/50">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium">时间</th>
-                        <th className="px-4 py-3 text-left font-medium">状态</th>
-                        <th className="px-4 py-3 text-left font-medium">结果</th>
-                        <th className="px-4 py-3 text-left font-medium">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {tasks.map((task) => {
-                        const sb = getStatusBadge(task.status);
-                        const photoCount = getResultPhotoCount(task.result);
-                        return (
-                          <tr key={task.id} className="hover:bg-muted/30" data-testid="task-item">
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {new Date(task.createdAt).toLocaleString("zh-CN")}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span
-                                className={cn(
-                                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                                  sb.className,
-                                )}
-                              >
-                                {sb.label}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {task.status === "done"
-                                ? `${photoCount} 张照片`
-                                : task.status === "failed"
-                                  ? (task.error?.slice(0, 80) ?? "未知错误")
-                                  : "-"}
-                            </td>
-                            <td className="px-4 py-3">
-                              {task.status === "done" && photoCount > 0 && (
-                                <Button variant="outline" size="sm" asChild>
-                                  <Link href={`/admin/plugins/${plugin.id}/tasks/${task.id}`}>
-                                    查看照片
-                                  </Link>
-                                </Button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* Task history — card grid */}
+          <div>
+            <h3 className="font-semibold mb-4">历史任务</h3>
+            {tasks.length === 0 ? (
+              <div className="rounded-lg border py-8 text-center text-sm text-muted-foreground">
+                暂无任务记录
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {tasks.map((task) => {
+                  const sb = getStatusBadge(task.status);
+                  const info = parseTaskDisplayInfo(task);
+                  return (
+                    <Card
+                      key={task.id}
+                      className="hover:shadow-md transition-shadow"
+                      data-testid="task-item"
+                    >
+                      {/* Thumbnail area */}
+                      <div className="aspect-[16/9] bg-muted/50 rounded-t-xl overflow-hidden flex items-center justify-center">
+                        {info?.firstPhotoPath ? (
+                          <img
+                            src={`http://localhost:3000/api/plugins/${pluginId}/tasks/${task.id}/photos/0`}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = "none";
+                              (e.target as HTMLImageElement).nextElementSibling?.classList.remove(
+                                "hidden",
+                              );
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className={
+                            info?.firstPhotoPath
+                              ? "hidden"
+                              : "flex flex-col items-center gap-2 text-muted-foreground"
+                          }
+                        >
+                          <Image className="size-10" />
+                          <span className="text-xs">无预览</span>
+                        </div>
+                      </div>
+                      <CardContent className="pt-4 space-y-2">
+                        {/* Time */}
+                        <div className="flex items-center gap-2 text-sm">
+                          <Clock className="size-3.5 text-muted-foreground shrink-0" />
+                          <span className="truncate">
+                            {info
+                              ? `${formatTime(info.timeStart)} ~ ${formatTime(info.timeEnd)}`
+                              : new Date(task.createdAt).toLocaleString("zh-CN")}
+                          </span>
+                        </div>
+                        {/* GPS */}
+                        {info?.gpsLat != null && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <MapPin className="size-3.5 shrink-0" />
+                            <span className="truncate">
+                              {info.gpsLat}, {info.gpsLng}
+                            </span>
+                          </div>
+                        )}
+                        {/* Stats */}
+                        {info && (
+                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <span>{info.photoCount} 张照片</span>
+                            <span>·</span>
+                            <span>{info.clustersFound} 个聚类</span>
+                          </div>
+                        )}
+                        {/* Error message for failed tasks */}
+                        {task.status === "failed" && task.error && (
+                          <p className="text-xs text-destructive truncate">
+                            {task.error.slice(0, 60)}
+                          </p>
+                        )}
+                        {/* Status + action */}
+                        <div className="flex items-center justify-between pt-3 border-t">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                              sb.className,
+                            )}
+                          >
+                            {sb.label}
+                          </span>
+                          {task.status === "done" && getResultPhotoCount(task.result) > 0 && (
+                            <Button variant="outline" size="sm" asChild>
+                              <Link href={`/admin/plugins/${plugin.id}/tasks/${task.id}`}>
+                                查看照片
+                              </Link>
+                            </Button>
+                          )}
+                          {task.status === "running" && (
+                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <div className="rounded-lg border py-12 text-center text-sm text-muted-foreground">
