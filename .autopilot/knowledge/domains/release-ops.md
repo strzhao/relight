@@ -32,6 +32,24 @@
 
 ---
 
+### [2026-06-14] ESM 中 `__dirname` 不可用，必须用 `import.meta.url` 替代
+
+<!-- tags: esm, __dirname, import.meta.url, fileURLToPath, nodejs -->
+
+**Scenario**: 在 ESM 模块中使用 `__dirname` 抛出 `ReferenceError`。
+
+**Lesson**: 替代模板：
+```ts
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+```
+
+**Evidence**: `plugins/registry.ts` 用 `__dirname` 解析 CLI 路径 → PM2 ESM 模式 → `ReferenceError` → 所有聚类任务 failed。
+
+---
+
 ### [2026-05-07] ESM 模块顶层 await 阻塞 vitest `await import()` → 测试 5s 超时
 
 <!-- tags: vitest, esm, top-level-await, dynamic-import, redis, ioredis, worker, bug -->

@@ -55,6 +55,8 @@
 
 ### 模式 (patterns.md)
 
+- [2026-06-14] ESM `__dirname` 不可用 → [release-ops](domains/release-ops.md)
+- [2026-06-14] 插件异步任务模式 → [backend-infra](domains/backend-infra.md)
 - [2026-06-14] SQLite 时间字符串比较空格 vs T 分隔符 → [database](domains/database.md)
 - [2026-06-13] 新增图片路径同步 RAW/DNG → [image-processing](domains/image-processing.md)
 - [2026-06-13] 主实体 UPDATE 同步派生字段 → [daily-selection](domains/daily-selection.md)

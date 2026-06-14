@@ -81,3 +81,13 @@
 **Alternatives rejected**: (1) 系统 cron / launchd — 引入新的调度层，与现有 BullMQ 基础设施不一致，且难以区分不同 storage source；(2) PM2 cron_restart — PM2 没有内建 cron，需借助 `--cron` 参数或外部脚本；(3) chokidar / fs.watch 文件监控 — NAS SMB 挂载不支持 fsevents，轮询开销大。
 
 **Trade-offs**: 增量扫描依赖 SHA256 去重，每日扫描即使无新文件也需遍历全部文件列表（6549 个 `stat` + hash 比较），凌晨 2 点执行避免与 AI 分析任务（依赖 Qwen 推理槽位）和每日精选（0 点）冲突。
+
+### [2026-06-14] 插件异步任务模式：POST 立即返回 + DB 状态轮询
+
+<!-- tags: plugin, async-task, pattern, api-design, background-job, polling -->
+
+**Background**: 插件执行耗时不确定（餐厅聚类 CLI 需 10-60s），API 不能同步等待。
+
+**Choice**: POST `/api/plugins/:id/run` 立即创建 `plugin_tasks` 记录（status=running），返回 `{ taskId }`。`plugin.run()` 以 fire-and-forget 方式执行，完成后 UPDATE status=done/failed + 写入 result/error。前端轮询 `GET /api/plugins/:id/tasks/:taskId` 直到 status 终态。
+
+**Trade-offs**: 优点：API 响应快、支持历史回溯、多个插件复用同一模式。缺点：轮询有延迟（前端 2s 间隔）、无实时推送（将来可加 SSE）。
