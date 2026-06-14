@@ -168,7 +168,7 @@ const TIME_GAP_MINUTES = 15;
 const GPS_CLUSTER_RADIUS_M = 200;
 
 /** 无 GPS 照片吸附时间窗口 (分钟) */
-const NO_GPS_WINDOW_MINUTES = 5;
+const NO_GPS_WINDOW_MINUTES = 15; // 扩大吸附窗口，捕获点菜截图到上菜拍照的间隔（如 11min）
 
 // ===== Arg Parsing =====
 
@@ -499,6 +499,69 @@ function gpsClusterWithinTimeCluster(
   return result;
 }
 
+/**
+ * Merge sub-clusters across time-gap boundaries if their GPS centers are within GPS_CLUSTER_RADIUS_M.
+ * This handles the case where a user takes photos at the same restaurant but with >15 min gaps
+ * between courses (e.g., waiting for dishes, eating slowly, stepping outside for exterior shot).
+ */
+function crossTimeGpsMerge(
+  subClusters: { gpsPhotos: PhotoRecord[]; noGpsPhotos: PhotoRecord[] }[],
+): { gpsPhotos: PhotoRecord[]; noGpsPhotos: PhotoRecord[] }[] {
+  if (subClusters.length <= 1) return subClusters;
+
+  const n = subClusters.length;
+  const parent = new Array(n).fill(0).map((_, i) => i);
+
+  function find(x: number): number {
+    let root = x;
+    while ((parent[root] as number) !== root) {
+      parent[root] = parent[parent[root] as number] as number;
+      root = parent[root] as number;
+    }
+    return root;
+  }
+
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  // Compute GPS center for each sub-cluster (only from gpsPhotos)
+  const centers = subClusters.map((sub) => computeGpsCenter(sub.gpsPhotos));
+
+  // Merge sub-clusters whose GPS centers are within radius
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const ci = centers[i];
+      const cj = centers[j];
+      if (ci && cj) {
+        const dist = haversineDistanceM(ci.lat, ci.lng, cj.lat, cj.lng);
+        if (dist < GPS_CLUSTER_RADIUS_M) {
+          union(i, j);
+        }
+      }
+    }
+  }
+
+  // Collect merged groups
+  const groups = new Map<number, { gpsPhotos: PhotoRecord[]; noGpsPhotos: PhotoRecord[] }>();
+  for (let i = 0; i < n; i++) {
+    const root = find(i);
+    if (!groups.has(root)) {
+      groups.set(root, { gpsPhotos: [], noGpsPhotos: [] });
+    }
+    const g = groups.get(root);
+    const sub = subClusters[i] as (typeof subClusters)[number];
+    if (g && sub) {
+      g.gpsPhotos.push(...sub.gpsPhotos);
+      g.noGpsPhotos.push(...sub.noGpsPhotos);
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
 function allPhotosInSubCluster(sub: {
   gpsPhotos: PhotoRecord[];
   noGpsPhotos: PhotoRecord[];
@@ -764,8 +827,16 @@ async function main(): Promise<void> {
   }
   err(`[discover-dianping] GPS 聚类后: ${allSubClusters.length} 个簇`);
 
+  // Cross-time GPS merge: re-merge clusters at the same GPS location separated by time gaps
+  const mergedClusters = crossTimeGpsMerge(allSubClusters);
+  const mergeNote =
+    mergedClusters.length < allSubClusters.length
+      ? ` (合并了 ${allSubClusters.length - mergedClusters.length} 个)`
+      : "";
+  err(`[discover-dianping] 跨时间GPS合并后: ${mergedClusters.length} 个簇${mergeNote}`);
+
   // Phase 2: Score and select best cluster
-  const clusterResults: ClusterResult[] = allSubClusters.map((sub, idx) => {
+  const clusterResults: ClusterResult[] = mergedClusters.map((sub, idx) => {
     const allPhotos = allPhotosInSubCluster(sub);
     const deduped = dedupCluster(allPhotos);
     const score = scoreCluster(deduped);
@@ -813,7 +884,7 @@ async function main(): Promise<void> {
   // Phase 3: Dedup and prepare selected photos
   let selectedPhotos: PhotoRecord[] = [];
   if (bestClusterIdx >= 0) {
-    const bestSub = allSubClusters[bestClusterIdx] as (typeof allSubClusters)[number];
+    const bestSub = mergedClusters[bestClusterIdx] as (typeof mergedClusters)[number];
     selectedPhotos = dedupCluster(allPhotosInSubCluster(bestSub));
   }
 
