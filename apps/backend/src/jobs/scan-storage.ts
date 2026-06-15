@@ -60,9 +60,11 @@ async function cleanupOrphans(
     const orphanIds = orphans.map((p) => p.id);
 
     // 4. 同一事务: 先删 daily_picks 引用 + 再删 photos
-    await db.transaction(async (tx) => {
-      await tx.delete(schema.dailyPicks).where(inArray(schema.dailyPicks.photoId, orphanIds));
-      await tx.delete(schema.photos).where(inArray(schema.photos.id, orphanIds));
+    // drizzle better-sqlite3 的 transaction() 严格同步，禁止 async 回调
+    // （async 回调会使 drizzle 抛 Transaction function cannot return a promise）
+    db.transaction((tx) => {
+      tx.delete(schema.dailyPicks).where(inArray(schema.dailyPicks.photoId, orphanIds)).run();
+      tx.delete(schema.photos).where(inArray(schema.photos.id, orphanIds)).run();
     });
     // photo_tags 和 photo_analyses 通过 ON DELETE CASCADE 自动清理
 
@@ -87,7 +89,7 @@ async function cleanupOrphans(
  * 1. 查找存储源
  * 2. 遍历目录获取所有图片文件
  * 3. 流式 SHA256 去重（适配器 computeFileHash）
- * 4. 收集元信息 → 批量 INSERT（db.transaction 包裹）
+ * 4. 收集元信息 → 批量 INSERT（单条 bulk INSERT，SQLite 天然原子，无需事务包裹）
  * 5. 并发生成缩略图（每批 4 个 Promise.all，失败不阻塞）
  * 6. 查询已有分析 → 跳过已分析 photo → addBulk 入队
  */
@@ -275,10 +277,10 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       return;
     }
 
-    // 5. 批量 INSERT 照片记录（事务包裹，单条 SQL 多值）
-    await db.transaction(async (tx) => {
-      await tx.insert(schema.photos).values(photoRecords);
-    });
+    // 5. 批量 INSERT 照片记录
+    // 单条 bulk INSERT 天然原子（better-sqlite3 单条 prepare+run 在隐式事务中）。
+    // 不能用 db.transaction(async) — drizzle better-sqlite3 禁止 async 回调。
+    await db.insert(schema.photos).values(photoRecords);
 
     job.log(`批量插入 ${photoRecords.length} 张照片记录`);
 

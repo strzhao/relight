@@ -1,6 +1,6 @@
 {
   "name": "@relight/backend",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "workers": "tsx src/workers/index.ts",
     "backfill:taken-at": "tsx src/cli/backfill-taken-at.ts",
+    "backfill:thumbnails": "tsx src/cli/backfill-thumbnails.ts",
     "models:download": "tsx scripts/download-models.ts"
   },
   "dependencies": {

@@ -156,6 +156,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
 - `e2e-verify.ts` — 端到端验证 AI 分析全链路（单张照片）
 - `repair-heic.ts` — 修复已有 HEIC 照片的缩略图（thumbnailPath IS NULL 且扩展名为 heic/heif）
+- `backfill-thumbnails.ts` — 补救 `thumbnail_path IS NULL` 的历史照片缩略图，复用 generateThumbnail，支持 `--dry-run`/`--limit`/`--media-type`（script: `backfill:thumbnails`）
 
 ### 前端架构 (apps/web)
 
