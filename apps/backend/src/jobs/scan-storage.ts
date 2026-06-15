@@ -178,7 +178,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
     let skippedUnchanged = 0;
     for (const file of files) {
       const existing = existingByPath.get(file.path);
-      const fileMtime = file.modifiedAt?.getTime() ?? null;
+      const fileMtime = file.modifiedAt ? Math.floor(file.modifiedAt.getTime() / 1000) : null;
       // size 匹配且（mtime 匹配 或 DB mtime 未记录）→ 内容未变更，复用 DB hash 跳过 SHA256
       if (
         existing &&
@@ -259,7 +259,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           width: metadata.width ?? 0,
           height: metadata.height ?? 0,
           fileSize: file.size,
-          fileMtime: file.modifiedAt?.getTime() ?? null,
+          fileMtime: file.modifiedAt ? Math.floor(file.modifiedAt.getTime() / 1000) : null,
           thumbnailPath: null,
           takenAt: metadata.takenAt?.toISOString() ?? null,
           createdAt: now,
