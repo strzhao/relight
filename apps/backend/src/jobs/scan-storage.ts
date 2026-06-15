@@ -161,23 +161,42 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       job.log(`清理 ${cleaned} 条孤儿记录（源文件已不存在）`);
     }
 
-    // 3. 流式计算每个文件的 SHA256 hash，构建 hash→file 映射
-    const fileHashMap = new Map<string, (typeof files)[number]>();
+    // 3. 增量扫描：size+mtime 匹配的复用 DB hash 跳过昂贵的 SHA256（仅变更/新文件读全文件 hash）
+    const existingPhotos = await db
+      .select({
+        filePath: schema.photos.filePath,
+        fileHash: schema.photos.fileHash,
+        fileSize: schema.photos.fileSize,
+        fileMtime: schema.photos.fileMtime,
+      })
+      .from(schema.photos)
+      .where(eq(schema.photos.storageSourceId, storageSourceId));
+    const existingByPath = new Map(existingPhotos.map((p) => [p.filePath, p]));
+    const existingHashes = new Set(existingPhotos.map((p) => p.fileHash));
 
+    const fileHashMap = new Map<string, (typeof files)[number]>();
+    let skippedUnchanged = 0;
     for (const file of files) {
+      const existing = existingByPath.get(file.path);
+      const fileMtime = file.modifiedAt?.getTime() ?? null;
+      // size 匹配且（mtime 匹配 或 DB mtime 未记录）→ 内容未变更，复用 DB hash 跳过 SHA256
+      if (
+        existing &&
+        existing.fileSize === file.size &&
+        (existing.fileMtime === null || existing.fileMtime === fileMtime)
+      ) {
+        fileHashMap.set(existing.fileHash, file);
+        skippedUnchanged++;
+        continue;
+      }
       const hash = await adapter.computeFileHash(file.path);
       fileHashMap.set(hash, file);
     }
+    job.log(
+      `增量扫描: 跳过 ${skippedUnchanged} 个未变更（size+mtime 匹配），计算 ${files.length - skippedUnchanged} 个文件 SHA256`,
+    );
 
-    // 查询已有照片的 hash
-    const existingPhotos = await db
-      .select({ fileHash: schema.photos.fileHash })
-      .from(schema.photos)
-      .where(eq(schema.photos.storageSourceId, storageSourceId));
-
-    const existingHashes = new Set(existingPhotos.map((p) => p.fileHash));
-
-    // 去重：过滤新文件
+    // 去重：过滤新文件（hash 不在 DB）
     const newEntries = [...fileHashMap.entries()].filter(([hash]) => !existingHashes.has(hash));
 
     job.log(`新文件: ${newEntries.length}, 已存在: ${scannedCount - newEntries.length}`);
@@ -201,6 +220,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
       width: number;
       height: number;
       fileSize: number;
+      fileMtime: number | null;
       thumbnailPath: string | null;
       takenAt: string | null;
       createdAt: string;
@@ -239,6 +259,7 @@ export async function scanStorageWorker(job: Job<ScanJobData>): Promise<void> {
           width: metadata.width ?? 0,
           height: metadata.height ?? 0,
           fileSize: file.size,
+          fileMtime: file.modifiedAt?.getTime() ?? null,
           thumbnailPath: null,
           takenAt: metadata.takenAt?.toISOString() ?? null,
           createdAt: now,
