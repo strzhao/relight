@@ -60,9 +60,11 @@ const toDbFormat = (iso: string): string => {
 
 ### [2026-05-09] drizzle async transaction 在 better-sqlite3 上抛 `Transaction function cannot return a promise`
 
-<!-- tags: drizzle, better-sqlite3, transaction, sync, async, sqlite, orm, bug, multi-step-update -->
+<!-- tags: drizzle, better-sqlite3, transaction, sync, async, sqlite, orm, bug, scan-storage, thumbnail, silent-data-loss -->
 
-**Lesson**: better-sqlite3 的 `transaction()` API 严格同步，drizzle 在该 driver 上原样转发。必须用同步 `.run()` API + sync 回调。单步 `await tx.insert(...)` 能跑通但多步 await 之间事件循环让步必然爆。
+**Lesson**: better-sqlite3 的 `transaction()` API 严格同步，drizzle 在该 driver 上原样转发。**任何 `async` 事务回调都会抛 `Transaction function cannot return a promise`**——不论单步多步（早期观察曾误以为"单步 await 能跑通"，实测当前 drizzle 版本单步也抛，必须用同步回调 + `.run()` API）。
+
+**隐蔽陷阱（[2026-06-15] scan-storage 实例修正）**：因 better-sqlite3 同步 commit，async 回调里的 SQL 可能在 drizzle 抛错**之前已执行落盘**，导致"数据写入了但 job 失败"的诡异状态——极难诊断。scan-storage 批量 INSERT 用 `db.transaction(async (tx) => { await tx.insert(...) })`，295 张照片数据已落盘（事务已 commit），但 worker job 抛错标记失败 → BullMQ 重试发现"新文件=0"（已入库）直接完成 → **后续步骤（缩略图生成）两次 attempt 都没轮到** → 新照片 `thumbnail_path` 全 NULL（job 既在 completed sorted set 又带 failedReason 字段是关键诊断信号）。修复：单语句去掉 transaction（SQLite 单语句天然原子），多语句改同步回调 `db.transaction((tx) => { tx.delete(...).run(); })`。排查：读 BullMQ job hash 的 `failedReason` 字段 + `bull-<prefix>:<queue>:<id>:logs` list。
 
 ---
 
