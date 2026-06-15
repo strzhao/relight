@@ -304,7 +304,11 @@ describe("验收测试 1：扫描定时任务注册 (registerScanRepeatableJob)"
       await registerScanRepeatableJob();
 
       expect(mockScanQueueAdd).toHaveBeenCalledTimes(1);
-      const [jobName, payload, opts] = mockScanQueueAdd.mock.calls[0] as [string, unknown, unknown];
+      const [jobName, payload, opts] = mockScanQueueAdd.mock.calls[0] as [
+        string,
+        { storageSourceId: string },
+        { jobId: string },
+      ];
       expect(jobName).toBe("scan-cron:my-source-uuid");
       expect(opts.jobId).toBe("scan-cron:my-source-uuid");
       expect(payload).toHaveProperty("storageSourceId", "my-source-uuid");

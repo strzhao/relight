@@ -146,6 +146,10 @@ function makeDefaultPlugins() {
       name: "餐厅照片聚类",
       description: "基于时间、GPS 和美食标签自动聚类餐厅照片",
       version: "1.0.0",
+      params: [
+        { key: "timeStart", label: "开始时间", type: "datetime-local", required: true },
+        { key: "timeEnd", label: "结束时间", type: "datetime-local", required: true },
+      ],
       run: async (params: Record<string, unknown>) => mockPluginRun(params),
     },
   ];
