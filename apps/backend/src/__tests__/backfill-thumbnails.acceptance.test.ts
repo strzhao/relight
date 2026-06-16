@@ -37,12 +37,8 @@ import { setupTestSchema } from "./helpers/test-schema";
 // 常量
 // ============================================================================
 
-/** backend 工程根 = apps/backend（cwd for tsx 解析相对 import + CLI 源文件定位） */
+/** backend 工程根 = apps/backend（node --import tsx 的 cwd + CLI 源文件定位） */
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
-/** monorepo 根 = 仓库根（用于定位 node_modules/.bin/tsx） */
-const MONO_ROOT = path.resolve(BACKEND_ROOT, "../..");
-/** tsx 可执行文件绝对路径 */
-const TSX_BIN = path.join(MONO_ROOT, "node_modules/.bin/tsx");
 /** 被测 CLI 源文件 */
 const CLI_PATH = path.join(BACKEND_ROOT, "src/cli/backfill-thumbnails.ts");
 
@@ -244,11 +240,12 @@ function runCli(env: TestEnv, args: string[]): CliRunResult {
     FORCE_COLOR: "0",
   };
 
-  // 直接执行 .bin/tsx（shebang 脚本，OS 解析 #!/bin/sh）。
-  // 不能用 `process.execPath + [TSX_BIN, ...]`——.bin/tsx 是 shell wrapper 不是 JS，
-  // node 直接 require 会抛 SyntaxError。
-  // 也不能依赖 system PATH（CI 环境可能没有 tsx），用绝对路径 + spawnSync 直接执行。
-  const result = spawnSync(TSX_BIN, [CLI_PATH, ...args], {
+  // 用 node 原生 --import tsx loader 跑 CLI（绕过 .bin/tsx shell wrapper）。
+  // shell wrapper（#!/bin/sh）在 pnpm symlink 结构下用 $basedir 解析 cli.mjs，
+  // Linux CI 的 spawnSync 执行它时 basedir 解析失败 → 子进程崩溃（status null → exit -1）。
+  // 改用 process.execPath + --import tsx，node 直接加载 tsx loader 跑 .ts CLI，
+  // 无 shell wrapper 依赖，跨平台可靠（mac/Linux 一致）。
+  const result = spawnSync(process.execPath, ["--import", "tsx", CLI_PATH, ...args], {
     cwd: BACKEND_ROOT,
     encoding: "utf-8",
     timeout: 60_000,
