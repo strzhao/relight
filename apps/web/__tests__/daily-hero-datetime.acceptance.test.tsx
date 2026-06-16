@@ -124,10 +124,17 @@ describe("DailyHero 拍摄时刻 dateline — 验收测试（红队 P3 + P5 web 
       expect(html).toContain("2021年06月15日");
     });
 
-    it("dateline 文本含拍摄时刻（14:30，+08:00）", async () => {
-      const dp = makeSingleEntryPick("2021-06-15T06:30:00.000Z");
+    it("dateline 文本含拍摄时刻（与 shared 函数一致，时区 portable）", async () => {
+      const takenAt = "2021-06-15T06:30:00.000Z";
+      const dp = makeSingleEntryPick(takenAt);
       const html = await renderDailyHero(dp);
-      expect(html).toContain("14:30");
+      // 时刻段不硬编码（CI=UTC 渲染 06:30，本地 +08:00 渲染 14:30），
+      // 用 shared 函数算期望，两端 portable
+      const shared = formatPhotoCaptureTime(takenAt);
+      expect(shared).not.toBeNull();
+      // biome-ignore lint/style/noNonNullAssertion: 上方已断言非 null
+      const timeSeg = shared!.match(/\d{2}:\d{2}/)?.[0] ?? "__NO_TIME__";
+      expect(html).toContain(timeSeg);
     });
 
     it("dateline 含「拍摄」语义锚点（区分精选日 vs 拍摄日）", async () => {
@@ -137,13 +144,24 @@ describe("DailyHero 拍摄时刻 dateline — 验收测试（红队 P3 + P5 web 
       expect(html).toMatch(/拍摄/);
     });
 
-    it("dateline 区域内同时含日期与时刻（kill 把日期放别处的 no-op）", async () => {
-      const dp = makeSingleEntryPick("2021-06-15T06:30:00.000Z");
+    it("dateline 区域内同时含日期与时刻（时区 portable，kill 把日期放别处的 no-op）", async () => {
+      const takenAt = "2021-06-15T06:30:00.000Z";
+      const dp = makeSingleEntryPick(takenAt);
       const html = await renderDailyHero(dp);
-      // capture-datetime 元素的文本节点内须同时出现日期与时刻
-      expect(html).toMatch(
-        /data-testid="capture-datetime"[^>]*>[^<]*2021年06月15日[\s\S]{0,40}14:30/,
-      );
+      const shared = formatPhotoCaptureTime(takenAt);
+      expect(shared).not.toBeNull();
+      // biome-ignore lint/style/noNonNullAssertion: 上方已断言非 null
+      const s = shared!;
+      const dateSeg = s.match(/\d{4}年\d{2}月\d{2}日/)?.[0] ?? "__NO_DATE__";
+      const timeSeg = s.match(/\d{2}:\d{2}/)?.[0] ?? "__NO_TIME__";
+      // 捕获 capture-datetime 元素区域，断言区域内同时含日期与时刻（时区 portable）
+      const startIdx = html.indexOf('data-testid="capture-datetime"');
+      const endIdx = html.indexOf('data-testid="entry-title"', startIdx);
+      expect(startIdx).toBeGreaterThan(-1);
+      expect(endIdx).toBeGreaterThan(startIdx);
+      const region = html.slice(startIdx, endIdx);
+      expect(region).toContain(dateSeg);
+      expect(region).toContain(timeSeg);
     });
   });
 
