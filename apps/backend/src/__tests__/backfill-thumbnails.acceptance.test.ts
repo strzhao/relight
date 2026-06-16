@@ -69,7 +69,10 @@ interface TestEnv {
  *       photos/             ← 原始图片 fixture
  */
 function createTestEnv(prefix: string): TestEnv {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), `relight-thumb-${prefix}-`));
+  // 避开 /tmp：被测 CLI 查询排除 /tmp/% 路径照片（防测试残留污染真实补救），而 CI Linux 的
+  // os.tmpdir()=/tmp 会使本测试 fixture 落在 /tmp 下、被自己排除（total=0，全红）。
+  // 改用 home 目录（mac /Users/*、CI /home/runner，均非 /tmp，且不在仓库工作树里）。
+  const tmpRoot = fs.mkdtempSync(path.join(os.homedir(), `.relight-test-thumb-${prefix}-`));
   const dbPath = path.join(tmpRoot, "test.db");
   const storageRoot = path.join(tmpRoot, "storage");
   const thumbnailsDir = path.join(storageRoot, "thumbnails");
