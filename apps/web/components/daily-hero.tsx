@@ -9,6 +9,7 @@ import {
   type DailyPickEntry,
   type DailyPickMember,
   type Photo,
+  formatPhotoCaptureTime,
 } from "@relight/shared";
 import { Volume2, VolumeX } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -66,6 +67,38 @@ function calcYearsAgo(takenAt: string | null): number | null {
   if (Number.isNaN(taken.getTime())) return null;
   const yearDiff = new Date().getFullYear() - taken.getFullYear();
   return yearDiff >= 1 ? yearDiff : null;
+}
+
+/**
+ * 拍摄时刻 dateline（TIER 2 编辑层级）。
+ *
+ * 渲染 `拍摄于 {YYYY年MM月DD日} · {HH:MM}[ · {N} 年前]`，与精选日 masthead
+ * 区分（"拍摄"二字作语义锚点）。takenAt 为 null/无效时整行不渲染。
+ * 年差后缀仅当 yearsAgo >= 1 出现，primary 强调色，保留 data-testid="years-ago-label"。
+ *
+ * 渲染细节：日期+时刻预拼接为单字符串作为 div 直接文本子节点（整体 muted 色），
+ * 年差作为 primary span。预拼接避免 React 在变量插值边界插入 `<!-- -->` 注释，
+ * 保证 DOM 文本连续（SSR 断言友好）。
+ */
+function CaptureDateline({ takenAt }: { takenAt: string | null }) {
+  const capture = formatPhotoCaptureTime(takenAt);
+  if (!capture) return null;
+  const yearsAgo = calcYearsAgo(takenAt);
+  // 预拼接完整文本，避免 React SSR 注释打断连续串
+  const leadLabel = `拍摄于 ${capture}`;
+  return (
+    <div
+      data-testid="capture-datetime"
+      className="font-display flex flex-wrap items-baseline justify-end gap-x-2 text-[11px] italic tracking-[0.18em] normal-case tabular-nums text-muted-foreground"
+    >
+      {leadLabel}
+      {yearsAgo !== null && (
+        <span data-testid="years-ago-label" className="not-italic tracking-[0.18em]">
+          {`· ${yearsAgo} 年前`}
+        </span>
+      )}
+    </div>
+  );
 }
 
 interface DailyHeroProps {
@@ -174,7 +207,6 @@ function HeroContentLegacy({ pick }: { pick: DailyPick }) {
   const photo = pick.photo;
   const isVideo = photo && (photo.mediaType ?? "image") === "video";
   const isPortrait = photo ? photo.height > photo.width * 1.05 : false;
-  const yearsAgo = calcYearsAgo(photo?.takenAt ?? null);
   const members = pick.members ?? [];
 
   return (
@@ -210,7 +242,7 @@ function HeroContentLegacy({ pick }: { pick: DailyPick }) {
           weekday={weekday}
           title={pick.title}
           narrative={pick.narrative}
-          yearsAgo={yearsAgo}
+          takenAt={photo?.takenAt ?? null}
         />
         {members.length > 0 && <MemberStrip members={members} />}
         <FolioFooter year={year} />
@@ -256,7 +288,6 @@ function HeroContentMulti({
 
   const currentEntry = entries[currentIdx];
   const { day, month, year, weekday } = parsePickDate(pick.pickDate);
-  const yearsAgo = calcYearsAgo(currentEntry?.photo?.takenAt ?? null);
 
   // ── refs：单一权威 idx，避免 stale closure ──
   const containerRef = useRef<HTMLElement>(null);
@@ -535,7 +566,7 @@ function HeroContentMulti({
           weekday={weekday}
           title={currentEntry.title}
           narrative={currentEntry.narrative}
-          yearsAgo={yearsAgo}
+          takenAt={currentEntry.photo?.takenAt ?? null}
         />
         {/* 弱化「设为壁纸」按钮：仅在当前展示的 entry 不是主精选时显示 */}
         {currentEntry.photoId !== pick.photoId && (
@@ -704,7 +735,7 @@ function EntrySeriesStrip({
 }
 
 /**
- * 右侧编辑栏：日期 + 标题 + 叙事
+ * 右侧编辑栏：日期 + 拍摄时刻 + 标题 + 叙事
  */
 function EntryEditorial({
   day,
@@ -713,7 +744,7 @@ function EntryEditorial({
   weekday,
   title,
   narrative,
-  yearsAgo,
+  takenAt,
 }: {
   day: string;
   month: string;
@@ -721,8 +752,9 @@ function EntryEditorial({
   weekday: string;
   title: string;
   narrative: string;
-  yearsAgo: number | null;
+  takenAt: string | null;
 }) {
+  const hasDateline = formatPhotoCaptureTime(takenAt) !== null;
   return (
     <>
       {/* Masthead */}
@@ -738,26 +770,17 @@ function EntryEditorial({
             </span>
           </div>
         </div>
-        <div className="flex shrink-0">
+        <div className="flex shrink-0 flex-col items-end gap-3">
+          <CaptureDateline takenAt={takenAt} />
           <FolioNav />
         </div>
       </div>
-
-      {/* Years-ago tag */}
-      {yearsAgo !== null && (
-        <span
-          className="mt-6 self-start text-[11px] tracking-[0.22em] text-primary/80 uppercase tabular-nums"
-          data-testid="years-ago-label"
-        >
-          {`${yearsAgo} 年前的今天`}
-        </span>
-      )}
 
       {/* Title */}
       <h2
         className={cn(
           "font-serif-sc text-[clamp(2.5rem,4.4vw,4.2rem)] leading-[1.05] font-medium tracking-[-0.015em]",
-          yearsAgo !== null ? "mt-3" : "mt-10",
+          hasDateline ? "mt-3" : "mt-10",
         )}
         style={{ textWrap: "balance" }}
         data-testid="entry-title"

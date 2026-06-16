@@ -1,4 +1,5 @@
 import type { DailyPick, Photo } from "@relight/shared";
+import { formatPhotoCaptureTime } from "@relight/shared";
 import {
   COLOR_BACKGROUND,
   COLOR_BORDER,
@@ -39,6 +40,18 @@ function parsePickDate(pickDate: string) {
   };
 }
 
+/**
+ * 计算 takenAt 与今日的年份差（与 web 端 calcYearsAgo 约定一致）。
+ * 返回正整数；< 1 年或无效输入返回 null。
+ */
+function calcYearsAgo(takenAt: string | null): number | null {
+  if (!takenAt) return null;
+  const taken = new Date(takenAt);
+  if (Number.isNaN(taken.getTime())) return null;
+  const yearDiff = new Date().getFullYear() - taken.getFullYear();
+  return yearDiff >= 1 ? yearDiff : null;
+}
+
 export interface DailyHeroJSXOpts {
   pick: Omit<DailyPick, "entries"> & { composedImagePath?: string | null };
   photo: Photo;
@@ -67,6 +80,11 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
   const borderWidth = Math.max(1, Math.round(scale));
 
   const { day, month, year, weekday } = parsePickDate(pick.pickDate);
+
+  // 拍摄时刻 dateline（与 web 端格式完全一致，同源 formatPhotoCaptureTime）
+  const captureText = formatPhotoCaptureTime(photo.takenAt ?? null);
+  const captureYearsAgo = calcYearsAgo(photo.takenAt ?? null);
+  const datelineFs = Math.round(13 * scale);
 
   return (
     <div
@@ -234,48 +252,83 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
           {pick.narrative}
         </div>
 
-        {/* Footer folio */}
+        {/* Footer folio — 拍摄时刻印记（最右下方）；takenAt 缺失时回退品牌印记平衡留白 */}
         <div
           style={{
             marginTop: "auto",
             paddingTop: Math.round(64 * scale),
             paddingBottom: Math.round(8 * scale),
             display: "flex",
-            alignItems: "center",
+            alignItems: "baseline",
             justifyContent: "flex-end",
-            gap: Math.round(12 * scale),
+            gap: Math.round(10 * scale),
           }}
         >
-          <span
-            style={{
-              fontFamily: "'Fraunces', serif",
-              fontStyle: "italic",
-              fontSize: smallFs,
-              color: `${COLOR_MUTED_FOREGROUND}59`,
-              letterSpacing: "0.3em",
-            }}
-          >
-            Vol. {year}
-          </span>
-          <div
-            style={{
-              height: 1,
-              width: Math.round(40 * scale),
-              backgroundColor: `${COLOR_FOREGROUND}1A`,
-            }}
-          />
-          <span
-            style={{
-              fontFamily: "'Noto Serif SC', serif",
-              fontWeight: 300,
-              fontSize: smallFs,
-              color: `${COLOR_MUTED_FOREGROUND}59`,
-              letterSpacing: "0.4em",
-              textTransform: "uppercase",
-            }}
-          >
-            Relight Chronicle
-          </span>
+          {captureText !== null ? (
+            <>
+              <span
+                style={{
+                  fontFamily: "'Fraunces', serif",
+                  fontStyle: "italic",
+                  fontWeight: 300,
+                  fontSize: datelineFs,
+                  color: `${COLOR_MUTED_FOREGROUND}99`,
+                  letterSpacing: "0.04em",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                拍摄于 {captureText}
+              </span>
+              {captureYearsAgo !== null && (
+                <span
+                  style={{
+                    fontFamily: "'Fraunces', serif",
+                    fontStyle: "italic",
+                    fontWeight: 300,
+                    fontSize: datelineFs,
+                    color: `${COLOR_MUTED_FOREGROUND}99`,
+                    letterSpacing: "0.04em",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  · {captureYearsAgo} 年前
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span
+                style={{
+                  fontFamily: "'Fraunces', serif",
+                  fontStyle: "italic",
+                  fontSize: smallFs,
+                  color: `${COLOR_MUTED_FOREGROUND}59`,
+                  letterSpacing: "0.3em",
+                }}
+              >
+                Vol. {year}
+              </span>
+              <div
+                style={{
+                  height: 1,
+                  width: Math.round(40 * scale),
+                  backgroundColor: `${COLOR_FOREGROUND}1A`,
+                }}
+              />
+              <span
+                style={{
+                  fontFamily: "'Noto Serif SC', serif",
+                  fontWeight: 300,
+                  fontSize: smallFs,
+                  color: `${COLOR_MUTED_FOREGROUND}59`,
+                  letterSpacing: "0.4em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Relight Chronicle
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>
