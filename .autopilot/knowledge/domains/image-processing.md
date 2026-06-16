@@ -109,3 +109,17 @@
 <!-- tags: wallpaper, cache, daily-composed, dimension-cache, composedImagePath, invalidation, bug -->
 
 **Lesson**: 缓存失效必须考虑所有 cache key 变体。当缓存按维度/参数派生不同 key 时，invalidate 操作必须删除该 pickDate 的所有缓存文件（`pickDate_*` glob）。
+
+---
+
+### [2026-06-16] Satori 把文本渲染为 `<path>` 字形矢量，SVG 中无任何原始文字串——测试禁用文本子串断言
+
+<!-- tags: satori, svg, text-rendering, path-glyph, test-strategy, differential-testing, wallpaper, tautological-test, red-team, acceptance-test, image-composition -->
+
+**Background**: wallpaper template-datetime 红队用 `svg.toContain("2021年06月15日")` / `toMatch(/拍摄/)` 断言拍摄时刻 dateline 文本，结果对任何实现都失败（7 个 impossible 断言）；其 null 边界 `svg.not.toContain("日期")` 反而恒真（同义反复），无法区分"dateline 真省略"与"从不渲染"。
+
+**Lesson**: Satori 渲染 JSX 时把所有文本（中日韩 / 拉丁）转为 `<path d="...">` 字形矢量，SVG 输出**不含任何原始文字字符串**（实证：渲染 `"2021年06月15日"` 的 div → `svg.includes("2021年06月15日")===false`、无 `<text>` 标签、PATH_COUNT=1）。因此：
+- **禁用** `svg.toContain/match(<文本>)` 验证 Satori 渲染的文本内容——对任何实现都不可能通过（红队写出即 impossible 断言）。
+- **禁用** `svg.not.toContain(<文本>)` 做存在性反向验证——恒真（Satori 永不含文本），无断言力（同义反复测试，掩盖回归）。
+- **正确姿势**：① 几何断言（`<image>`/`<rect>` 的 x/y/w/h 验证 contain/cover）；② **差分 SVG**（输入 A vs 输入 B 的 SVG 必不同 + path 数随内容增减 + 不同输入产出不同 SVG）证明文本内容随输入渲染——kill no-op。本项目既有 `template.acceptance.test.ts`（contain 契约）零文本断言、纯几何，即是此规律的正确范例。
+- **autopilot 红队启示**：红队可能写出 impossible（Satori 文本断言）或 tautological（无文本环境的 not.toContain）断言；编排器需独立实证渲染行为后，把断言修正为有效且更强的差分/几何断言（是修复不可能断言，非弱化有效断言）。

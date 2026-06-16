@@ -20,6 +20,7 @@
 
 | 日期 | 模式 | 领域文件 |
 |------|------|----------|
+| 2026-06-16 | Satori 文本渲染为 path，SVG 无文字 → 测试禁文本断言（改差分/几何） | [image-processing](domains/image-processing.md) |
 | 2026-06-13 | 新增图片路径须同步 RAW/DNG | [image-processing](domains/image-processing.md) |
 | 2026-06-13 | 主实体 UPDATE 须同步关联派生字段 | [daily-selection](domains/daily-selection.md) |
 | 2026-06-13 | MenuBarExtra Task.detached | [mac-app](domains/mac-app.md) |

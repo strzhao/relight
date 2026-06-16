@@ -55,6 +55,7 @@
 
 ### 模式 (patterns.md)
 
+- [2026-06-16] Satori 文本渲染为 path，SVG 无文字 → 测试禁文本断言（改差分/几何） → [image-processing](domains/image-processing.md)
 - [2026-06-14] ESM `__dirname` 不可用 → [release-ops](domains/release-ops.md)
 - [2026-06-14] 插件异步任务模式 → [backend-infra](domains/backend-infra.md)
 - [2026-06-14] SQLite 时间字符串比较空格 vs T 分隔符 → [database](domains/database.md)
