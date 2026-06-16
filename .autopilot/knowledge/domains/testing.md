@@ -59,3 +59,23 @@
 <!-- tags: vitest, vi-mock, tdd, blue-red, contract-drift, ssr, react, mock-shape, hook-vs-prop, design -->
 
 **Lesson**: vi.mock 的 export 形状一旦写死，被测组件的 import 形状必须 100% 匹配。实现侧应同时提供"对象 API"和"平铺函数"两套导出（兼容层），让蓝队的 `api.xxx()` 和红队 mock 的 `getXxx()` 都能解析。
+
+---
+
+### [2026-06-17] CLI 黑盒 spawnSync 测试的 fixture 不能落 /tmp — CI Linux tmpdir=/tmp 与被测 /tmp 排除逻辑自吞
+
+<!-- tags: vitest, spawn-sync, cli-test, fixture, tmpdir, ci, linux, os-homedir, black-box, path-filter, bug -->
+
+**Background**: backfill-thumbnails CLI 查询故意 `not(like(filePath, "/tmp/%"))` 排除 /tmp 测试残留。测试 fixture 用 `mkdtempSync(os.tmpdir())`：本地 mac tmpdir=`/var/folders/*`（非 /tmp）→ fixture 不被排除 → 测试绿；CI Linux tmpdir=`/tmp` → fixture 落 /tmp → **被自己排除** → total=0 全 14 红。本地全绿 + 无 `.env` 全绿，纯 Linux 特有，极难本地复现。
+
+**Lesson**: 黑盒跑 CLI 的测试，fixture 路径不要用 `os.tmpdir()`——若被测代码有任何 `/tmp` 排除或路径特殊处理，CI Linux（tmpdir=/tmp）会让 fixture 自吞，本地（mac tmpdir=/var/folders）却绿。改用 `os.homedir()`（mac `/Users/*`、CI `/home/runner`，均非 /tmp，且不在仓库工作树里不污染 git）。判断准则：**fixture 路径绝不能命中被测代码的任何路径过滤规则**；当本地/CI tmpdir 不同时，用显式非 /tmp 目录。
+
+---
+
+### [2026-06-17] spawnSync 跑 tsx CLI 用 `node --import tsx`，别依赖 .bin/tsx shell wrapper
+
+<!-- tags: tsx, spawn-sync, cli-test, shell-wrapper, pnpm, symlink, node-import, ci, linux, cross-platform, bug -->
+
+**Background**: `node_modules/.bin/tsx` 在 pnpm 结构下是 `#!/bin/sh` shell wrapper（非 symlink），内部用 `$basedir/node` + 相对路径 `.pnpm/tsx@x/node_modules/tsx/dist/cli.mjs`。`spawnSync(TSX_BIN, [cli])` 让 OS 解析 shell wrapper，CI Linux 下 `$basedir` 解析 pnpm symlink 失败 → exec 找不到 cli.mjs → 子进程 status null → `result.status ?? -1` = exit -1 全崩；本地 mac 碰巧解析成功。
+
+**Lesson**: 黑盒 spawnSync 跑 .ts CLI，用 `spawnSync(process.execPath, ["--import", "tsx", cliPath, ...args])`（node 原生 ESM loader hook），绕过 shell wrapper，无 basedir/shell 依赖，mac/Linux 一致。前提：Node ≥20.6（`--import` 稳定），CI `node-version: 20`（=最新 20.x）满足。诊断 spawnSync 子进程崩溃：先查 `result.status`（null=被 signal 杀/未启动 vs 数字=正常退出），再查 stderr；shell wrapper 崩溃常表现为 status null + 空 stdout。

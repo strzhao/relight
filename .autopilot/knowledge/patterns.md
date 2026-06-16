@@ -20,6 +20,8 @@
 
 | 日期 | 模式 | 领域文件 |
 |------|------|----------|
+| 2026-06-17 | CLI 黑盒测试 fixture 避开 /tmp（CI Linux tmpdir=/tmp 与被测 /tmp 排除自吞） | [testing](domains/testing.md) |
+| 2026-06-17 | spawnSync 跑 tsx CLI 用 node --import tsx，别依赖 .bin/tsx shell wrapper | [testing](domains/testing.md) |
 | 2026-06-16 | Satori 文本渲染为 path，SVG 无文字 → 测试禁文本断言（改差分/几何） | [image-processing](domains/image-processing.md) |
 | 2026-06-13 | 新增图片路径须同步 RAW/DNG | [image-processing](domains/image-processing.md) |
 | 2026-06-13 | 主实体 UPDATE 须同步关联派生字段 | [daily-selection](domains/daily-selection.md) |
