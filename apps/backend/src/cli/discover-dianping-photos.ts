@@ -3,6 +3,15 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { config } from "../lib/config";
 import { convertHeicToJpeg, isHeicFile } from "../lib/heic";
+import {
+  buildClusterDirName,
+  dedupeName,
+  getMealtimeLabel,
+  haversineDistanceM,
+  isMealtime,
+  linkPhotoToDir,
+  resolveCityFromGps,
+} from "./dianping-output";
 import { err } from "./vlog/lib/util";
 
 // ===== Types =====
@@ -39,6 +48,14 @@ interface ClusterResult {
   gpsRadiusM: number;
   score: number;
   isSelected: boolean;
+  /** withFoodTags >= 1 的簇（输出为子目录） */
+  isRestaurant: boolean;
+  /** "早餐"|"午餐"|"晚餐"|"其他" */
+  mealtime: string;
+  /** GPS 解析出的城市名；无 GPS/无匹配 → null */
+  city: string | null;
+  /** 输出子目录名（餐厅簇才有，否则 null） */
+  outputSubDir: string | null;
   stats: {
     total: number;
     withFoodTags: number;
@@ -53,6 +70,8 @@ interface OutputPhoto {
   takenAt: string;
   tags: string[];
   inCluster: number;
+  /** 所属子目录名；未输出（非餐厅簇）→ null */
+  outputSubDir: string | null;
 }
 
 interface OutputJson {
@@ -64,6 +83,8 @@ interface OutputJson {
     totalInWindow: number;
     clustersFound: number;
     selected: number;
+    restaurantClusters: number;
+    outputSubDirs: number;
     copied: number;
     failed: number;
   };
@@ -155,11 +176,7 @@ const SCREENSHOT_KEYWORDS = new Set([
   "支付",
 ]);
 
-/** 用餐时段 (北京时间) */
-const MEALTIME_WINDOWS = [
-  { start: 11, end: 14, label: "午餐" },
-  { start: 17, end: 21, label: "晚餐" },
-];
+// MEALTIME_WINDOWS（已含早餐）已迁至 ./dianping-output，单一来源
 
 /** 时间间隙切分阈值 (分钟) */
 const TIME_GAP_MINUTES = 15;
@@ -212,18 +229,7 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-// ===== Haversine Distance =====
-
-function haversineDistanceM(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6_371_000; // Earth radius in meters
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// haversineDistanceM 已迁至 ./dianping-output（单一来源）
 
 // ===== Tag Parsing =====
 
@@ -269,11 +275,7 @@ function isScreenshotFromTags(tags: string[]): boolean {
   return hasScreenshotTags(tags) && !hasFoodTags(tags);
 }
 
-/** 判断 takenAt 是否在用餐时段 (北京时间) */
-function isMealtime(isoStr: string): boolean {
-  const hour = new Date(isoStr).getHours();
-  return MEALTIME_WINDOWS.some((w) => hour >= w.start && hour < w.end);
-}
+// isMealtime 已迁至 ./dianping-output（含早餐窗口，早/午/晚均视为正餐）
 
 // ===== DB Query =====
 
@@ -316,13 +318,13 @@ function queryPhotosInWindow(
     ORDER BY p.taken_at ASC
   `;
 
-  // DB taken_at 格式为 "YYYY-MM-DD HH:MM:SS"（空格），CLI ISO 8601 有 T 分隔，直接字符串比较会失败
+  // DB taken_at 格式为 "2026-06-14T04:18:53.000Z"（T 分隔 UTC），必须匹配格式否则 SQLite 字符串比较失败
   const toDbFmt = (iso: string): string => {
     try {
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return iso;
       const p = (n: number) => n.toString().padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
     } catch {
       return iso;
     }
@@ -665,27 +667,22 @@ async function processOnePhoto(
   mode: "convert" | "copy" | "link",
 ): Promise<string> {
   const srcPath = photo.filePath;
-  const ext = path.extname(srcPath).toLowerCase();
+  const ext = path.extname(srcPath); // 原始大小写：basename(suffix) 大小写敏感，须用原 ext 才能正确去除
+  const extLower = ext.toLowerCase();
   const baseName = path.basename(srcPath, ext);
-  const outExt = ext === ".heic" || ext === ".heif" ? ".jpg" : ext;
+  // convert/copy 模式 HEIC→jpg；link 模式走 linkPhotoToDir，此处 outExt 不被使用
+  const outExt = extLower === ".heic" || extLower === ".heif" ? ".jpg" : ext;
   const outName = baseName + outExt;
   const outPath = path.join(outputDir, outName);
 
   await mkdir(outputDir, { recursive: true });
 
   if (mode === "link") {
-    // Symlink (not available for HEIC→JPG conversion fallback)
-    if (isHeicFile(srcPath)) {
-      // Fall back to convert for HEIC
-      err(`[discover-dianping] link 模式不支持 HEIC，降级为 convert: ${path.basename(srcPath)}`);
-      const buf = await readFile(srcPath);
-      const jpeg = await convertHeicToJpeg(buf, { quality: 90 });
-      await writeFile(outPath, jpeg);
-    } else {
-      const { symlink } = await import("node:fs/promises");
-      await symlink(srcPath, outPath);
-    }
-  } else if (mode === "copy") {
+    // 纯零拷贝：symlink 原始文件（含 HEIC）。逻辑见 dianping-output.linkPhotoToDir
+    return await linkPhotoToDir(srcPath, outputDir, photo.id);
+  }
+
+  if (mode === "copy") {
     if (isHeicFile(srcPath)) {
       err(`[discover-dianping] copy 模式不支持 HEIC，降级为 convert: ${path.basename(srcPath)}`);
       const buf = await readFile(srcPath);
@@ -799,6 +796,8 @@ async function main(): Promise<void> {
         totalInWindow: 0,
         clustersFound: 0,
         selected: 0,
+        restaurantClusters: 0,
+        outputSubDirs: 0,
         copied: 0,
         failed: 0,
       },
@@ -857,6 +856,10 @@ async function main(): Promise<void> {
       gpsRadiusM,
       score,
       isSelected: false,
+      isRestaurant: withFoodTags >= 1,
+      mealtime: getMealtimeLabel(allPhotos[0]?.takenAt ?? "") ?? "其他",
+      city: resolveCityFromGps(gpsCenter?.lat ?? null, gpsCenter?.lng ?? null),
+      outputSubDir: null,
       stats: {
         total: deduped.length,
         withFoodTags,
@@ -881,46 +884,65 @@ async function main(): Promise<void> {
     (clusterResults[bestClusterIdx] as ClusterResult).isSelected = true;
   }
 
-  // Phase 3: Dedup and prepare selected photos
-  let selectedPhotos: PhotoRecord[] = [];
-  if (bestClusterIdx >= 0) {
-    const bestSub = mergedClusters[bestClusterIdx] as (typeof mergedClusters)[number];
-    selectedPhotos = dedupCluster(allPhotosInSubCluster(bestSub));
-  }
+  // Phase 3: 餐厅簇 = withFoodTags >= 1（至少 1 张美食标签照片），全部输出为子目录。
+  // bestCluster 仅用于 JSON 标注（消费方可选只取最佳簇），不再决定输出范围。
+  const restaurantClusterIdxs = clusterResults
+    .map((cr, idx) => ({ cr, idx }))
+    .filter(({ cr }) => cr.isRestaurant);
 
   err(
-    `[discover-dianping] 选中簇 #${bestClusterIdx + 1}: ` +
-      `${selectedPhotos.length} 张照片, score=${bestScore}`,
+    `[discover-dianping] 餐厅簇 ${restaurantClusterIdxs.length}/${clusterResults.length} 个，` +
+      `最佳簇 #${bestClusterIdx + 1} (score=${bestScore}, 仅标注)`,
   );
 
-  // File operations
+  // 每个餐厅簇建子目录（日期_餐次_城市），内放原始文件 symlink；
+  // 用户后续手动把语音评价文件丢进对应子目录，消费方拿到完整一顿饭内容。
   let copied = 0;
   let failed = 0;
+  let outputSubDirs = 0;
   const outputPhotos: OutputPhoto[] = [];
+  const usedNames = new Set<string>();
 
-  for (const photo of selectedPhotos) {
-    try {
-      const outputPath = await processOnePhoto(photo, args.outputDir, args.mode);
-      outputPhotos.push({
-        path: photo.filePath,
-        outputPath,
-        takenAt: photo.takenAt,
-        tags: photo.tags,
-        inCluster: bestClusterIdx + 1,
-      });
-      copied++;
-    } catch (e) {
-      err(
-        `[discover-dianping] 处理失败: ${path.basename(photo.filePath)} — ${(e as Error).message}`,
-      );
-      outputPhotos.push({
-        path: photo.filePath,
-        outputPath: "",
-        takenAt: photo.takenAt,
-        tags: photo.tags,
-        inCluster: bestClusterIdx + 1,
-      });
-      failed++;
+  for (const { cr, idx } of restaurantClusterIdxs) {
+    const sub = mergedClusters[idx] as (typeof mergedClusters)[number];
+    const deduped = dedupCluster(allPhotosInSubCluster(sub));
+
+    const dirName = dedupeName(
+      buildClusterDirName({ takenAt: cr.timeRange.start, gpsCenter: cr.gpsCenter }),
+      usedNames,
+    );
+    const subDir = path.join(args.outputDir, dirName);
+    (clusterResults[idx] as ClusterResult).outputSubDir = dirName;
+    outputSubDirs++;
+
+    err(`[discover-dianping] 簇 #${cr.id} → ${dirName}/ (${deduped.length} 张)`);
+
+    for (const photo of deduped) {
+      try {
+        const outputPath = await processOnePhoto(photo, subDir, args.mode);
+        outputPhotos.push({
+          path: photo.filePath,
+          outputPath,
+          takenAt: photo.takenAt,
+          tags: photo.tags,
+          inCluster: cr.id,
+          outputSubDir: dirName,
+        });
+        copied++;
+      } catch (e) {
+        err(
+          `[discover-dianping] 处理失败: ${path.basename(photo.filePath)} — ${(e as Error).message}`,
+        );
+        outputPhotos.push({
+          path: photo.filePath,
+          outputPath: "",
+          takenAt: photo.takenAt,
+          tags: photo.tags,
+          inCluster: cr.id,
+          outputSubDir: dirName,
+        });
+        failed++;
+      }
     }
   }
 
@@ -932,7 +954,9 @@ async function main(): Promise<void> {
     stats: {
       totalInWindow: photos.length,
       clustersFound: clusterResults.length,
-      selected: selectedPhotos.length,
+      selected: bestClusterIdx >= 0 ? (clusterResults[bestClusterIdx]?.stats.total ?? 0) : 0,
+      restaurantClusters: restaurantClusterIdxs.length,
+      outputSubDirs,
       copied,
       failed,
     },
@@ -947,8 +971,8 @@ async function main(): Promise<void> {
   }
 
   err(
-    `[discover-dianping] 完成: ${copied} 复制, ${failed} 失败, ` +
-      `${clusterResults.length} 个聚类, 选中簇 #${out.selectedCluster}`,
+    `[discover-dianping] 完成: ${copied} link/复制, ${failed} 失败, ` +
+      `${clusterResults.length} 个聚类, 餐厅簇 ${restaurantClusterIdxs.length}, 子目录 ${outputSubDirs}`,
   );
 
   if (failed > 0) process.exit(2);
