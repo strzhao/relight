@@ -6,6 +6,19 @@
 
 ## 模式与教训
 
+### [2026-07-03] 组件 DOM 迁位致「区域切片」acceptance 测试失效 — 位置无关边界 + 契约演进反转断言
+
+<!-- tags: dom-order, region-slice, acceptance-test, contract-evolution, indexof, migration, red-team, frontend, wallpaper, autopilot, testing -->
+
+**Pattern**: 红队 acceptance 测试常用 `slice(indexOf('testid-a'), indexOf('testid-b', startIdx))` 切一段 DOM 区域断言「a 元素内同时含 X 与 Y」。这隐含 **DOM 顺序假设**（a 在 b 之前）。当组件迁位打破顺序，`endIdx` 变 -1，整条断言 FAIL——不是实现有 bug，是测试绑定了旧布局。本案：`CaptureDateline` 从 masthead（entry-title 之前）迁到 FolioFooter（entry-title 之后），既有 datetime 测试 3 处区域切片全 FAIL。
+
+**Fix / Lesson**:
+1. **位置无关更稳健**：从 testid 切到末尾 `html.slice(startIdx)`（前提：该元素是后续末尾），或直接断言元素自身文本。避免「A 在 B 之前」的 indexOf 双端切片——它绑定 DOM 顺序，迁位即脆裂。
+2. **契约演进时反转既有断言是合法的**：当 design 合法变更（如「品牌保留」→「品牌删除」），既有 acceptance 测试的 `toContain` 需同步反转为 `not.toContain`。这与「改测试迁就实现 bug」不同——契约本身变了，测试编码的是旧契约。蓝队/编排器可按新契约机械同步既有测试（非红队铁律违反）。
+3. 区别于 [[2026-07-02]]：那条是测试意图正确但**过严**（与设计明确决策冲突，需升级用户）；本条是契约**本身演进**，机械反转即可。
+
+---
+
 ### [2026-07-02] 红队验收测试可能与设计文档的「明确决策」冲突 — 升级 review-accept，用户授权后放宽对齐设计
 
 <!-- tags: red-team, acceptance-test, design-conflict, review-accept, anti-rationalization, daily-selection, dedup, backfill, autopilot, escalate -->
