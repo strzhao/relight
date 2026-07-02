@@ -62,6 +62,21 @@
 
 ## 模式与教训
 
+### [2026-07-02] 定时任务自愈：worker 按 job.name 分流实现 cron 自动补跑 + 递归隔离
+
+<!-- tags: daily-selection, auto-heal, cron, bullmq, job-name, routing, recursion-safety, dependency-injection, scheduled-job, design -->
+
+**Background**: 手动 `backfill:daily-picks` CLI 只解决了「补跑」的一半——得人主动跑。服务宕机几天恢复后历史缺口仍不会自动补上。真正自动的补跑应在每日 0:00 的定时任务里顺带做掉。
+
+**Choice**: 在 `dailySelectionWorker` 入口按 `job.name` 分流：仅 `job.name === "daily-selection-cron"` 时先调 `autoHealRecentMissingDays(N)` 补跑最近 N 天（不含今天）缺失，再跑今天。关键点：
+- **递归隔离**：自愈内层 job `name: "auto-heal"`，绝不等于 `"daily-selection-cron"` → 每个补跑日期不会再触发自愈分支（否则指数爆炸）。手动 `run-daily-selection`（StubJob name=undefined）、`backfill:daily-picks`（name="backfill-daily"）也都不匹配 → 互不干扰。
+- **范围控制**：N 默认 7（`DAILY_AUTO_HEAL_DAYS` 可配），只补最近一周缺口；首次安装/长期离线的超大历史缺口仍交手动 CLI（`--enqueue` + worker 慢慢消化），避免开机跑几万次 AI 压垮本地 qwen。
+- **可测性**：`autoHealRecentMissingDays(daysBack, log, runPickDate)` 用依赖注入 `runPickDate` 回调，单测注入 mock 即可验证缺失检测/升序/容错，不必 mock 同模块的 worker（避免循环）。单日 throw try/catch 不中断。
+
+**Lesson**: BullMQ 单 Worker 处理多类 job 时，`job.name` 是天然的「行为分流」开关——给定时/手动/回填/自愈各用不同 name，既共享同一 worker 实现，又能精准触发副作用。需要「定时任务顺带做自愈/清理」类需求都可复用此模式。
+
+---
+
 ### [2026-07-02] 每日精选历史回填（backfill-daily-picks）：复用 worker pickDate 覆盖 + fillUp/30 天去重的「全消费」边界
 
 <!-- tags: daily-selection, backfill, cli, pickdate-override, fillup, dedup, design-decision-7, candidate-pool, sequential-backfill, boundary-effect, design -->
