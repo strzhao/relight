@@ -27,7 +27,8 @@
       "apps/mac/**/Assets.xcassets/**",
       "apps/mac/build/**",
       "**/test-results/**",
-      "**/photos/**"
+      "**/photos/**",
+      ".autopilot/runtime/**"
     ]
   },
   "overrides": [
