@@ -55,6 +55,8 @@
 
 ### 模式 (patterns.md)
 
+- [2026-07-02] 红队测试与设计明确决策冲突 → review-accept + 用户授权放宽对齐设计 → [testing](domains/testing.md)
+- [2026-07-02] 每日精选历史回填 CLI（复用 worker pickDate 覆盖）+ fillUp/30 天去重全消费边界 → [daily-selection](domains/daily-selection.md)
 - [2026-06-17] CLI 黑盒测试 fixture 避开 /tmp — CI Linux tmpdir=/tmp 与被测 /tmp 排除自吞 → [testing](domains/testing.md)
 - [2026-06-17] spawnSync 跑 tsx CLI 用 node --import tsx，别依赖 .bin/tsx shell wrapper → [testing](domains/testing.md)
 - [2026-06-16] Satori 文本渲染为 path，SVG 无文字 → 测试禁文本断言（改差分/几何） → [image-processing](domains/image-processing.md)

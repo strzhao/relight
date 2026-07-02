@@ -6,6 +6,16 @@
 
 ## 模式与教训
 
+### [2026-07-02] 红队验收测试可能与设计文档的「明确决策」冲突 — 升级 review-accept，用户授权后放宽对齐设计
+
+<!-- tags: red-team, acceptance-test, design-conflict, review-accept, anti-rationalization, daily-selection, dedup, backfill, autopilot, escalate -->
+
+**Pattern**: 红队测试不仅会有 fixture setup bug（见 [[2026-05-15]]），还可能把设计文档的「单日」场景外推为「多日」并写下与设计**明确决策**冲突的硬断言。本案：设计决策 7 明确承认「顺序回填 30 天去重边界效应」，但红队多日测试硬断言「每日都落库」。读 worker 源码（candidate-pool.ts 的 fillUp + 跨表去重）确证 impl 正确、测试过严后，不能在不改 worker（设计禁止）或改锁定测试（框架禁止）前提下修复。
+
+**Resolution**: (1) 读源码拿运行时证据证 impl 正确（**不凭假设升级**——先验证 fillUp 全消费假设再呈交）；(2) `gate: "review-accept"` 把冲突 + 源码证据呈交用户裁决；(3) 用户选「放宽测试对齐设计」后，保留强断言（exit 0 / 首日必落库 / 升序 / 落库日在目标范围内）、移除与决策冲突的硬断言、注释根因 + 设计决策编号。**关键**：红队铁律「不许改测试」在**用户显式授权 + 对齐设计（非弱化断言遮蔽 bug）**时可破例；同步改 staging 副本防 stop-hook 重合流回滚。
+
+---
+
 ### [2026-05-15] 红队 acceptance fixture 自身 bug — anti-rationalization 的边界与处理路径
 
 <!-- tags: vitest, acceptance-test, fixture, red-team, anti-rationalization, autopilot, contract-checker, bug -->

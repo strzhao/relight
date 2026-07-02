@@ -62,6 +62,18 @@
 
 ## 模式与教训
 
+### [2026-07-02] 每日精选历史回填（backfill-daily-picks）：复用 worker pickDate 覆盖 + fillUp/30 天去重的「全消费」边界
+
+<!-- tags: daily-selection, backfill, cli, pickdate-override, fillup, dedup, design-decision-7, candidate-pool, sequential-backfill, boundary-effect, design -->
+
+**Background**: 定时任务每天北京 00:00 只跑「今天」，服务宕机 / 未开机 / 首次安装未回追导致的某日 dailyPicks 缺失会永久存在。回填所需底层能力其实早已齐备——worker 支持 `job.data.pickDate` 覆盖（`jobs/daily-selection.ts:284-289`），据此构造 pickNow 让 4 源时间窗 / yearsAgo / 30 天去重池全部相对目标日；写库 `onConflictDoUpdate` 幂等；30 天去重窗已对称化（乱序回填安全，见 [[2026-06-02]] 两条）。
+
+**Choice**: 缺口只是「检测缺失日期 + 循环喂给 worker」这一层编排，故新增**纯 CLI** `backfill-daily-picks`（非路由，跟随仓库 `backfill-*` 惯例）。默认进程内顺序同步（复用 `run-daily-selection.ts` 的 `StubJob` + `dailySelectionWorker`），`--enqueue` 可切换 BullMQ 入队。默认跳过已存在日期，`--force` 覆盖；`--from` 默认=最早照片日、`--to`=今日；`--dry-run`/`--yes` 安全闸门防误触大规模回填。run-daily-selection.ts 需加 `isDirectRun` 守卫（与 backfill-thumbnails 同模式），否则 `import { StubJob }` 会触发末尾无条件 main()。
+
+**Lesson（fillUp 全消费 gotcha）**: 回填多日时注意——candidate-pool 的 4 源都有 `strftime('%Y', takenAt) < currentYear` 条件，目标日**当年**的照片走不到 4 源，会触发 fillUp 第 5 源（`aestheticScore ≥ 7.5` + `NOT IN excludeList`）。微型 fixture（几张同年高分照片）下，首日回填经 fillUp 把所有照片消费为 entries，30 天跨表去重（`daily_picks ∪ daily_pick_entries.members`）使后续日期候选池全空 → worker skip → 不落库。这正是设计决策 7「顺序回填边界效应」的极端情形。回填多日要么用足量 fixture（每日多张 / 跨年），要么接受「首日必落库、后续日按 dedup 可能 skip」。
+
+---
+
 ### [2026-06-02] 每日精选 30 天去重窗口单向 lt(pickDate, now) 隐含"按日期顺序生成"假设 → 乱序回填时跨天 hero 撞图
 
 <!-- tags: daily-selection, candidate-pool, dedup, getRecentPickedEventKeys, date-window, ordering-assumption, backfill, out-of-order, hero-collision, scheduled-job, bug -->
