@@ -46,6 +46,7 @@ pnpm --filter @relight/backend build       # tsup 打包
 pnpm --filter @relight/backend start       # 跑生产构建产物
 pnpm --filter @relight/backend tsx src/cli/backfill-media-type.ts  # 历史视频数据回填 mediaType / durationSec
 pnpm --filter @relight/backend tsx src/cli/detect-bursts.ts        # 历史照片连拍组回填（识别已有照片中的连拍关系）
+pnpm --filter @relight/backend backfill:daily-picks --dry-run       # 演练：列出历史缺失的每日精选日期（加 --yes 执行、--enqueue 入队）
 pnpm --filter @relight/backend models:download                     # 下载人脸识别 ONNX 模型权重（~16MB）
 
 # 前端专属
@@ -159,6 +160,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `e2e-verify.ts` — 端到端验证 AI 分析全链路（单张照片）
 - `repair-heic.ts` — 修复已有 HEIC 照片的缩略图（thumbnailPath IS NULL 且扩展名为 heic/heif）
 - `backfill-thumbnails.ts` — 补救 `thumbnail_path IS NULL` 的历史照片缩略图，复用 generateThumbnail，支持 `--dry-run`/`--limit`/`--media-type`（script: `backfill:thumbnails`）
+- `backfill-daily-picks.ts` — 补跑历史缺失的每日精选（检测 dailyPicks 表缺失日期，逐日回填；`--dry-run` 演练 / `--yes` 执行 / `--enqueue` 入队；默认 `--from=最早照片日`、`--to=今日`；复用 worker pickDate 覆盖，进程内顺序或 BullMQ 入队）（script: `backfill:daily-picks`）
 
 ### 前端架构 (apps/web)
 

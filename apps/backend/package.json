@@ -15,6 +15,7 @@
     "workers": "tsx src/workers/index.ts",
     "backfill:taken-at": "tsx src/cli/backfill-taken-at.ts",
     "backfill:thumbnails": "tsx src/cli/backfill-thumbnails.ts",
+    "backfill:daily-picks": "tsx src/cli/backfill-daily-picks.ts",
     "models:download": "tsx scripts/download-models.ts"
   },
   "dependencies": {

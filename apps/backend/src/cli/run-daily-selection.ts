@@ -1,7 +1,7 @@
 import type { Job } from "bullmq";
 import { dailySelectionWorker } from "../jobs/daily-selection";
 
-class StubJob {
+export class StubJob {
   data: Record<string, unknown> = {};
   constructor(data: Record<string, unknown> = {}) {
     this.data = data;
@@ -37,9 +37,17 @@ async function main(): Promise<void> {
   console.log(`\n总耗时: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("失败:", err);
-    process.exit(1);
-  });
+// 仅在直接运行时执行 main()，import 时不触发（防止 backfill-daily-picks 复用 StubJob 时误执行）
+const isDirectRun =
+  process.argv[1] &&
+  (process.argv[1].endsWith("run-daily-selection.ts") ||
+    process.argv[1].endsWith("run-daily-selection.js"));
+
+if (isDirectRun) {
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("失败:", err);
+      process.exit(1);
+    });
+}
