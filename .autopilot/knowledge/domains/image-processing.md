@@ -123,3 +123,19 @@
 - **禁用** `svg.not.toContain(<文本>)` 做存在性反向验证——恒真（Satori 永不含文本），无断言力（同义反复测试，掩盖回归）。
 - **正确姿势**：① 几何断言（`<image>`/`<rect>` 的 x/y/w/h 验证 contain/cover）；② **差分 SVG**（输入 A vs 输入 B 的 SVG 必不同 + path 数随内容增减 + 不同输入产出不同 SVG）证明文本内容随输入渲染——kill no-op。本项目既有 `template.acceptance.test.ts`（contain 契约）零文本断言、纯几何，即是此规律的正确范例。
 - **autopilot 红队启示**：红队可能写出 impossible（Satori 文本断言）或 tautological（无文本环境的 not.toContain）断言；编排器需独立实证渲染行为后，把断言修正为有效且更强的差分/几何断言（是修复不可能断言，非弱化有效断言）。
+
+---
+
+### [2026-07-02] HTTP content-type 响应头必须按 magic byte 判定，不能按扩展名
+
+<!-- tags: content-type, magic-byte, sniff, heic, jpeg, format-disguise, routing, photos, original, raw, browser, chrome, firefox, bug, getmimetype -->
+
+**Background**: 「HEIC 伪装 JPEG」现象（见 [2026-05-04] 同现象的 sharp 处理层）的受害层不止 sharp——**HTTP content-type 响应头**也踩坑。`storage/local.ts` 的 `getMimeType()` 纯按扩展名映射（`.heic → image/heic`），是所有 content-type 的唯一来源。`GET /:id/original` 路由虽含 HEIC 转码，但 `isHeicBuffer()`（按 magic byte）正确识别错配文件非 HEIC → 跳过转码 → 最终输出 `Content-Type: image/heic` + **JPEG 字节体** → Chrome/Firefox 不渲染 `image/heic` → 前端 DailyHero 大图裂。`GET /:id/raw`（流式 Range 端点）同样按扩展名、无转码 → 同裂。缩略图路由因**硬编码** `image/jpeg` 反而安全；所有读 buffer 用 `isHeicBuffer` 决策的路径（thumbnail/wallpaper/analyze/detect-faces/daily-selection）对错配文件也安全（按字节当 JPEG 处理）。
+
+**Lesson**: 凡是给浏览器/外部消费方发 content-type 的 HTTP 端点，content-type 必须「**magic byte 优先，扩展名兜底**」，与 `isHeicBuffer` 的字节判定哲学对齐——`getMimeType()` 按扩展名是隐患源头。修复：新增 `lib/mime.ts` 的 `sniffImageContentType(buffer, fallback?)`（JPEG/PNG/GIF/WEBP/BMP/TIFF/HEIC 7 格式 magic byte + bounds-check + 短 buffer 降级 fallback），original 路由用完整 buffer sniff（保留 HEIC 转码），raw 路由图片类读头部 16 字节 sniff（视频保持扩展名，Range 流语义与 content-type 正交）。
+
+**鉴别诊断 — 前端原图裂图的两类根因**（缩略图均正常）：
+- 原图返回「文件不存在」SVG 占位 → **SMB 软链漂移**（挂载点漂到 -1 后缀，见 release-ops）
+- 原图 200 但裂图 → `curl -sI …/original` 看 content-type，再 `curl … | xxd -l 4` 对照 body magic byte：content-type 与字节**不一致** = 扩展名错配（本条）；一致 = 前端渲染问题
+
+**排查链**：首页排除 500 → curl original 拿 content-type → 对照 body magic byte → svg 占位=文件层（SMB/路径）/ content-type≠字节=扩展名错配 / 一致=前端层。
