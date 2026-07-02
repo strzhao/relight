@@ -145,6 +145,8 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **缩略图生成** (`src/lib/thumbnail.ts`): 800px max (`fit: "inside"`)，quality 85，HEIC 文件先经 heic-decode 解码。输出统一 `.jpg` 扩展名。
 
+**MIME 嗅探** (`src/lib/mime.ts`): magic byte 优先的图片 content-type 探测，导出 `sniffImageContentType(buffer, fallback)`。解决 iPhone 同步把 JPEG 字节命名为 .HEIC 的错配 — original/raw 端点 content-type 改为「字节优先、扩展名兜底」，避免浏览器按错误的 image/heic 渲染导致裂图。纯函数、零依赖、bounds-check 短 buffer 安全降级。
+
 **壁纸合成器** (`src/lib/wallpaper/`):
 - `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/.wallpaper-cache/` 目录。
 - `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`），杂志版排版：大图铺底 + 渐变遮罩 + 标题（Fraunces） + 叙事文案（Noto Serif SC）+ footer 拍摄时刻 dateline（`takenAt` 有效时显示「拍摄于 {日期} {时刻} · {N} 年前」，与 web 同源 `formatPhotoCaptureTime`；`takenAt` 缺失回退 Vol./Relight Chronicle 品牌印记平衡留白）。

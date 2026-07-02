@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { db, schema } from "../db";
 import { analyzeQueue } from "../jobs/queues";
 import { convertHeicToJpeg, isHeicBuffer } from "../lib/heic";
+import { sniffImageContentType } from "../lib/mime";
 import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
 import { createStorageAdapter } from "../storage";
 
@@ -254,7 +255,7 @@ export const photosRouter = new Hono()
     try {
       const adapter = createStorageAdapter(photo.storageType);
       let buffer = await adapter.getFileBuffer(fullPath);
-      let contentType = adapter.getMimeType(fullPath);
+      let contentType = sniffImageContentType(buffer, adapter.getMimeType(fullPath));
       const etagBase = `${photo.filePath}`;
 
       // HEIC 转码为 JPEG（按 magic byte 判断，兼容扩展名错配）
@@ -316,7 +317,26 @@ export const photosRouter = new Hono()
     }
 
     const adapter = createStorageAdapter(photo.storageType);
-    const contentType = adapter.getMimeType(photo.filePath);
+    const extMimeType = adapter.getMimeType(photo.filePath);
+
+    // content-type 修正：图片类按 magic byte 判定（解决 .HEIC 实为 JPEG 等错配裂图）。
+    // 视频类保持扩展名（视频字节嗅探不在本 lib 范围，且 Range 流不读全文件）。
+    // 读头部 16 字节用 fd 避免读全文件，不影响后续 createReadStream + Range 语义。
+    let contentType = extMimeType;
+    if (extMimeType.startsWith("image/")) {
+      let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+      try {
+        handle = await fs.open(fullPath, "r");
+        const head = Buffer.alloc(16);
+        const { bytesRead } = await handle.read(head, 0, 16, 0);
+        contentType = sniffImageContentType(head.subarray(0, bytesRead), extMimeType);
+      } catch {
+        // 头部读取失败时降级到扩展名判定（不阻塞流式响应）
+        contentType = extMimeType;
+      } finally {
+        if (handle) await handle.close().catch(() => {});
+      }
+    }
 
     const rangeHeader = c.req.header("Range") ?? c.req.header("range");
 
