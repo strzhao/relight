@@ -76,7 +76,6 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
   const monthFs = Math.round(16 * scale);
   const titleFs = Math.round(60 * scale);
   const narrativeFs = Math.round(18 * scale);
-  const smallFs = Math.round(10 * scale);
   const borderWidth = Math.max(1, Math.round(scale));
 
   const { day, month, year, weekday } = parsePickDate(pick.pickDate);
@@ -252,7 +251,7 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
           {pick.narrative}
         </div>
 
-        {/* Footer folio — 拍摄时刻印记（最右下方）；takenAt 缺失时回退品牌印记平衡留白 */}
+        {/* Footer folio — 拍摄时刻印记（最右下方）；takenAt 缺失时留白（不回退品牌） */}
         <div
           style={{
             marginTop: "auto",
@@ -264,7 +263,7 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
             gap: Math.round(10 * scale),
           }}
         >
-          {captureText !== null ? (
+          {captureText !== null && (
             <>
               <span
                 style={{
@@ -294,39 +293,6 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
                   · {captureYearsAgo} 年前
                 </span>
               )}
-            </>
-          ) : (
-            <>
-              <span
-                style={{
-                  fontFamily: "'Fraunces', serif",
-                  fontStyle: "italic",
-                  fontSize: smallFs,
-                  color: `${COLOR_MUTED_FOREGROUND}59`,
-                  letterSpacing: "0.3em",
-                }}
-              >
-                Vol. {year}
-              </span>
-              <div
-                style={{
-                  height: 1,
-                  width: Math.round(40 * scale),
-                  backgroundColor: `${COLOR_FOREGROUND}1A`,
-                }}
-              />
-              <span
-                style={{
-                  fontFamily: "'Noto Serif SC', serif",
-                  fontWeight: 300,
-                  fontSize: smallFs,
-                  color: `${COLOR_MUTED_FOREGROUND}59`,
-                  letterSpacing: "0.4em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Relight Chronicle
-              </span>
             </>
           )}
         </div>

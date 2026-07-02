@@ -174,15 +174,15 @@ describe("dailyHeroJSX 拍摄时刻 dateline — 验收测试（红队 P4 + P5 w
       expect(svgPresent.length).toBeGreaterThan(svgNull.length);
     });
 
-    it("takenAt 有效与 null 两种状态 footer 均非空（恒渲染内容平衡留白）", async () => {
-      // 新设计：footer 恒有内容——takenAt 有效显示拍摄时间，null 回退品牌印记。
-      // 故「present 比 null 多 path」不再成立（品牌印记多段文字 path 数相当）；
-      // 改验证两种状态 footer 都渲染了内容（path>0），且内容不同（拍摄时间 vs 品牌印记）。
+    it("takenAt 有效比 null 多 dateline 字形（null footer 留白，无品牌回退）", async () => {
+      // 精简后：footer 仅 takenAt 有效时渲染 dateline；null 留空（品牌印记已删）。
+      // 差分证明：present 含 dateline 字形 → path 数多于 null；null 无 dateline 也无品牌。
       const dataUrl = await makePortraitDataUrl();
       const svgPresent = await renderSvg(makeMockPhotoPortrait(), dataUrl);
       const svgNull = await renderSvg({ ...makeMockPhotoPortrait(), takenAt: null }, dataUrl);
-      expect((svgPresent.match(/<path/g) || []).length).toBeGreaterThan(0);
-      expect((svgNull.match(/<path/g) || []).length).toBeGreaterThan(0);
+      expect((svgPresent.match(/<path/g) || []).length).toBeGreaterThan(
+        (svgNull.match(/<path/g) || []).length,
+      );
       expect(svgPresent).not.toEqual(svgNull);
     });
 
@@ -302,13 +302,15 @@ describe("dailyHeroJSX 拍摄时刻 dateline — 验收测试（红队 P4 + P5 w
   // takenAt=null 边界（wallpaper 侧）：dateline 不渲染，几何不破
   // ----------------------------------------------------------------
   describe("takenAt=null 边界 — wallpaper dateline 不渲染且几何不破", () => {
-    it("takenAt=null 时 footer 回退品牌印记平衡留白（非空，且与 present 不同）", async () => {
-      // 新设计：null 不渲染拍摄时间，但 footer 回退品牌印记（Vol/Relight Chronicle）非空，
-      // 保持留白平衡。验证：null footer 非空（path>0）+ 与 present（拍摄时间）内容不同。
+    it("takenAt=null 时 footer 留白无品牌印记（path 数少于 present，精简后不回退品牌）", async () => {
+      // 精简后：null 不渲染拍摄时间，也不回退品牌印记（Vol/Relight Chronicle 已删）。
+      // footer 留空。验证：null SVG path 数 < present SVG path 数（dateline 仅 present 渲染）。
       const dataUrl = await makePortraitDataUrl();
       const svgNull = await renderSvg({ ...makeMockPhotoPortrait(), takenAt: null }, dataUrl);
       const svgPresent = await renderSvg(makeMockPhotoPortrait(), dataUrl);
-      expect((svgNull.match(/<path/g) || []).length).toBeGreaterThan(0);
+      expect((svgNull.match(/<path/g) || []).length).toBeLessThan(
+        (svgPresent.match(/<path/g) || []).length,
+      );
       expect(svgNull).not.toEqual(svgPresent);
     });
 

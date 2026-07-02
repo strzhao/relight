@@ -154,12 +154,11 @@ describe("DailyHero 拍摄时刻 dateline — 验收测试（红队 P3 + P5 web 
       const s = shared!;
       const dateSeg = s.match(/\d{4}年\d{2}月\d{2}日/)?.[0] ?? "__NO_DATE__";
       const timeSeg = s.match(/\d{2}:\d{2}/)?.[0] ?? "__NO_TIME__";
-      // 捕获 capture-datetime 元素区域，断言区域内同时含日期与时刻（时区 portable）
+      // 新 DOM 顺序：capture-datetime 现位于 footer（entry-title 之后），已是 footer 末元素。
+      // 切片到末尾即可（capture-datetime 元素自身闭合即区域结束）。
       const startIdx = html.indexOf('data-testid="capture-datetime"');
-      const endIdx = html.indexOf('data-testid="entry-title"', startIdx);
       expect(startIdx).toBeGreaterThan(-1);
-      expect(endIdx).toBeGreaterThan(startIdx);
-      const region = html.slice(startIdx, endIdx);
+      const region = html.slice(startIdx);
       expect(region).toContain(dateSeg);
       expect(region).toContain(timeSeg);
     });
@@ -296,15 +295,13 @@ describe("DailyHero 拍摄时刻 dateline — 验收测试（红队 P3 + P5 web 
       const dp = makeSingleEntryPick(takenAt);
       const html = await renderDailyHero(dp);
 
-      // 捕获 capture-datetime 元素的完整区域（从其 testid 到下一个 testid entry-title），
-      // 断言该区域内同时含「日期」与「N 年前」——证明年差是 dateline 的内联子节点，
+      // 新 DOM 顺序：capture-datetime 现位于 footer（entry-title 之后），已是 footer 末元素。
+      // 切片到末尾即可，断言区域内同时含「日期」与「N 年前」——证明年差是 dateline 的内联子节点，
       // 而非 DOM 别处的独立 testid 标签（kill no-op）。
       // 用区域捕获替代脆弱的字符数正则（年差 span 含 testid+class 使跨度超固定窗口）。
       const startIdx = html.indexOf('data-testid="capture-datetime"');
-      const endIdx = html.indexOf('data-testid="entry-title"', startIdx);
       expect(startIdx).toBeGreaterThan(-1);
-      expect(endIdx).toBeGreaterThan(startIdx);
-      const datelineRegion = html.slice(startIdx, endIdx);
+      const datelineRegion = html.slice(startIdx);
       expect(datelineRegion).toContain(`${histYear}年06月15日`);
       expect(datelineRegion).toContain(`${yearsAgo} 年前`);
     });

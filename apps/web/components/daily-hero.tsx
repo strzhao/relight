@@ -242,10 +242,9 @@ function HeroContentLegacy({ pick }: { pick: DailyPick }) {
           weekday={weekday}
           title={pick.title}
           narrative={pick.narrative}
-          takenAt={photo?.takenAt ?? null}
         />
         {members.length > 0 && <MemberStrip members={members} />}
-        <FolioFooter year={year} />
+        <FolioFooter takenAt={photo?.takenAt ?? null} />
       </div>
     </section>
   );
@@ -566,7 +565,6 @@ function HeroContentMulti({
           weekday={weekday}
           title={currentEntry.title}
           narrative={currentEntry.narrative}
-          takenAt={currentEntry.photo?.takenAt ?? null}
         />
         {/* 弱化「设为壁纸」按钮：仅在当前展示的 entry 不是主精选时显示 */}
         {currentEntry.photoId !== pick.photoId && (
@@ -591,7 +589,7 @@ function HeroContentMulti({
             </button>
           </div>
         )}
-        <FolioFooter year={year} />
+        <FolioFooter takenAt={currentEntry.photo?.takenAt ?? null} />
       </div>
     </section>
   );
@@ -744,7 +742,6 @@ function EntryEditorial({
   weekday,
   title,
   narrative,
-  takenAt,
 }: {
   day: string;
   month: string;
@@ -752,9 +749,7 @@ function EntryEditorial({
   weekday: string;
   title: string;
   narrative: string;
-  takenAt: string | null;
 }) {
-  const hasDateline = formatPhotoCaptureTime(takenAt) !== null;
   return (
     <>
       {/* Masthead */}
@@ -771,7 +766,6 @@ function EntryEditorial({
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-3">
-          <CaptureDateline takenAt={takenAt} />
           <FolioNav />
         </div>
       </div>
@@ -779,8 +773,7 @@ function EntryEditorial({
       {/* Title */}
       <h2
         className={cn(
-          "font-serif-sc text-[clamp(2.5rem,4.4vw,4.2rem)] leading-[1.05] font-medium tracking-[-0.015em]",
-          hasDateline ? "mt-3" : "mt-10",
+          "font-serif-sc text-[clamp(2.5rem,4.4vw,4.2rem)] leading-[1.05] font-medium tracking-[-0.015em] mt-10",
         )}
         style={{ textWrap: "balance" }}
         data-testid="entry-title"
@@ -926,14 +919,10 @@ function FolioNav() {
   );
 }
 
-function FolioFooter({ year }: { year: string }) {
+function FolioFooter({ takenAt }: { takenAt: string | null }) {
   return (
-    <div className="mt-auto flex items-center justify-end gap-4 pt-16 pb-2 text-[10px] tracking-[0.3em] text-muted-foreground/35 uppercase tabular-nums">
-      <div className="flex items-center gap-3">
-        <span className="font-display italic">Vol. {year}</span>
-        <span className="h-px w-10 bg-foreground/10" />
-        <span className="font-sans font-light tracking-[0.4em]">Relight Chronicle</span>
-      </div>
+    <div className="mt-auto flex justify-end pt-16 pb-2">
+      <CaptureDateline takenAt={takenAt} />
     </div>
   );
 }

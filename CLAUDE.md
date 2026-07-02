@@ -150,7 +150,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **壁纸合成器** (`src/lib/wallpaper/`):
 - `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/.wallpaper-cache/` 目录。
-- `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`），杂志版排版：大图铺底 + 渐变遮罩 + 标题（Fraunces） + 叙事文案（Noto Serif SC）+ footer 拍摄时刻 dateline（`takenAt` 有效时显示「拍摄于 {日期} {时刻} · {N} 年前」，与 web 同源 `formatPhotoCaptureTime`；`takenAt` 缺失回退 Vol./Relight Chronicle 品牌印记平衡留白）。
+- `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`），杂志版排版：大图铺底 + 渐变遮罩 + 标题（Fraunces） + 叙事文案（Noto Serif SC）+ footer 拍摄时刻 dateline（`takenAt` 有效时显示「拍摄于 {日期} {时刻} · {N} 年前」，与 web 同源 `formatPhotoCaptureTime`；`takenAt` 缺失时 footer 留白，不回退品牌印记——Vol./Relight Chronicle 已删精简）。
 - `colors.ts` — 从照片主色调提取渐变色，增强视觉层次。
 - 字体资产放在 `apps/backend/assets/fonts/`（Fraunces `.ttf` + Noto Serif SC `.otf`），tsup 构建时通过 `copyPublicDir` 自动复制到 `dist/assets/`。
 - `tsup.config.ts` — 后端独立构建配置，处理 Satori JSX 转换和字体资产复制。
@@ -167,7 +167,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Next.js 15 App Router，Tailwind CSS v4，组件使用 `@/components/ui/` 下的 Radix UI 封装
 - **客户端 API**: `lib/api.ts` — 浏览器端 fetch 包装，`NEXT_PUBLIC_API_URL` 指向后端
 - **服务端 API**: `lib/admin-data.ts` — RSC 中 `serverFetch<T>()`，`cache: "no-store"` 保证数据实时
-- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日 20 张精选 entries，左大图+右叙事+底部缩略图栅格，支持 ?entry=N URL 同步/键盘 ←/→ 切换/aria-selected；右侧编辑栏 masthead 旁渲染 `CaptureDateline`（拍摄时刻「拍摄于 {日期} · {时刻} · {N} 年前」，与壁纸同源 `formatPhotoCaptureTime`，`takenAt` 缺失不渲染）；entries=[] 时回退 HeroContentLegacy 旧版布局), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
+- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日 20 张精选 entries，左大图+右叙事+底部缩略图栅格，支持 ?entry=N URL 同步/键盘 ←/→ 切换/aria-selected；`CaptureDateline`（拍摄时刻「拍摄于 {日期} · {时刻} · {N} 年前」，与壁纸同源 `formatPhotoCaptureTime`，`takenAt` 缺失不渲染）渲染在右下角 `FolioFooter`（masthead 不再含 dateline；FolioFooter 仅 dateline 单行，原 `Vol. {year}` / `Relight Chronicle` 品牌印记已删精简）；entries=[] 时回退 HeroContentLegacy 旧版布局), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
 - **管理后台**: `/admin` 仪表盘 + `/admin/photos` + `/admin/queues` + `/admin/health` 子页面
 
 ### 数据流
