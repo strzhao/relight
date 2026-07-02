@@ -118,7 +118,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo；扫描结束后调用 `detectBursts` 识别连拍组（时间窗口 ≤3s + dHash 汉明距离 ≤10），写入 `bursts` 表并标记每组代表
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）；分析完成后调用 `calibrateBurstRepresentative` 在组内竞争代表位（选评分最高者）
-- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — 从候选池选出 20 张精选照片，pLimit 并发（`DAILY_SELECTION_CONCURRENCY` 默认 2）为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`
+- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — 从候选池选出 20 张精选照片，pLimit 并发（`DAILY_SELECTION_CONCURRENCY` 默认 2）为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段

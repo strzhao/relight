@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Job } from "bullmq";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import pLimit from "p-limit";
 import sharp from "sharp";
 import { aiClient } from "../ai/client";
@@ -15,15 +15,76 @@ import type { ClusteredCandidate } from "./daily-selection/cluster";
 import { buildRelatedPool } from "./daily-selection/related-pool";
 
 /**
- * 生成北京时间 YYYY-MM-DD 格式的日期字符串
+ * 任意 Date → 北京时间 YYYY-MM-DD（与 cli/backfill-daily-picks.ts 同源写法，避免跨层 import）
  */
-function formatPickDate(): string {
-  const now = new Date();
-  const shanghai = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+function beijingDateOf(date: Date): string {
+  const shanghai = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
   const y = shanghai.getFullYear();
   const m = String(shanghai.getMonth() + 1).padStart(2, "0");
   const d = String(shanghai.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * 生成北京时间 YYYY-MM-DD 格式的今日日期字符串
+ */
+function formatPickDate(): string {
+  return beijingDateOf(new Date());
+}
+
+/** 一天的毫秒数 */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 最近 daysBack 天的北京日期数组，升序，**不含今天**：[today-N, ..., today-1]。
+ * 用于定时任务自愈——补跑过去 N 天的缺口，今天由 cron 正常逻辑跑。
+ */
+export function recentBeijingDates(daysBack: number): string[] {
+  if (daysBack <= 0) return [];
+  const now = Date.now();
+  const out: string[] = [];
+  for (let i = daysBack; i >= 1; i--) {
+    out.push(beijingDateOf(new Date(now - i * DAY_MS)));
+  }
+  return out;
+}
+
+/**
+ * 自愈：检查最近 daysBack 天缺失的 dailyPicks，按升序逐日调 runPickDate 补跑。
+ *
+ * - 单日失败（runPickDate throw）不中断，log 后继续（返回值只计成功数）。
+ * - runPickDate 用依赖注入（默认由 worker 传入「内层 name=auto-heal 的 job」回调），
+ *   方便单测注入 mock，也保证补跑日期不会再触发自愈分支（递归安全）。
+ *
+ * @returns 成功补跑的天数
+ */
+export async function autoHealRecentMissingDays(
+  daysBack: number,
+  log: (msg: string) => void,
+  runPickDate: (pickDate: string) => Promise<void>,
+): Promise<number> {
+  const dates = recentBeijingDates(daysBack);
+  if (dates.length === 0) return 0;
+
+  const rows = await db
+    .select({ pickDate: schema.dailyPicks.pickDate })
+    .from(schema.dailyPicks)
+    .where(inArray(schema.dailyPicks.pickDate, dates));
+  const existing = new Set(rows.map((r) => r.pickDate));
+
+  const missing = dates.filter((d) => !existing.has(d));
+  log(`最近 ${daysBack} 天：${missing.length} 天缺失（${existing.size} 天已有），按升序补跑`);
+
+  let healed = 0;
+  for (const date of missing) {
+    try {
+      await runPickDate(date);
+      healed++;
+    } catch (err) {
+      log(`${date} 补跑失败，跳过: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return healed;
 }
 
 /** 单张候选的处理结果 */
@@ -280,6 +341,29 @@ async function processSingleEntry(
  */
 export async function dailySelectionWorker(job: Job): Promise<void> {
   job.log("开始每日精选（新版 20 张多入选流水线）");
+
+  // 定时任务（daily-selection-cron）先自愈最近 N 天缺失，再跑今天。
+  // 仅 cron job 匹配——手动 run-daily-selection（StubJob name=undefined）、
+  // backfill:daily-picks（进程内 StubJob / 入队 name="backfill-daily"）、自愈内层（name="auto-heal"）
+  // 都不等于 "daily-selection-cron" → 不触发，避免递归与误触。
+  if (job.name === "daily-selection-cron") {
+    job.log(`[auto-heal] 检查最近 ${config.dailyAutoHealDays} 天缺失...`);
+    const healed = await autoHealRecentMissingDays(
+      config.dailyAutoHealDays,
+      (m) => job.log(m),
+      async (pickDate) => {
+        // 内层 job name 用 "auto-heal"，绝不等于 "daily-selection-cron" → 不重触发自愈（递归安全）
+        const healJob = {
+          name: "auto-heal",
+          data: { pickDate },
+          log: (m: string) => job.log(`[heal ${pickDate}] ${m}`),
+          updateProgress: () => Promise.resolve(),
+        } as unknown as Job;
+        await dailySelectionWorker(healJob);
+      },
+    );
+    job.log(`[auto-heal] 补跑 ${healed} 天，开始跑今天`);
+  }
 
   // 允许 job.data.pickDate 覆盖（用于回填/重跑历史日期，格式 YYYY-MM-DD）
   const overrideDate = (job.data as { pickDate?: string } | undefined)?.pickDate;

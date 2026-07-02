@@ -37,6 +37,9 @@ export const config = {
   },
   /** 每日精选并行处理并发度（默认 2，可通过 DAILY_SELECTION_CONCURRENCY 环境变量调整） */
   dailySelectionConcurrency: Number.parseInt(process.env.DAILY_SELECTION_CONCURRENCY ?? "2", 10),
+  /** 每日精选定时任务自愈窗口：0:00 触发时先按升序补跑最近 N 天（不含今天）缺失的 dailyPicks，
+   *  再跑今天。默认 7（覆盖宕机一周内自动恢复）；超大历史缺口仍需手动 backfill:daily-picks CLI。 */
+  dailyAutoHealDays: Number.parseInt(process.env.DAILY_AUTO_HEAL_DAYS ?? "7", 10),
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),
