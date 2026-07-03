@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RuntimeStatus } from "@relight/shared";
-import { count, desc, sql } from "drizzle-orm";
+import type { RuntimeStatus, StorageSourceStatus } from "@relight/shared";
+import { count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import Redis from "ioredis";
 import { db, schema } from "../db";
@@ -139,6 +139,50 @@ async function probeCron(): Promise<{
   };
 }
 
+/**
+ * 存储源可达性聚合：只读 DB 里 storageSources.status（由每日 0 点探测 / 手动 check 写入），
+ * 不实时 checkPathAccessibility（避免 5s 轮询每源 3s 超时卡死）。
+ * 任一 enabled 源 unhealthy → degraded（不升 down，避免一源挂误判整体 down）。
+ */
+async function probeStorageHealth(): Promise<{
+  status: Status;
+  degradedCount: number;
+  downCount: number;
+  sources: Array<{
+    id: string;
+    name: string;
+    status: StorageSourceStatus;
+    lastError: string | null;
+  }>;
+}> {
+  try {
+    const rows = await db
+      .select({
+        id: schema.storageSources.id,
+        name: schema.storageSources.name,
+        status: schema.storageSources.status,
+        lastError: schema.storageSources.lastError,
+      })
+      .from(schema.storageSources)
+      .where(eq(schema.storageSources.enabled, true));
+    const unhealthy = new Set<string>(["inaccessible", "unmounted", "permission_denied"]);
+    let degradedCount = 0;
+    const sources = rows.map((r) => {
+      const st = (r.status ?? "unknown") as StorageSourceStatus;
+      if (unhealthy.has(st)) degradedCount++;
+      return { id: r.id, name: r.name, status: st, lastError: r.lastError };
+    });
+    return {
+      status: degradedCount > 0 ? "degraded" : "running",
+      degradedCount,
+      downCount: 0,
+      sources,
+    };
+  } catch {
+    return { status: "down", degradedCount: 0, downCount: 0, sources: [] };
+  }
+}
+
 async function repositoryStats(): Promise<{
   photoCount: number;
   todayAdded: number;
@@ -174,12 +218,13 @@ async function repositoryStats(): Promise<{
 }
 
 export const runtimeRouter = new Hono().get("/status", async (c) => {
-  const [redis, workers, queueDepth, cron, repo] = await Promise.all([
+  const [redis, workers, queueDepth, cron, repo, storage] = await Promise.all([
     probeRedis(),
     probeWorkers(),
     probeQueueDepth(),
     probeCron(),
     repositoryStats(),
+    probeStorageHealth(),
   ]);
 
   const services: RuntimeStatus["services"] = {
@@ -197,9 +242,16 @@ export const runtimeRouter = new Hono().get("/status", async (c) => {
     },
     redis,
     cron,
+    storage,
   };
 
-  const statuses: Status[] = [services.api.status, workers.status, redis.status, cron.status];
+  const statuses: Status[] = [
+    services.api.status,
+    workers.status,
+    redis.status,
+    cron.status,
+    storage.status,
+  ];
   const overall: Status = statuses.some((s) => s === "down")
     ? "down"
     : statuses.some((s) => s === "degraded")

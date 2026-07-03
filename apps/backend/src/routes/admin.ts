@@ -324,6 +324,39 @@ export const adminRouter = new Hono()
       });
     }
 
+    // 6. 存储源可达性（读 DB 缓存 status，由每日 0 点探测 / 手动 check 写入；不实时探测）
+    try {
+      const sources = await db
+        .select({
+          name: schema.storageSources.name,
+          status: schema.storageSources.status,
+          lastError: schema.storageSources.lastError,
+        })
+        .from(schema.storageSources)
+        .where(eq(schema.storageSources.enabled, true));
+      const unhealthy = sources.filter(
+        (s) => s.status !== null && s.status !== "healthy" && s.status !== "unknown",
+      );
+      if (unhealthy.length > 0) {
+        components.push({
+          component: "storage",
+          status: "degraded",
+          message: `${unhealthy.length} 个存储源不可达：${unhealthy
+            .map((s) => `${s.name}（${s.status}${s.lastError ? `：${s.lastError}` : ""}）`)
+            .join("、")}`,
+        });
+      } else if (sources.length > 0) {
+        components.push({ component: "storage", status: "healthy" });
+      }
+      // sources.length === 0 时不 push（空仓库不报）
+    } catch {
+      components.push({
+        component: "storage",
+        status: "degraded",
+        message: "无法读取存储源状态",
+      });
+    }
+
     const overall = components.some((c) => c.status === "unhealthy")
       ? "unhealthy"
       : components.some((c) => c.status === "degraded")

@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import UserNotifications
 
 private let logger = Logger(subsystem: "app.relight.mac", category: "ControlCenter")
 
@@ -22,6 +23,7 @@ struct RuntimeStatus: Codable {
         let workers: WorkersService
         let redis: RedisService
         let cron: CronService
+        let storage: StorageService?
     }
 
     struct ApiService: Codable {
@@ -56,6 +58,22 @@ struct RuntimeStatus: Codable {
         let status: ServiceStatus
         let lastDailyPickDate: String?
         let nextRunAt: String?
+    }
+
+    /// 存储源可达性聚合（可选——后端旧版本无此字段时 nil）
+    struct StorageService: Codable {
+        let status: ServiceStatus
+        let degradedCount: Int
+        let downCount: Int
+        let sources: [StorageSourceHealth]
+    }
+
+    struct StorageSourceHealth: Codable {
+        let id: String
+        let name: String
+        /// "healthy" | "inaccessible" | "unmounted" | "permission_denied" | "unknown"
+        let status: String
+        let lastError: String?
     }
 
     struct Repository: Codable {
@@ -119,6 +137,9 @@ final class RuntimeStatusViewModel: ObservableObject {
     /** 缓存 RuntimeConfig（一次性加载，几乎不变；openWeb 等读 webPort 用） */
     @Published var cachedConfig: RuntimeConfigData?
 
+    /// 存储健康上次快照（sourceId → status），进程内去抖，状态翻转才弹通知
+    private var lastStorageSnapshot: [String: String] = [:]
+
     private var pollingTask: Task<Void, Never>?
     private let settings: AppSettings
 
@@ -158,6 +179,7 @@ final class RuntimeStatusViewModel: ObservableObject {
                 self.status = s
                 self.lastError = nil
                 self.lastFetchAt = Date()
+                checkStorageHealthFlip(in: s)
             } else {
                 self.lastError = decoded.error?.message ?? "no data"
             }
@@ -165,6 +187,45 @@ final class RuntimeStatusViewModel: ObservableObject {
             // 网络挂了 → status 不变，但显示错误
             lastError = error.localizedDescription
             logger.warning("fetch runtime status failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 检测存储健康状态翻转（healthy ↔ unhealthy），翻转时弹系统通知。
+    /// 首次见到某源且 healthy → 不告警；首次见到且 unhealthy → 告警（mac 重启后重弹提醒用户）。
+    private func checkStorageHealthFlip(in status: RuntimeStatus) {
+        guard let storage = status.services.storage else { return }
+        let unhealthy: Set<String> = ["inaccessible", "unmounted", "permission_denied"]
+        var newSnapshot: [String: String] = [:]
+        for src in storage.sources {
+            newSnapshot[src.id] = src.status
+            let prev = lastStorageSnapshot[src.id]
+            if prev == src.status { continue }   // 状态未变 → 去抖
+            let nowUnhealthy = unhealthy.contains(src.status)
+            if prev == nil && !nowUnhealthy { continue }   // 首启正常 → 不轰炸
+            let title = nowUnhealthy ? "存储源不可达" : "存储源已恢复"
+            let body = nowUnhealthy
+                ? "\(src.name)：\(src.lastError ?? "请检查 NAS 挂载")"
+                : "\(src.name) 已可正常访问"
+            sendStorageNotification(title: title, body: body, sourceId: src.id, status: src.status)
+        }
+        lastStorageSnapshot = newSnapshot
+    }
+
+    private func sendStorageNotification(title: String, body: String, sourceId: String, status: String) {
+        let center = UNUserNotificationCenter.current()
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let req = UNNotificationRequest(
+            identifier: "storage-health-\(sourceId)-\(status)",
+            content: content,
+            trigger: nil
+        )
+        center.add(req) { error in
+            if let e = error {
+                logger.warning("存储健康通知发送失败: \(e.localizedDescription)")
+            }
         }
     }
 

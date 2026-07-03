@@ -13,6 +13,7 @@ import { createStorageAdapter } from "../storage";
 import { buildCandidatePool, getRecentPickedEventKeys } from "./daily-selection/candidate-pool";
 import type { ClusteredCandidate } from "./daily-selection/cluster";
 import { buildRelatedPool } from "./daily-selection/related-pool";
+import { probeAllSources } from "./storage-health";
 
 /**
  * 任意 Date → 北京时间 YYYY-MM-DD（与 cli/backfill-daily-picks.ts 同源写法，避免跨层 import）
@@ -347,6 +348,19 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   // backfill:daily-picks（进程内 StubJob / 入队 name="backfill-daily"）、自愈内层（name="auto-heal"）
   // 都不等于 "daily-selection-cron" → 不触发，避免递归与误触。
   if (job.name === "daily-selection-cron") {
+    // 精选前先探测存储源可达性——漂移时跳过本次精选（避免产出全 fallback 垃圾 entries、
+    // 浪费 AI 调用；修复后由下次 cron / auto-heal / 手动 backfill 补回）
+    const probe = await probeAllSources((m) => job.log(m));
+    if (probe.overall === "unhealthy") {
+      const failed = probe.sources.filter((s) => s.status !== "healthy");
+      job.log(
+        `[storage] 存储源不可达（${failed.length} 个：${failed
+          .map((s) => `${s.name}=${s.status}`)
+          .join(", ")}），跳过本次精选与 auto-heal；待修复后由下次 cron / 手动 backfill 补回`,
+      );
+      return;
+    }
+
     job.log(`[auto-heal] 检查最近 ${config.dailyAutoHealDays} 天缺失...`);
     const healed = await autoHealRecentMissingDays(
       config.dailyAutoHealDays,

@@ -586,6 +586,18 @@ export interface RuntimeStatus {
       lastDailyPickDate: string | null;
       nextRunAt: string | null;
     };
+    /** 存储源可达性聚合（可选——mac 旧版本解码兼容）。读 DB 缓存 status，不实时探测 */
+    storage?: {
+      status: ServiceStatus;
+      degradedCount: number;
+      downCount: number;
+      sources: Array<{
+        id: string;
+        name: string;
+        status: StorageSourceStatus;
+        lastError: string | null;
+      }>;
+    };
   };
   repository: {
     photoCount: number;
