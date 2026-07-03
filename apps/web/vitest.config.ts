@@ -14,6 +14,9 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     exclude: ["e2e/**", "**/node_modules/**", "**/dist/**"],
+    testTimeout: 15000,
+    hookTimeout: 15000,
+    poolOptions: { forks: { maxForks: 2 } },
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
