@@ -118,3 +118,27 @@
 <!-- tags: api, daily-selection, manual-select, wallpaper, field-sync, data-consistency, bug -->
 
 **Lesson**: 任何对外键引用的"热切换"操作，必须在同一事务/UPDATE 中同步该外键对应的关联表中的派生字段。对外 API 响应中的聚合根字段必须与当前外键所指向的关联行保持一致。
+
+---
+
+### [2026-07-11] select 评选阶段接线遗漏修复：CLAUDE.md 描述了三阶段但实现只接了两阶段
+
+<!-- tags: daily-selection, select, wiring-gap, prompt, parser, aiClient, ageBonus, aesthetic-floor, design -->
+
+**Background**: 每日精选 hero 选片质量差（平庸照当主角 / 情感回忆不足）。诊断发现 select 评选阶段（用怀念意义/情感标准在候选间选 hero）的 prompt（`v2/daily/select`）、Zod parser（`parseDailySelectResponse`，注释明写"阶段1 评选响应"）、文本模型接口（`aiClient.chat`）**三者早已存在却从未接入主流程**——`daily-selection.ts` 候选池产出 12 张后直接全部 narrate，hero 由 `weightedScore` 纯公式决定。CLAUDE.md 描述了"select→narrate→members"三阶段，但实现只做了 narrate+members。
+
+**Choice**: 激活 `runSelectStage`（`buildCandidatePool` 后、`processSingleEntry` 并发前调用），复用既有 prompt/parser/chat，AI 选 1 张 hero 重排到 `[0]`，其余按 weightedScore desc。配套：`weightedScore` 年代权重乘法(最高 1.6×)→加法 `ageBonus`(封顶 +0.3)，避免分数趋同时退化成年代排序；主力 4 源加美学下限 ≥7.0（fillUp ≥7.5 不变）挡低分平庸照。5 路 fallback 保序（enabled=false / 候选<2 零调用 / chat 抛错 / 解析失败 / 越界）。实现关键：`candidates = ordered` 整体替换，否则 select masked 失效（hero 不进 entryResults[0]/壁纸主图）。
+
+**Lesson**: 设计文档 / CLAUDE.md 描述的多阶段流程，实现时可能"接线遗漏"——每阶段配套资产（prompt/parser/client）齐备 ≠ 已接入主流程。新增阶段时必须验证主流程控制流真的调用了它（hero 来源是否真由新阶段决定，而非 masked fallback）。dry-run 对比新旧 hero 是验证"select 真生效"的有效手段：构造 select 返回非 rank0，断言 `ordered[0] !== candidates[0]`。关联 [[2026-05-16]]「视觉模型不受 prompt soft constraint 约束」——select 用文本模型故 prompt 约束有效，区别于视觉 narrate。
+
+---
+
+### [2026-07-11] select prompt 调平衡：年代霸权与情感霸权都是陷阱
+
+<!-- tags: daily-selection, select, prompt, llm-prompt, age-bias, emotion-bias, balance, lesson -->
+
+**Background**: select prompt 原版标「时空厚度 = 最高优先级」+ 第6条「倾向历史今天/久远抽样」，双重放大年代偏好 → AI 死抓最老照片（7/11 选 13 年前银杏，用户手选的是 2 年前婴儿照；7/9 选 2016 射箭背影）。第一版调优矫枉过正——把情感设为「最高优先级」→ AI 见宝宝就选，同一张宝宝照在 dry-run 里被选 4 天（累积去重缺失放大了重复），多样性崩溃。
+
+**Choice**: 改成 6 维（情感/人际/真实/时空/趣闻/构图）**综合最佳、无最高优先级** + 明确「平衡原则」反对两种霸权：「不要因最老就选（年代霸权），也不要因最萌就选（情感霸权）」「13 年前空洞照输给 2 年前情感照，但平淡近照未必赢过有岁月厚度的老照片」+「人 vs 风景」「独特性」约束。删掉「倾向久远抽样」的多样性约束（它和「最高优先级」叠加放大年代偏好）。
+
+**Lesson**: LLM 评选 prompt 里给某维度标「最高优先级」极易导致该维度霸权——AI 会机械优化单一维度。平衡 prompt 要：① 多维并列无霸权；② 显式给出「A 输给 B / B 输给 A」的锚定反例，让模型理解权衡边界而非单维极致；③ 删掉与「最高优先级」叠加的弱约束。验证用 dry-run 看跨天多样性（同 prompt 连跑多天，hero 是否题材分散、不重复同类）。注意 select 是单日决策，跨天多样性靠 30 天去重池保证，prompt 只能管单日内不极端。dry-run 对比新旧算法时，候选池来源关键：用 DB 既有 entries 看不到候选池变化，必须 `buildCandidatePool` 重新构建 + 累积去重才反映真实。
