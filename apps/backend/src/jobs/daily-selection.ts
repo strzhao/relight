@@ -5,7 +5,11 @@ import pLimit from "p-limit";
 import sharp from "sharp";
 import { aiClient } from "../ai/client";
 import { loadPrompts } from "../ai/prompts";
-import { parseDailyMembersResponse, parseDailyNarrateResponse } from "../ai/response-parser";
+import {
+  parseDailyMembersResponse,
+  parseDailyNarrateResponse,
+  parseDailySelectResponse,
+} from "../ai/response-parser";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
@@ -48,6 +52,122 @@ export function recentBeijingDates(daysBack: number): string[] {
     out.push(beijingDateOf(new Date(now - i * DAY_MS)));
   }
   return out;
+}
+
+// ===== 每日精选 select 评选阶段（阶段 0.5：hero 重排）=====
+
+/** 候选来源 → select prompt 中的中文标签 */
+const SOURCE_LABEL: Record<ClusteredCandidate["source"], string> = {
+  historyToday: "历史上的今天",
+  sameMonth: "同月份",
+  sameSeason: "同季节",
+  agedRandom: "久远抽样",
+  fillUp: "随机回填",
+};
+
+/**
+ * 把候选元数据格式化为 select prompt 期望的摘要文本：
+ * "序号 + 来源标签 + 年份 + 美学评分 + 情感分析 + 标签 + 叙事描述"
+ *
+ * 纯函数，导出供单测覆盖。
+ */
+export function buildSelectUserPrompt(
+  candidates: ClusteredCandidate[],
+  userPromptTemplate: string,
+): string {
+  const lines = candidates.map((c, i) => {
+    const sourceLabel = SOURCE_LABEL[c.source] ?? c.source;
+    const year = (c.takenAt ?? "").slice(0, 4) || "未知";
+    const score = c.aestheticScore ?? 5.0;
+    const emotions =
+      c.emotionalAnalysis && typeof c.emotionalAnalysis === "object"
+        ? `${(c.emotionalAnalysis as Record<string, unknown>).primary ?? "未知"} / ${(c.emotionalAnalysis as Record<string, unknown>).secondary ?? "未知"}`
+        : "未知";
+    const tagsStr = Array.isArray(c.tags)
+      ? (c.tags as { name: string }[]).map((t) => t.name).join("、") || "无"
+      : "无";
+    const desc = (c.narrative ?? "无描述").slice(0, 80);
+    const mediaTypeLabel = (c.mediaType ?? "image") === "video" ? "[视频]" : "[图片]";
+    return [
+      `[${i}] ${mediaTypeLabel} 来源: ${sourceLabel}`,
+      `  年份: ${year}（约 ${c.yearsAgo} 年前）| 美学评分: ${score}`,
+      `  情感: ${emotions} | 标签: ${tagsStr}`,
+      `  描述: ${desc}`,
+    ].join("\n");
+  });
+  return userPromptTemplate.replace("{候选摘要列表}", lines.join("\n\n"));
+}
+
+/**
+ * select 评选阶段：用文本模型从候选摘要中选出最值得怀念的一张，重排到 [0]。
+ *
+ * 契约：
+ * - ordered.length === candidates.length（重排不增不减，是 candidates 的置换）
+ * - source==="ai" 时 ordered[0] === candidates[selectedIndex]，selectedIndex ∈ [0,n-1]
+ * - 所有失败路径均 fallback：enabled===false / length<2（零 AI 调用）/ AI 抛错 / 解析失败 / 越界
+ *   → source="fallback", ordered 原序, selectedIndex=0
+ * - 副作用：内存重排（无 DB 写入）+ opts.log；仅 enabled 且 length≥2 时多 1 次 aiClient.chat
+ */
+export async function runSelectStage(
+  candidates: ClusteredCandidate[],
+  opts: { log: (m: string) => void; enabled: boolean },
+): Promise<{
+  ordered: ClusteredCandidate[];
+  selectedIndex: number;
+  reasoning: string;
+  source: "ai" | "fallback";
+}> {
+  const n = candidates.length;
+  const fallbackResult = {
+    ordered: candidates,
+    selectedIndex: 0,
+    reasoning: "",
+    source: "fallback" as const,
+  };
+
+  if (!opts.enabled || n < 2) {
+    if (!opts.enabled) opts.log("select 阶段禁用（DAILY_SELECT_ENABLED=false），保持原序");
+    else opts.log(`候选数 ${n} < 2，select 阶段跳过（零 AI 调用），保持原序`);
+    return fallbackResult;
+  }
+
+  try {
+    const selectPrompts = await loadPrompts("v2", "daily/select");
+    const userText = buildSelectUserPrompt(candidates, selectPrompts.user);
+
+    const rawResponse = await aiClient.chat(userText, selectPrompts.system);
+    const { parsed, error } = parseDailySelectResponse(rawResponse);
+
+    // 解析失败（parsed=null，Zod 校验未通过且无可容错提取值）→ fallback 原序
+    if (!parsed) {
+      opts.log(`select 解析失败: ${error ?? "未知"}，fallback 原序`);
+      return fallbackResult;
+    }
+
+    const selectedIndex = parsed.selectedIndex;
+    const reasoning = parsed.reasoning;
+
+    // 越界保护
+    if (selectedIndex < 0 || selectedIndex > n - 1) {
+      opts.log(`select selectedIndex=${selectedIndex} 越界 [0,${n - 1}]，fallback 原序`);
+      return fallbackResult;
+    }
+
+    // 重排：[selected, ...其余按原 weightedScore desc 顺序]
+    const chosen = candidates[selectedIndex];
+    const rest = candidates.filter((_, i) => i !== selectedIndex);
+    rest.sort((a, b) => b.weightedScore - a.weightedScore);
+    const ordered = chosen ? [chosen, ...rest] : [...candidates];
+
+    opts.log(
+      `select 完成: selectedIndex=${selectedIndex}, reasoning="${reasoning.slice(0, 60)}", source=ai`,
+    );
+
+    return { ordered, selectedIndex, reasoning, source: "ai" };
+  } catch (err) {
+    opts.log(`select 阶段异常: ${err instanceof Error ? err.message : String(err)}，fallback 原序`);
+    return fallbackResult;
+  }
 }
 
 /**
@@ -396,19 +516,33 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   const { eventKeys, excludeIds: recentIds } = await getRecentPickedEventKeys(30, pickNow);
   job.log(`最近 30 天去重池: ${recentIds.size} 个 photoId, ${eventKeys.size} 个事件键`);
 
-  const candidates = await buildCandidatePool({
+  const poolCandidates = await buildCandidatePool({
     now: pickNow,
     excludeIds: recentIds,
     eventKeys,
     maxN: 12,
   });
 
-  job.log(`4 源候选池共 ${candidates.length} 张候选`);
+  job.log(`4 源候选池共 ${poolCandidates.length} 张候选`);
 
-  if (candidates.length === 0) {
+  if (poolCandidates.length === 0) {
     job.log("今日无候选照片，跳过每日精选");
     return;
   }
+
+  // ---- 阶段 0.5: select 评选（文本模型重排 hero）----
+  // 重排后 candidates[0] = select 选中的 hero，决定 entryResults[0] 与壁纸主图
+  const { ordered, selectedIndex, reasoning, source } = await runSelectStage(poolCandidates, {
+    log: (m) => job.log(m),
+    enabled: config.dailySelectEnabled,
+  });
+  job.log(
+    `select 阶段: source=${source}, selectedIndex=${selectedIndex}, hero=${ordered[0]?.photoId ?? "n/a"}`,
+  );
+  if (source === "ai" && reasoning) {
+    job.log(`select reasoning: ${reasoning}`);
+  }
+  const candidates = ordered;
 
   // ---- 阶段 1: 并行处理每张候选（narrate + members）----
   job.log(`阶段 1: 并行处理 ${candidates.length} 张候选（concurrency=${concurrency}）`);

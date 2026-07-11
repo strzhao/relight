@@ -13,6 +13,7 @@
 import path from "node:path";
 import { and, desc, eq, gte, lt, lte, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
+import { config } from "../../lib/config";
 import { haversineMeters } from "../../lib/geo";
 import { getSettingValue } from "../../lib/settings";
 import { type ClusteredCandidate, clusterByDirnameAndTime, parseTakenAtMs } from "./cluster";
@@ -62,17 +63,22 @@ export interface EnrichedCandidate {
 }
 
 /**
- * 久远度加权函数：开根号曲线，封顶 1.6
- * - 0 年: 1.0x
- * - 1 年: 1.10x
- * - 5 年: ~1.22x
- * - 10 年: ~1.32x
- * - 20 年: ~1.45x
- * - >36 年: 1.60x (cap)
+ * 久远度加成函数：开根号曲线，封顶 0.3（加法而非乘法，避免候选分数趋同时退化为年代排序）。
+ *
+ * weightedScore 新公式 = aestheticScore + ageBonus(yearsAgo)。
+ *
+ * - y < 1: 0（保持旧"不足 1 年不加成"语义）
+ * - 1 年: ~0.05
+ * - 5 年: ~0.11
+ * - 10 年: ~0.16
+ * - 20 年: ~0.22
+ * - 36 年: 0.30 (cap)
+ *
+ * y ≥ 1 区间单调递增（sqrt 单调）。
  */
-export function ageWeightMultiplier(yearsAgo: number): number {
-  if (yearsAgo < 1) return 1.0;
-  return 1.0 + Math.min(0.6, Math.sqrt(yearsAgo) * 0.1);
+export function ageBonus(yearsAgo: number): number {
+  if (yearsAgo < 1) return 0;
+  return Math.min(0.3, Math.sqrt(yearsAgo) * 0.05);
 }
 
 /**
@@ -310,6 +316,7 @@ export async function buildCandidatePool(
       and(
         sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}`,
         sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+        gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
       ),
     )
@@ -345,6 +352,7 @@ export async function buildCandidatePool(
         sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${month}`,
         sql`strftime('%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) != ${day}`,
         sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+        gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
       ),
     )
@@ -384,6 +392,7 @@ export async function buildCandidatePool(
         and(
           sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) IN (${sql.raw(monthsInClause)})`,
           sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
+          gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
           burstRepOnly,
         ),
       )
@@ -421,6 +430,7 @@ export async function buildCandidatePool(
           sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`,
           sql`${twoYearsAgo}`,
         ),
+        gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
       ),
     )
@@ -444,7 +454,7 @@ export async function buildCandidatePool(
           durationSec: r.durationSec,
           aestheticScore: r.aestheticScore,
           yearsAgo,
-          weightedScore: score * ageWeightMultiplier(yearsAgo),
+          weightedScore: score + ageBonus(yearsAgo),
           source,
           narrative: r.narrative,
           emotionalAnalysis: r.emotionalAnalysis,

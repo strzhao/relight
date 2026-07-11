@@ -40,6 +40,13 @@ export const config = {
   /** 每日精选定时任务自愈窗口：0:00 触发时先按升序补跑最近 N 天（不含今天）缺失的 dailyPicks，
    *  再跑今天。默认 7（覆盖宕机一周内自动恢复）；超大历史缺口仍需手动 backfill:daily-picks CLI。 */
   dailyAutoHealDays: Number.parseInt(process.env.DAILY_AUTO_HEAL_DAYS ?? "7", 10),
+  /** 每日精选 select 评选阶段开关：在候选池构造后、narrate 之前调文本模型重排 hero。
+   *  关闭时直接按 weightedScore desc 原序进入 narrate，零 AI 调用。 */
+  dailySelectEnabled: (process.env.DAILY_SELECT_ENABLED ?? "true") === "true",
+  /** 主力 4 源（historyToday / sameMonth / sameSeason / agedRandom）候选最低美学评分。
+   *  fillUp 第 5 源保持更严的 ≥7.5 不变（见 candidate-pool.ts 硬编码）。 */
+  minAestheticScorePrimary:
+    Number.parseFloat(process.env.DAILY_SELECT_MIN_AESTHETIC_SCORE ?? "7.0") || 7.0,
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),
