@@ -55,6 +55,7 @@
 
 ### 模式 (patterns.md)
 
+- [2026-07-16] Turbopack client manifest 损坏（#85883）→ PM2 守护 web 改 webpack，手动 dev 留 turbopack → [release-ops](domains/release-ops.md)
 - [2026-07-02] 定时任务自愈（worker 按 job.name 分流 + 递归隔离 + 依赖注入）→ [daily-selection](domains/daily-selection.md)
 - [2026-07-02] 红队测试与设计明确决策冲突 → review-accept + 用户授权放宽对齐设计 → [testing](domains/testing.md)
 - [2026-07-02] 每日精选历史回填 CLI（复用 worker pickDate 覆盖）+ fillUp/30 天去重全消费边界 → [daily-selection](domains/daily-selection.md)

@@ -79,3 +79,15 @@ const __dirname = path.dirname(__filename);
 <!-- tags: port-allocation, web-port, hardcode, configuration, runtime-config, mac-app, openweb, swiftui, env, monorepo, worktree, ops, bug, anti-pattern -->
 
 **正确模式**: 让后端通过 `/api/runtime/config` 暴露所有客户端要用的运行时参数，客户端 fetchConfig 后用，硬编码只作 fallback。端口分配纪律：3000 API / 3601 Web 常驻 / 4001-4999 worktree backend / 4501-5499 worktree web。
+
+---
+
+### [2026-07-16] Next.js 15.5 Turbopack 的 React Client Manifest 损坏（upstream #85883）→ PM2 守护 web 改 webpack，手动 dev 留 turbopack
+
+<!-- tags: turbopack, next.js, pm2, ecosystem, webpack, client-manifest, global-error, buildmanifest-tmp, upstream-bug, dev-server, long-running, ops, bug -->
+
+**Background**: web 首页 500，日志反复 `Could not find the module ".../next/dist/client/components/builtin/global-error.js#default" in the React Client Manifest`（连带 `boundary-components.js#MetadataBoundary`、`segment-explorer-node.js#SegmentViewNode`），伴随 `_buildManifest.js.tmp.XXX ENOENT` 竞态。是 Next.js 15.5.0+ Turbopack 已确认 upstream bug（vercel/next.js#85883）——Turbopack 重建 React Client Manifest 时异常，找不到 next 自身内置模块。常驻 PM2 进程（连跑 11 天）正是受害者。
+
+**Choice**: `ecosystem.config.cjs` 的 `relight-web.args` 去掉 `--turbopack` → PM2 守护走稳定 webpack（不受此 bug 影响）。`apps/web/package.json` 的 `dev` 脚本保留 `--turbopack`，手动 `pnpm dev` 仍享快编译。改 args 必须 `pm2 delete relight-web && pm2 start ecosystem.config.cjs --only relight-web` + `pm2 save`——`pm2 reload` 不重读 ecosystem 的 args 变更；不 `pm2 save` 则开机 resurrect 回退旧 turbopack。
+
+**Lesson**: 「PM2 长期守护的 dev」与「人手动短期跑的 dev」稳定性诉求不同——前者无人值守、崩了不可见，优先稳（webpack）；后者可随时重启、追快（turbopack）。两者用不同入口（ecosystem args vs package.json 脚本）精准隔离即可兼得。排查"manifest 找不到 next 内置模块"先排除缓存（`rm -rf .next` 无效即非单纯缓存）、next 包完整性（`.pnpm/next@*/dist/...` 文件物理存在）、多版本、磁盘/iCloud 干扰 `.tmp`——均正常即 Turbopack bug 本身，切 webpack 验证最快。
