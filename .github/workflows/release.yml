@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select latest stable Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -116,7 +116,7 @@ jobs:
       # 默认 GITHUB_TOKEN（对本仓库有 contents:write），用于「同步 cask 回 main」。
       # 跨仓库推送 tap 用 TAP_GITHUB_TOKEN，仅注入到那一步，互不耦合（最小权限）。
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download release zip and compute sha256
         run: |
