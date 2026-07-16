@@ -39,7 +39,7 @@ module.exports = {
       name: "relight-web",
       cwd: path.join(repoRoot, "apps/web"),
       script: "scripts/run-with-env.mjs",
-      args: "node_modules/.bin/next dev --turbopack",
+      args: "node_modules/.bin/next dev",
       interpreter: "node",
       autorestart: true,
       max_memory_restart: "1G",
