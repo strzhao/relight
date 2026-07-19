@@ -12,6 +12,7 @@ import {
 } from "../ai/response-parser";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
+import { beijingDateOf } from "../lib/datetime";
 import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
 import { createStorageAdapter } from "../storage";
 import { buildCandidatePool, getRecentPickedEventKeys } from "./daily-selection/candidate-pool";
@@ -20,18 +21,9 @@ import { buildRelatedPool } from "./daily-selection/related-pool";
 import { probeAllSources } from "./storage-health";
 
 /**
- * 任意 Date → 北京时间 YYYY-MM-DD（与 cli/backfill-daily-picks.ts 同源写法，避免跨层 import）
- */
-function beijingDateOf(date: Date): string {
-  const shanghai = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
-  const y = shanghai.getFullYear();
-  const m = String(shanghai.getMonth() + 1).padStart(2, "0");
-  const d = String(shanghai.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-/**
  * 生成北京时间 YYYY-MM-DD 格式的今日日期字符串
+ *
+ * `beijingDateOf` 已抽到 `lib/datetime.ts`（与 `jobs/daily-push.ts` 共享）。
  */
 function formatPickDate(): string {
   return beijingDateOf(new Date());

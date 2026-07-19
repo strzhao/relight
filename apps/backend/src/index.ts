@@ -1,5 +1,10 @@
 import { serve } from "@hono/node-server";
-import { createApp, registerDailyRepeatableJob, registerScanRepeatableJob } from "./app";
+import {
+  createApp,
+  registerDailyPushRepeatableJob,
+  registerDailyRepeatableJob,
+  registerScanRepeatableJob,
+} from "./app";
 import { config } from "./lib/config";
 import { detectVideoCapability } from "./lib/video/ffmpeg";
 import { detectWhisperCapability } from "./lib/video/transcribe";
@@ -9,6 +14,11 @@ const app = createApp();
 // 注册每日精选定时任务
 registerDailyRepeatableJob().catch((err) => {
   console.error("[relight] 注册每日精选定时任务失败:", err);
+});
+
+// 注册每日壁纸企业微信群推送定时任务（北京时间 10:00）
+registerDailyPushRepeatableJob().catch((err) => {
+  console.error("[relight] 注册每日壁纸推送定时任务失败:", err);
 });
 
 // 注册扫描定时任务

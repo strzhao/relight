@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 目标用户：中文用户。
 
+每日精选壁纸企业微信群推送（每天北京时间 10:00 自动 + mac 控制中心配置 webhook 与启用开关 + 测试发送）。
+
 ## 技术栈
 
 - **Monorepo**: pnpm workspaces + Turborepo

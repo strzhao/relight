@@ -32,3 +32,10 @@ export const detectFacesQueue = new Queue("detect-faces", {
   defaultJobOptions,
   prefix: config.bullmqPrefix,
 });
+
+/** 每日精选壁纸企业微信群推送 Queue（每天北京时间 10:00） */
+export const dailyPushQueue = new Queue("daily-push", {
+  connection,
+  defaultJobOptions,
+  prefix: config.bullmqPrefix,
+});

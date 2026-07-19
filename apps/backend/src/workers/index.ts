@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db, schema } from "../db";
 import { analyzePhotoWorker } from "../jobs/analyze-photo";
+import { dailyPushWorker } from "../jobs/daily-push";
 import { dailySelectionWorker } from "../jobs/daily-selection";
 import { detectFacesWorker } from "../jobs/detect-faces";
 import { scanStorageWorker } from "../jobs/scan-storage";
@@ -63,6 +64,12 @@ const dailyWorker = new Worker("daily-selection", dailySelectionWorker, {
 const detectFacesWorkerInstance = new Worker("detect-faces", detectFacesWorker, {
   connection,
   concurrency: 2,
+  prefix: config.bullmqPrefix,
+});
+
+// 每日精选壁纸企业微信群推送 Worker — 每天 10:00 触发，串行单任务即可
+const dailyPushWorkerInstance = new Worker("daily-push", dailyPushWorker, {
+  connection,
   prefix: config.bullmqPrefix,
 });
 
@@ -135,6 +142,7 @@ async function shutdown(signal: string): Promise<void> {
       analyzeWorker.close(false),
       dailyWorker.close(false),
       detectFacesWorkerInstance.close(false),
+      dailyPushWorkerInstance.close(false),
       analyzeEvents.close(),
     ]);
     console.log("[workers] 所有 Worker 已关闭");
@@ -175,6 +183,13 @@ detectFacesWorkerInstance.on("completed", (job) => {
 });
 detectFacesWorkerInstance.on("failed", (job, err) => {
   console.error(`[detect-faces] 任务失败: ${job?.id}`, err.message);
+});
+
+dailyPushWorkerInstance.on("completed", (job) => {
+  console.log(`[daily-push] 任务完成: ${job.id}`);
+});
+dailyPushWorkerInstance.on("failed", (job, err) => {
+  console.error(`[daily-push] 任务失败: ${job?.id}`, err.message);
 });
 
 console.log(

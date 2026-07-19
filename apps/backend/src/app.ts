@@ -2,9 +2,9 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { db, schema } from "./db";
-import { dailyQueue, scanQueue } from "./jobs/queues";
+import { dailyPushQueue, dailyQueue, scanQueue } from "./jobs/queues";
 import { AppError } from "./lib/errors";
-import { localhostOnly } from "./lib/middleware/localhost-only";
+import { localhostOnly, localhostOnlyStrict } from "./lib/middleware/localhost-only";
 import {
   adminRouter,
   analyzeRouter,
@@ -21,6 +21,7 @@ import {
   storageRouter,
   tagsRouter,
 } from "./routes";
+import { pushRouter } from "./routes/push";
 import { runtimeConfigRouter } from "./routes/runtime-config";
 import { workersControlRouter } from "./routes/workers-control";
 import { workersLogsRouter } from "./routes/workers-logs";
@@ -33,6 +34,18 @@ export async function registerDailyRepeatableJob(): Promise<void> {
     {
       repeat: { pattern: "0 0 * * *", tz: "Asia/Shanghai" },
       jobId: "daily-selection-cron",
+    },
+  );
+}
+
+/** 注册每日壁纸推送重复任务（每天北京时间 10:00，与每日精选 0:00 解耦） */
+export async function registerDailyPushRepeatableJob(): Promise<void> {
+  await dailyPushQueue.add(
+    "daily-push-cron",
+    {},
+    {
+      repeat: { pattern: "0 10 * * *", tz: "Asia/Shanghai" },
+      jobId: "daily-push-cron",
     },
   );
 }
@@ -75,6 +88,7 @@ export function createApp(): Hono {
   );
 
   app.use("/api/runtime/*", localhostOnly);
+  app.use("/api/push/*", localhostOnlyStrict);
 
   app.onError((err, c) => {
     if (err instanceof AppError) {
@@ -94,6 +108,7 @@ export function createApp(): Hono {
   app.route("/api/runtime/config", runtimeConfigRouter);
   app.route("/api/photos", photosRouter);
   app.route("/api/daily", dailyRouter);
+  app.route("/api/push", pushRouter);
   app.route("/api/tags", tagsRouter);
   app.route("/api/admin", adminRouter);
   app.route("/api/scan", scanRouter);
