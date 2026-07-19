@@ -83,3 +83,11 @@
 <!-- tags: urlsession, http-cache, ephemeral, foundation, networking, mac-app, bug -->
 
 **Lesson**: 对于需要实时数据的请求，使用 `URLSessionConfiguration.ephemeral` 创建无持久化缓存的 session。
+
+---
+
+### [2026-07-19] Xcode 工程 pbxproj 硬编码引用：删 .swift 文件必须三处同步清理
+
+<!-- tags: xcode, pbxproj, pbxbuildfile, pbxfilereference, pbxsourcesbuildphase, delete-file, PBXFileSystemSynchronizedRootGroup, build, mac-app, pitfall -->
+
+**Lesson**: 本工程 `apps/mac/Relight.xcodeproj/project.pbxproj` 未启用 `PBXFileSystemSynchronizedRootGroup`（Xcode 16+ 文件系统自动同步组），而是逐文件硬编码引用。删除 `.swift` 文件时必须同步移除 pbxproj 三处条目：① `PBXBuildFile` 节 ② `PBXFileReference` 节 ③ `PBXSourcesBuildPhase` 的 Files 列表（若文件在 group 内，还要清 `PBXGroup` children 引用与 group 定义块）。漏清任一处 → `xcodebuild` build 失败（找不到文件 / 残留引用）。验证命令：`grep -c '<FileName>.swift' project.pbxproj` 应为 0。本次删 3 文件（SettingsView/GeneralSettingsTab/AboutTab）共清理 4 处引用后 `** BUILD SUCCEEDED **`。

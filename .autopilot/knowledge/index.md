@@ -74,6 +74,7 @@
 - [2026-06-13] URLSession ephemeral → [mac-app](domains/mac-app.md)
 - [2026-06-13] Xcode 增量编译 clean build → [mac-app](domains/mac-app.md)
 - [2026-06-13] NSAppleScript → Process() → [mac-app](domains/mac-app.md)
+- [2026-07-19] pbxproj 硬编码引用删文件三处清理 → [mac-app](domains/mac-app.md)
 - [2026-06-13] 壁纸双缓存失效 → [image-processing](domains/image-processing.md)
 - [2026-06-12] 弱操作 UI 降权设计 → [daily-selection](domains/daily-selection.md)
 - [2026-06-02] 去重窗口时区跨天 → [daily-selection](domains/daily-selection.md)
