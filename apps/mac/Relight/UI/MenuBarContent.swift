@@ -1,8 +1,5 @@
 import SwiftUI
 import AppKit
-import OSLog
-
-private let logger = Logger(subsystem: "app.relight.mac", category: "MenuBarContent")
 
 struct MenuBarContent: View {
     @EnvironmentObject var commandBus: MenuBarCommandBus
@@ -43,7 +40,6 @@ struct MenuBarContent: View {
         }
         Divider()
         openControlCenterButton
-        settingsButton
         Button("退出 拾光") {
             NSApp.terminate(nil)
         }
@@ -53,37 +49,6 @@ struct MenuBarContent: View {
     private var openControlCenterButton: some View {
         if #available(macOS 14, *) {
             OpenControlCenterButton()
-        }
-    }
-
-    @ViewBuilder
-    private var settingsButton: some View {
-        if #available(macOS 14, *) {
-            MenuBarSettingsButton(commandBus: commandBus)
-        } else {
-            Button("设置...") {
-                if let onOpen = commandBus.onOpenSettings {
-                    onOpen()
-                } else {
-                    logger.warning("openSettings callback not wired (macOS 13 fallback)")
-                }
-            }
-        }
-    }
-}
-
-@available(macOS 14, *)
-private struct MenuBarSettingsButton: View {
-    let commandBus: MenuBarCommandBus
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
-        Button("设置...") {
-            if let onOpen = commandBus.onOpenSettings {
-                onOpen()
-            } else {
-                openSettings()
-            }
         }
     }
 }

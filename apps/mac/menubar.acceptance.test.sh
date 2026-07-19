@@ -48,9 +48,6 @@ echo "────────────────────────�
 A_FILES=(
   "Relight/UI/MenuBarCommandBus.swift"
   "Relight/UI/MenuBarContent.swift"
-  "Relight/UI/SettingsView.swift"
-  "Relight/UI/SettingsTabs/GeneralSettingsTab.swift"
-  "Relight/UI/SettingsTabs/AboutTab.swift"
 )
 
 for rel in "${A_FILES[@]}"; do
