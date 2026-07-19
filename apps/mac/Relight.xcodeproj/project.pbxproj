@@ -23,9 +23,6 @@
 		A0000000000000000000005C /* VideoWallpaperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005B; settings = {}; };
 		A00000000000000000000064 /* MenuBarCommandBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005F; settings = {}; };
 		A00000000000000000000065 /* MenuBarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060; settings = {}; };
-		A00000000000000000000066 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061; settings = {}; };
-		A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062; settings = {}; };
-		A00000000000000000000068 /* AboutTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063; settings = {}; };
 		A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006A; settings = {}; };
 		A0000000000000000000006E /* AutostartManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B; settings = {}; };
 		A0000000000000000000006F /* BeijingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C; settings = {}; };
@@ -54,9 +51,6 @@
 		A0000000000000000000005B /* VideoWallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoWallpaperEngine.swift; sourceTree = "<group>"; };
 		A0000000000000000000005F /* MenuBarCommandBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarCommandBus.swift; sourceTree = "<group>"; };
 		A00000000000000000000060 /* MenuBarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContent.swift; sourceTree = "<group>"; };
-		A00000000000000000000061 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A00000000000000000000062 /* GeneralSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsTab.swift; sourceTree = "<group>"; };
-		A00000000000000000000063 /* AboutTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutTab.swift; sourceTree = "<group>"; };
 		A0000000000000000000006A /* WallpaperCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCoordinator.swift; sourceTree = "<group>"; };
 		A0000000000000000000006B /* AutostartManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutostartManager.swift; sourceTree = "<group>"; };
 		A0000000000000000000006C /* BeijingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeijingTime.swift; sourceTree = "<group>"; };
@@ -162,23 +156,12 @@
 			children = (
 				A0000000000000000000005F /* MenuBarCommandBus.swift */,
 				A00000000000000000000060 /* MenuBarContent.swift */,
-				A00000000000000000000061 /* SettingsView.swift */,
 				A00000000000000000000071 /* ControlCenter.swift */,
 				A00000000000000000000075 /* ReportsPage.swift */,
 				A00000000000000000000076 /* LogsPage.swift */,
 				A00000000000000000000077 /* SettingsPage.swift */,
-				A0000000000000000000005E /* SettingsTabs */,
 			);
 			path = UI;
-			sourceTree = "<group>";
-		};
-		A0000000000000000000005E /* SettingsTabs */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000062 /* GeneralSettingsTab.swift */,
-				A00000000000000000000063 /* AboutTab.swift */,
-			);
-			path = SettingsTabs;
 			sourceTree = "<group>";
 		};
 		A00000000000000000000069 /* Coordinator */ = {
@@ -270,9 +253,6 @@
 				A0000000000000000000005C /* VideoWallpaperEngine.swift in Sources */,
 				A00000000000000000000064 /* MenuBarCommandBus.swift in Sources */,
 				A00000000000000000000065 /* MenuBarContent.swift in Sources */,
-				A00000000000000000000066 /* SettingsView.swift in Sources */,
-				A00000000000000000000067 /* GeneralSettingsTab.swift in Sources */,
-				A00000000000000000000068 /* AboutTab.swift in Sources */,
 				A0000000000000000000006D /* WallpaperCoordinator.swift in Sources */,
 				A0000000000000000000006E /* AutostartManager.swift in Sources */,
 				A0000000000000000000006F /* BeijingTime.swift in Sources */,

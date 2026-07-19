@@ -11,9 +11,8 @@ struct RelightApp: App {
 
     fileprivate static let logger = Logger(subsystem: "app.relight.mac", category: "RelightApp")
 
-    // 单例式持有 coordinator/autostart，避免 actor 在 init 内被 capture self 问题
+    // 单例式持有 coordinator，避免 actor 在 init 内被 capture self 问题
     fileprivate static var sharedCoordinator: WallpaperCoordinator?
-    fileprivate static var sharedAutostart: AutostartManager?
 
     init() {
         #if DEBUG
@@ -36,11 +35,13 @@ struct RelightApp: App {
         )
         let autostart = AutostartManager()
         Self.sharedCoordinator = coordinator
-        Self.sharedAutostart = autostart
 
         // 直接在 init 中设置回调
         commandBus.onRefreshNow = { [coordinator] in
             await coordinator.refreshNow()
+        }
+        commandBus.onAutoStartChange = { [autostart] en in
+            autostart.sync(enabled: en)
         }
 
         // 启动 bootstrap + scheduler
@@ -79,13 +80,7 @@ struct RelightApp: App {
         Window("拾光 — 控制中心", id: "control-center") {
             ControlCenterView()
                 .environmentObject(settings)
-        }
-        Settings {
-            SettingsView()
-                .environmentObject(settings)
-                .onChange(of: settings.autoStart) { newValue in
-                    Self.sharedAutostart?.sync(enabled: newValue)
-                }
+                .environmentObject(commandBus)
         }
     }
 }
