@@ -11,6 +11,7 @@ final class AutostartManager {
 
   /// enabled=true → SMAppService.mainApp.register()；false → unregister()
   /// 失败仅 OSLog warning，不抛
+  /// ⚠️ SMAppService 要求 app 有效签名（非 ad-hoc），否则 register 静默失败、登录项不生效
   func sync(enabled: Bool) {
     do {
       if enabled {
