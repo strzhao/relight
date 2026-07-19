@@ -102,3 +102,23 @@
 **Background**: `node_modules/.bin/tsx` 在 pnpm 结构下是 `#!/bin/sh` shell wrapper（非 symlink），内部用 `$basedir/node` + 相对路径 `.pnpm/tsx@x/node_modules/tsx/dist/cli.mjs`。`spawnSync(TSX_BIN, [cli])` 让 OS 解析 shell wrapper，CI Linux 下 `$basedir` 解析 pnpm symlink 失败 → exec 找不到 cli.mjs → 子进程 status null → `result.status ?? -1` = exit -1 全崩；本地 mac 碰巧解析成功。
 
 **Lesson**: 黑盒 spawnSync 跑 .ts CLI，用 `spawnSync(process.execPath, ["--import", "tsx", cliPath, ...args])`（node 原生 ESM loader hook），绕过 shell wrapper，无 basedir/shell 依赖，mac/Linux 一致。前提：Node ≥20.6（`--import` 稳定），CI `node-version: 20`（=最新 20.x）满足。诊断 spawnSync 子进程崩溃：先查 `result.status`（null=被 signal 杀/未启动 vs 数字=正常退出），再查 stderr；shell wrapper 崩溃常表现为 status null + 空 stdout。
+
+---
+
+### [2026-07-20] vi.mock 整模块用 importOriginal 保留非 mock 导出 + sendFn 可注入解无 msw/nock 的 HTTP mock
+
+<!-- tags: vitest, vi-mock, importOriginal, fetch, sendFn, http-mock, msw, nock, dependency-injection, red-team, wecom, webhook, type-compat, bug -->
+
+**Background**: 红队 `vi.mock("../lib/push/wechat")` 只列了需注入的函数(sendWallpaperToWeCom/compressForWeCom/getDailyPushSettings),漏了被测代码(worker/路由)同时 import 的公开常量 `WECOM_WEBHOOK_REGEX` → 运行时 `No "WECOM_WEBHOOK_REGEX" export is defined on the mock`。**两个红队文件都踩同一坑**。另:`vi.hoisted()` 写在 `vi.mock()` 工厂内部会 SyntaxError(两者都 hoisted)。项目无 msw/nock,无法用 interceptor mock 外部 HTTP。
+
+**Fix/Lesson**:
+1. **vi.mock 整模块 + 被测代码还 import 该模块的其他导出(常量/类)时,用 `importOriginal` 保留 actual,只覆盖需注入的**——避免逐个枚举导出易漏:
+   ```ts
+   vi.mock("../lib/push/wechat", async (importOriginal) => {
+     const actual = await importOriginal<typeof import("../lib/push/wechat")>();
+     return { ...actual, sendWallpaperToWeCom: mockSend, /* 仅覆盖需注入的 */ };
+   });
+   ```
+2. **vi.hoisted 必须在 vi.mock 外**(工厂内调 vi.hoisted → SyntaxError)。
+3. **无 msw/nock 时,给外部 HTTP 调用加 `sendFn: typeof fetch = fetch` 可注入参数**(默认原生 fetch,测试注入 `vi.fn<typeof fetch>` 计数 mock),等价 interceptor 但走公开 API、零依赖。
+4. **mock fetch 类型签名须对齐 `typeof fetch`**(第一参 `RequestInfo | URL`,非 `string`)——TS 逆变:`vi.fn<(url: string, ...)>` 不可赋给 `typeof fetch`,用 `vi.fn<typeof fetch>` 让参数自动宽化。

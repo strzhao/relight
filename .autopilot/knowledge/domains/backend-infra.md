@@ -91,3 +91,13 @@
 **Choice**: POST `/api/plugins/:id/run` 立即创建 `plugin_tasks` 记录（status=running），返回 `{ taskId }`。`plugin.run()` 以 fire-and-forget 方式执行，完成后 UPDATE status=done/failed + 写入 result/error。前端轮询 `GET /api/plugins/:id/tasks/:taskId` 直到 status 终态。
 
 **Trade-offs**: 优点：API 响应快、支持历史回溯、多个插件复用同一模式。缺点：轮询有延迟（前端 2s 间隔）、无实时推送（将来可加 SSE）。
+
+---
+
+### [2026-07-20] localhostOnly 对 GET 豁免 — 含 secret 的端点须用 localhostOnlyStrict
+
+<!-- tags: hono, middleware, localhost-only, get-exempt, secret, webhook, security, bind-0-0-0-0, backend-infra -->
+
+**Background**: `localhostOnly` 中间件对 GET 方法豁免(`if (!isLocal && c.req.method !== "GET")`)——历史设计为让只读配置概览(runtime/config)可被非本地读。但新增的 `GET /api/push/settings` 明文返回企业微信 webhook secret(含 `?key=`),后端 `serve({ fetch, port })` 默认 bind `0.0.0.0` → 同网段任意主机 `curl GET` 即可窃取 secret 冒充推送。qa-reviewer 暴露(严重度 85)。
+
+**Fix/Lesson**: 含 secret 的端点(GET 明文返回 token/key)不能用 `localhostOnly`(其 GET 豁免使保护失效)。新增 `localhostOnlyStrict`(全方法检查,不豁免 GET)用于这类端点;只读概览仍用 `localhostOnly`。**localhostOnly 的 GET 豁免隐含"只读概览"假设,凡响应含 secret 的端点都破坏该假设**——安全审查时逐个检查 localhostOnly 端点响应是否含 secret,是则升级为 strict。

@@ -55,6 +55,8 @@
 
 ### 模式 (patterns.md)
 
+- [2026-07-20] vi.mock importOriginal 保留非 mock 导出 + sendFn 可注入解无 msw/nock 的 HTTP mock → [testing](domains/testing.md)
+- [2026-07-20] localhostOnly 对 GET 豁免 — 含 secret 端点须用 localhostOnlyStrict → [backend-infra](domains/backend-infra.md)
 - [2026-07-16] Turbopack client manifest 损坏（#85883）→ PM2 守护 web 改 webpack，手动 dev 留 turbopack → [release-ops](domains/release-ops.md)
 - [2026-07-02] 定时任务自愈（worker 按 job.name 分流 + 递归隔离 + 依赖注入）→ [daily-selection](domains/daily-selection.md)
 - [2026-07-02] 红队测试与设计明确决策冲突 → review-accept + 用户授权放宽对齐设计 → [testing](domains/testing.md)
