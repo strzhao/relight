@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -130,9 +131,11 @@ struct SettingsPage: View {
     @ViewBuilder
     private var aboutSection: some View {
         VStack(spacing: 12) {
-            Image(systemName: "photo.stack.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.tint)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 64, height: 64)
             Text("拾光 (Relight)")
                 .font(.title2.bold())
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
