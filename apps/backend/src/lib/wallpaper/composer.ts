@@ -8,7 +8,7 @@ import satori from "satori";
 import sharp from "sharp";
 import { config } from "../config";
 import { convertHeicToJpeg, isHeicBuffer } from "../heic";
-import { dailyHeroJSX } from "./template";
+import { dailyHeroJSX, portraitHeroJSX } from "./template";
 
 interface FontData {
   name: string;
@@ -81,12 +81,35 @@ export async function composeWallpaper(
     }
   }
 
+  // 竖版（width < height）走精确 cover 裁切：照片预裁到精确 W×H，<img> 直接撑满。
+  // 横版保持 ×1.2 inside（template 用 contain，需 letterbox 余量）。HEIC / 非 HEIC 两分支同步分流。
+  const isPortrait = width < height;
+
   if (isHeicBuffer(photoBuffer)) {
-    photoBuffer = await convertHeicToJpeg(photoBuffer, {
-      maxWidth: Math.round(width * 1.2),
-      maxHeight: Math.round(height * 1.2),
-      quality: 85,
-    });
+    if (isPortrait) {
+      // 竖版 HEIC：精确 cover 裁切（不带 ×1.2）
+      photoBuffer = await convertHeicToJpeg(photoBuffer, {
+        maxWidth: width,
+        maxHeight: height,
+        quality: 85,
+      });
+    } else {
+      photoBuffer = await convertHeicToJpeg(photoBuffer, {
+        maxWidth: Math.round(width * 1.2),
+        maxHeight: Math.round(height * 1.2),
+        quality: 85,
+      });
+    }
+  } else if (isPortrait) {
+    // 竖版非 HEIC：精确 cover 裁切（不带 ×1.2、不放大）
+    photoBuffer = await sharp(photoBuffer)
+      .resize(width, height, {
+        fit: "cover",
+        position: "center",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 85 })
+      .toBuffer();
   } else {
     photoBuffer = await sharp(photoBuffer)
       .resize(Math.round(width * 1.2), Math.round(height * 1.2), {
@@ -100,7 +123,10 @@ export async function composeWallpaper(
   const photoBase64 = photoBuffer.toString("base64");
   const photoDataUrl = `data:image/jpeg;base64,${photoBase64}`;
 
-  const jsx = dailyHeroJSX({ pick, photo, photoDataUrl, width, height });
+  // 竖版用 portraitHeroJSX（B 方案），横版用 dailyHeroJSX（零回归）
+  const jsx = isPortrait
+    ? portraitHeroJSX({ pick, photo, photoDataUrl, width, height })
+    : dailyHeroJSX({ pick, photo, photoDataUrl, width, height });
 
   const fonts = await loadFonts();
 

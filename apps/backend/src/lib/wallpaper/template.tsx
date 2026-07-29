@@ -300,3 +300,242 @@ export function dailyHeroJSX({ pick, photo, photoDataUrl, width, height }: Daily
     </div>
   );
 }
+
+// ============================================================================
+// 竖版（portrait）壁纸模板 — B 方案（全屏照片 cover + 底部渐变压白字）
+//
+// 设计文档「排版规格（B 方案）」1290×2796：
+//   - 背景照片：sharp 预裁精确 W×H（composer 注入 dataURL），<img width=W height=H> 撑满
+//   - 渐变层：absolute bottom, height 1500·scale, linear-gradient 压暗底部
+//   - 白字层：absolute bottom, color #F5F1E8, flex column
+//     masthead(day/month/yearweek) → title → narrative → dateline
+//
+// scale = min(W/1290, H/2796) 双轴约束（D4）；横版 scale=W/1800 不动。
+// Satori spike 已确认 absolute + linear-gradient 可行（渐变→<linearGradient>+<rect fill=url>）。
+// ============================================================================
+
+/** 竖版白字层主色（暖纸白，区别于横版墨色正文） */
+const COLOR_PORTRAIT_INK = "#F5F1E8";
+
+export interface PortraitHeroJSXOpts {
+  pick: Omit<DailyPick, "entries"> & { composedImagePath?: string | null };
+  photo: Photo;
+  photoDataUrl: string;
+  width: number;
+  height: number;
+}
+
+export function portraitHeroJSX({ pick, photo, photoDataUrl, width, height }: PortraitHeroJSXOpts) {
+  const W = width;
+  const H = height;
+  // D4: 双轴约束（横版保持 W/1800 不变，此处独立）
+  const scale = Math.min(W / 1290, H / 2796);
+
+  const { day, month, year, weekday } = parsePickDate(pick.pickDate);
+
+  // 拍摄时刻 dateline（与横版/web 同源 formatPhotoCaptureTime）
+  const captureText = formatPhotoCaptureTime(photo.takenAt ?? null);
+  const captureYearsAgo = calcYearsAgo(photo.takenAt ?? null);
+
+  // 排版规格（× scale）
+  const dayFs = Math.round(96 * scale);
+  const monthFs = Math.round(32 * scale);
+  const yearweekFs = Math.round(28 * scale);
+  const titleFs = Math.round(76 * scale);
+  const narrativeFs = Math.round(32 * scale);
+  const datelineFs = Math.round(25 * scale);
+
+  const gradientHeight = Math.round(1500 * scale);
+  const padX = Math.round(96 * scale);
+  const padBottom = Math.round(110 * scale);
+  const mastheadGap = Math.round(30 * scale);
+  const titleMarginTop = Math.round(44 * scale);
+  const narrativeMarginTop = Math.round(32 * scale);
+  const datelineMarginTop = Math.round(56 * scale);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        width: W,
+        height: H,
+        position: "relative",
+        backgroundColor: "#0A0A0E",
+        fontFamily: "'Fraunces', serif",
+        overflow: "hidden",
+      }}
+    >
+      {/* 背景照片铺满（composer 已 cover 预裁精确 W×H，img 直接撑满） */}
+      {photoDataUrl ? (
+        <img
+          src={photoDataUrl}
+          alt={pick.title}
+          width={W}
+          height={H}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: W,
+            height: H,
+            objectFit: "cover",
+            display: "block",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: W,
+            height: H,
+            backgroundColor: COLOR_PHOTO_PLACEHOLDER,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        />
+      )}
+
+      {/* 底部渐变层（压暗以承白字） */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          width: W,
+          height: gradientHeight,
+          backgroundImage:
+            "linear-gradient(to bottom, rgba(10,10,14,0) 0%, rgba(10,10,14,0.55) 55%, rgba(10,10,14,0.78) 100%)",
+        }}
+      />
+
+      {/* 白字层（absolute bottom） */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          width: W,
+          color: COLOR_PORTRAIT_INK,
+          display: "flex",
+          flexDirection: "column",
+          padding: `0 ${padX}px ${padBottom}px`,
+        }}
+      >
+        {/* Masthead — day / month / year·week */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: `${mastheadGap}px`,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'Fraunces', serif",
+              fontSize: dayFs,
+              lineHeight: 0.8,
+              fontWeight: 300,
+              fontStyle: "italic",
+              color: COLOR_PORTRAIT_INK,
+              letterSpacing: "-0.02em",
+            }}
+          >
+            {day}
+          </span>
+          <span
+            style={{
+              fontFamily: "'Fraunces', serif",
+              fontSize: monthFs,
+              fontStyle: "italic",
+              fontWeight: 300,
+              color: COLOR_PORTRAIT_INK,
+              opacity: 0.85,
+            }}
+          >
+            {month}
+          </span>
+          <span
+            style={{
+              fontFamily: "'Noto Serif SC', serif",
+              fontSize: yearweekFs,
+              color: COLOR_PORTRAIT_INK,
+              letterSpacing: "0.2em",
+              opacity: 0.75,
+            }}
+          >
+            {year} · 周{weekday}
+          </span>
+        </div>
+
+        {/* Title */}
+        <div
+          style={{
+            marginTop: `${titleMarginTop}px`,
+            fontFamily: "'Noto Serif SC', serif",
+            fontSize: titleFs,
+            lineHeight: 1.1,
+            fontWeight: 500,
+            color: COLOR_PORTRAIT_INK,
+            letterSpacing: "-0.015em",
+            textShadow: "0 2px 20px rgba(0,0,0,0.3)",
+            overflow: "hidden",
+            display: "flex",
+          }}
+        >
+          {pick.title}
+        </div>
+
+        {/* Narrative */}
+        <div
+          style={{
+            marginTop: `${narrativeMarginTop}px`,
+            fontFamily: "'Noto Serif SC', serif",
+            fontSize: narrativeFs,
+            lineHeight: 1.8,
+            color: COLOR_PORTRAIT_INK,
+            opacity: 0.92,
+            overflow: "hidden",
+            display: "flex",
+            flexWrap: "wrap",
+          }}
+        >
+          {pick.narrative}
+        </div>
+
+        {/* Dateline — 拍摄时刻（右对齐）；takenAt 缺失则留白（不渲染该行） */}
+        {captureText !== null && (
+          <div
+            style={{
+              marginTop: `${datelineMarginTop}px`,
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "flex-end",
+              gap: `${Math.round(8 * scale)}px`,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "'Fraunces', serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: datelineFs,
+                color: COLOR_PORTRAIT_INK,
+                opacity: 0.7,
+                letterSpacing: "0.04em",
+                fontVariantNumeric: "tabular-nums",
+                textAlign: "right",
+              }}
+            >
+              拍摄于 {captureText}
+              {captureYearsAgo !== null ? ` · ${captureYearsAgo} 年前` : ""}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

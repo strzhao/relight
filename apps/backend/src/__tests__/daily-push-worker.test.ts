@@ -59,6 +59,8 @@ vi.mock("../db", () => ({ db: mockDb, schema: mockSchema }));
 
 vi.mock("../lib/wallpaper/composer", () => ({
   composedCachePath: vi.fn(() => "/tmp/fake-composed.jpg"),
+  // 竖版现场合成兜底用（动态 import）：返回假路径，readFile 已被 mock 为成功
+  composeAndSave: vi.fn(async () => "/tmp/fake-composed-portrait.jpg"),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -139,7 +141,9 @@ describe("dailyPushWorker", () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it("正常发送成功 → [daily-push] success ... errcode=0 + 仅一次出站调用", async () => {
+  it("正常发送成功 → [daily-push] success ... errcode=0 + 横版出站调用", async () => {
+    // AP-5：横版成功后追加竖版推送（1290×2796），send 总调用 2 次（横+竖）。
+    // 竖版 readFile 缓存命中（mock 总返回 buffer）→ compress → send 第 2 次。
     mockGetSettings.mockResolvedValue({ webhook: VALID, enabled: true });
     mockDb.select.mockReturnValue(
       chainableMock([{ pickDate: "2026-07-19", composedImagePath: "/tmp/pick.jpg" }]),
@@ -149,7 +153,8 @@ describe("dailyPushWorker", () => {
     const logs = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logs).toContain("[daily-push] success");
     expect(logs).toContain("errcode=0");
-    expect(mockSend).toHaveBeenCalledTimes(1);
+    // 横版 1 次 + 竖版 1 次（AP-5 双 send 契约）
+    expect(mockSend).toHaveBeenCalledTimes(2);
   });
 
   it("errcode≠0 时输出 [daily-push] failed ... errcode=X errmsg=Y + throw（触发 BullMQ 重试）", async () => {

@@ -35,6 +35,10 @@ import { composedCachePath } from "../lib/wallpaper/composer";
 const DEFAULT_WALLPAPER_WIDTH = 5120;
 const DEFAULT_WALLPAPER_HEIGHT = 2880;
 
+/** 竖版手机壁纸尺寸（与 daily-selection 阶段 3 竖版预生成一致） */
+const PORTRAIT_WALLPAPER_WIDTH = 1290;
+const PORTRAIT_WALLPAPER_HEIGHT = 2796;
+
 /**
  * daily-push Worker。
  *
@@ -111,6 +115,17 @@ export async function dailyPushWorker(job: Job): Promise<void> {
       `[daily-push] success pickDate=${pickDate} errcode=${result.errcode} errmsg=${result.errmsg}`,
     );
     job.log(`[daily-push] success errcode=${result.errcode}`);
+
+    // 竖版手机壁纸推送（1290×2796）——横版成功后追加，独立 try/catch。
+    // 竖版失败仅 log，不阻断横版（已 success）、不触发重试（AP-5）。
+    // 优先读预生成缓存（与 daily-selection 阶段3 / 路由同 cacheKey），缺失则现场合成兜底。
+    // 日志前缀遵循 `[daily-push] (success|skipped|failed)` 契约（竖版用 variant=portrait 区分）。
+    await pushPortraitWallpaper(job, settings.webhook, pickDate, pickRow).catch((portraitErr) => {
+      const msg = portraitErr instanceof Error ? portraitErr.message : String(portraitErr);
+      job.log(`[daily-push] failed variant=portrait non_blocking err=${msg}`);
+      console.log(`[daily-push] failed pickDate=${pickDate} variant=portrait err=${msg}`);
+    });
+
     return;
   } catch (err) {
     // 基于 errcode 字段判断(而非错误类):任何带 errcode 的 error(含 WeComRejectedError 与
@@ -128,4 +143,73 @@ export async function dailyPushWorker(job: Job): Promise<void> {
     }
     throw err;
   }
+}
+
+/**
+ * 竖版手机壁纸推送（1290×2796）。
+ *
+ * 流程：读缓存 `composedCachePath(pickDate,1290,2796)` → 缺失则现场 `composeAndSave` 兜底
+ *      → compressForWeCom → sendWallpaperToWeCom（第二条 image 消息）。
+ *
+ * 独立 try/catch：任何失败只抛出到调用方 `.catch` 记 log，不阻断横版（已 success）。
+ * 现场兜底需查 dailyPicks 完整行 + hero photo 组装 composer 入参。
+ */
+async function pushPortraitWallpaper(
+  job: Job,
+  webhook: string,
+  pickDate: string,
+  pickRow: { pickDate: string; composedImagePath: string | null },
+): Promise<void> {
+  const portraitCachePath = composedCachePath(
+    pickDate,
+    PORTRAIT_WALLPAPER_WIDTH,
+    PORTRAIT_WALLPAPER_HEIGHT,
+  );
+
+  let portraitBuffer: Buffer;
+  try {
+    portraitBuffer = await readFile(portraitCachePath);
+    job.log(`[daily-push] portrait cache hit: ${portraitCachePath}`);
+  } catch {
+    // 缓存缺失，现场合成兜底
+    job.log(`[daily-push] portrait cache miss, fallback compose: ${portraitCachePath}`);
+
+    // 查 dailyPicks 完整行 + hero photo（composer 需要 pick.title/narrative/members + photo）
+    const fullPickRows = await db
+      .select()
+      .from(schema.dailyPicks)
+      .where(eq(schema.dailyPicks.pickDate, pickDate))
+      .limit(1);
+    const fullPick = fullPickRows[0];
+    if (!fullPick) {
+      throw new Error(`portrait fallback: dailyPicks ${pickDate} 未找到（无法现场合成）`);
+    }
+
+    const photoRows = await db
+      .select()
+      .from(schema.photos)
+      .where(eq(schema.photos.id, fullPick.photoId))
+      .limit(1);
+    const heroPhoto = photoRows[0];
+    if (!heroPhoto) {
+      throw new Error(`portrait fallback: hero photo ${fullPick.photoId} 未找到`);
+    }
+
+    const { composeAndSave } = await import("../lib/wallpaper/composer");
+    await composeAndSave({
+      pick: { ...fullPick, composedImageUrl: null },
+      photo: heroPhoto,
+      width: PORTRAIT_WALLPAPER_WIDTH,
+      height: PORTRAIT_WALLPAPER_HEIGHT,
+    });
+    portraitBuffer = await readFile(portraitCachePath);
+    job.log("[daily-push] portrait fallback composed ok");
+  }
+
+  const portraitCompressed = await compressForWeCom(portraitBuffer);
+  const portraitResult = await sendWallpaperToWeCom(webhook, portraitCompressed);
+  console.log(
+    `[daily-push] success pickDate=${pickDate} variant=portrait errcode=${portraitResult.errcode}`,
+  );
+  job.log(`[daily-push] success variant=portrait errcode=${portraitResult.errcode}`);
 }

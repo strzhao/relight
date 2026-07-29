@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 目标用户：中文用户。
 
-每日精选壁纸企业微信群推送（每天北京时间 10:00 自动 + mac 控制中心配置 webhook 与启用开关 + 测试发送）。
+每日精选壁纸企业微信群推送（每天北京时间 10:00 自动推送横版 + 手机竖版 + mac 控制中心配置 webhook 与启用开关 + 测试发送）。
 
 ## 技术栈
 
@@ -120,7 +120,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo；扫描结束后调用 `detectBursts` 识别连拍组（时间窗口 ≤3s + dHash 汉明距离 ≤10），写入 `bursts` 表并标记每组代表
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）；分析完成后调用 `calibrateBurstRepresentative` 在组内竞争代表位（选评分最高者）
-- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — `buildCandidatePool`（4 源混采 + 跨表去重 + 主力源美学下限 `minAestheticScorePrimary` 默认 ≥7.0、fillUp ≥7.5）→ **select AI 评选阶段**（`runSelectStage`：文本模型从候选摘要重排 hero，`weightedScore` 降序为兜底；5 路 fallback 保序：`dailySelectEnabled===false`/候选<2 零 AI/抛错/解析失败/越界）→ pLimit 并发为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`；**候选池排序**：`weightedScore = aestheticScore + ageBonus(yearsAgo)`，年代权重从乘法(最高 1.6×)改为加法(封顶 +0.3)，避免分数趋同时退化为纯年代排序；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
+- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — `buildCandidatePool`（4 源混采 + 跨表去重 + 主力源美学下限 `minAestheticScorePrimary` 默认 ≥7.0、fillUp ≥7.5）→ **select AI 评选阶段**（`runSelectStage`：文本模型从候选摘要重排 hero，`weightedScore` 降序为兜底；5 路 fallback 保序：`dailySelectEnabled===false`/候选<2 零 AI/抛错/解析失败/越界）→ pLimit 并发为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`，并追加合成手机竖版壁纸（1290×2796，B 方案全屏照片+底部渐变压白字，cacheKey `1290x2796` 与路由/推送三方闭合，独立 try/catch 不阻塞主流程）；**候选池排序**：`weightedScore = aestheticScore + ageBonus(yearsAgo)`，年代权重从乘法(最高 1.6×)改为加法(封顶 +0.3)，避免分数趋同时退化为纯年代排序；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段
@@ -151,8 +151,8 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 **MIME 嗅探** (`src/lib/mime.ts`): magic byte 优先的图片 content-type 探测，导出 `sniffImageContentType(buffer, fallback)`。解决 iPhone 同步把 JPEG 字节命名为 .HEIC 的错配 — original/raw 端点 content-type 改为「字节优先、扩展名兜底」，避免浏览器按错误的 image/heic 渲染导致裂图。纯函数、零依赖、bounds-check 短 buffer 安全降级。
 
 **壁纸合成器** (`src/lib/wallpaper/`):
-- `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/.wallpaper-cache/` 目录。
-- `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`），杂志版排版：大图铺底 + 渐变遮罩 + 标题（Fraunces） + 叙事文案（Noto Serif SC）+ footer 拍摄时刻 dateline（`takenAt` 有效时显示「拍摄于 {日期} {时刻} · {N} 年前」，与 web 同源 `formatPhotoCaptureTime`；`takenAt` 缺失时 footer 留白，不回退品牌印记——Vol./Relight Chronicle 已删精简）。
+- `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/.wallpaper-cache/` 目录。竖版分支（`width < height`）走 sharp/HEIC 精确 cover 预裁（不带 ×1.2），横版保持 inside 余量不变。
+- `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`）：横版 `dailyHeroJSX`（杂志版排版：大图铺底 + 渐变遮罩 + 标题 Fraunces + 叙事文案 Noto Serif SC + footer 拍摄时刻 dateline，`takenAt` 有效时显示「拍摄于 {日期} {时刻} · {N} 年前」，与 web 同源 `formatPhotoCaptureTime`；`takenAt` 缺失 footer 留白）；竖版 `portraitHeroJSX`（B 方案：全屏 `<img>` 撑满 + absolute 底部渐变压暗 + 暖纸白字层，`scale = min(W/1290, H/2796)` 双轴约束，横版 `scale = W/1800` 不动）。
 - `colors.ts` — 从照片主色调提取渐变色，增强视觉层次。
 - 字体资产放在 `apps/backend/assets/fonts/`（Fraunces `.ttf` + Noto Serif SC `.otf`），tsup 构建时通过 `copyPublicDir` 自动复制到 `dist/assets/`。
 - `tsup.config.ts` — 后端独立构建配置，处理 Satori JSX 转换和字体资产复制。
@@ -206,6 +206,9 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
               mac App: GET /api/daily/:pickDate/wallpaper?width=&height=
                        (按屏幕尺寸实时合成/缓存命中直接返回，设为系统壁纸)
+                                    ↓
+                   手机竖版 1290×2796: 阶段3 预生成缓存 + 企业微信推送追加竖版
+                       (缓存优先/现场合成兜底，独立 try/catch 不阻断横版)
 ```
 
 ## 设计体系

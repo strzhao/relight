@@ -695,6 +695,32 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
         .where(eq(schema.dailyPicks.id, pickRow.id));
 
       job.log(`阶段 3 完成: ${composedPath}`);
+
+      // 竖版手机壁纸预生成（1290×2796，B 方案）——非视频时追加，独立 try/catch。
+      // cacheKey 用默认 `${width}x${height}` → 文件名 `..._v2-contain-1290x2796.jpg`，
+      // 与路由 composedCachePath(pickDate,1290,2796) 命中契约一致（D2）。
+      // 失败仅 log，不阻塞主流程（AP-6 竖版合成失败兜底）。
+      try {
+        job.log("阶段 3: 合成竖版手机壁纸 1290×2796");
+        const portraitPath = await composeAndSave({
+          pick: {
+            ...pickRow,
+            composedImageUrl: null,
+            members: primary.members,
+          },
+          photo: heroPhoto,
+          width: 1290,
+          height: 2796,
+          // cacheKey 故意不传 → 走默认 `1290x2796`，与路由查找闭合（D2）
+        });
+        job.log(`阶段 3 竖版完成: ${portraitPath}`);
+      } catch (portraitErr) {
+        job.log(
+          `阶段 3 竖版失败（不影响横版/精选）: ${
+            portraitErr instanceof Error ? portraitErr.message : String(portraitErr)
+          }`,
+        );
+      }
     } catch (err) {
       job.log(`阶段 3 失败（不影响精选）: ${err instanceof Error ? err.message : String(err)}`);
     }
