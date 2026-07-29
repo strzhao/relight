@@ -139,3 +139,35 @@
 - 原图 200 但裂图 → `curl -sI …/original` 看 content-type，再 `curl … | xxd -l 4` 对照 body magic byte：content-type 与字节**不一致** = 扩展名错配（本条）；一致 = 前端渲染问题
 
 **排查链**：首页排除 500 → curl original 拿 content-type → 对照 body magic byte → svg 占位=文件层（SMB/路径）/ content-type≠字节=扩展名错配 / 一致=前端层。
+
+---
+
+### [2026-07-29] Satori 支持 position:absolute 多层叠加 + linear-gradient（spike 实证，非文档推测）
+
+<!-- tags: satori, position-absolute, linear-gradient, wallpaper, portrait, spike, verify-before-build, image-composition -->
+
+**Background**: 手机竖版壁纸 B 方案（全屏照片 cover + 底部 1500px 渐变压白字）需 `position:absolute` 三层叠加（img + 渐变层 + 白字层）+ `linear-gradient`。本仓库横版模板全程 flex，absolute/gradient 无先例——`grep "position:absolute|backgroundImage|linear-gradient"` 在 wallpaper 目录为空。
+
+**Lesson**: spike 实证（1290×2796 真实 Satori 渲染）确认**可行**：
+- `linear-gradient(to bottom, rgba(...)→...)` 被渲染为 `<defs><pattern><linearGradient><stop>` + 外层 `<rect fill="url(#...)" x y width height>`，渐变层 y=H-gradientHeight 精确
+- `position:absolute` 多层叠加（img/渐变/文字三层）**支持**，文字层 `<path>` 落在 absolute bottom padding 指定区域（min-y 在底部）
+- 与 [2026-05-08] object-fit 几何不确定性不同：absolute 定位 + linear-gradient 这两个**稳定**，可放心用
+
+**方法**: 本仓库无先例的 Satori 特性，**铺开实现前必须 spike**——写最小 JSX 真实渲染一次，几何断言验证（`<rect>` y/height、文字 path 坐标、`<image>` W×H），文档/经验推测都不算数。失败有几何断言兜底，不会静默回归。
+
+---
+
+### [2026-07-29] 维度派生 cacheKey 必须三方闭合：预生成 / 路由命中 / 推送读取同一约定
+
+<!-- tags: wallpaper, cache, cachekey, daily-composed, contract, route-hit, pregenerate, push, portrait, image-processing -->
+
+**Background**: 手机竖版壁纸预生成 `composeAndSave({width:1290,height:2796})`，cacheKey 缺省回退 `${width}x${height}` → 文件名 `..._1290x2796.jpg`。曾考虑语义别名 `cacheKey:"portrait"`（文件名 `..._portrait.jpg`），但路由命中检测 `composedCachePath(pickDate, 1290, 2796)` 查找 `..._1290x2796.jpg`——**预生成文件名 ≠ 路由查找文件名 → 预生成白做、每次请求现场合成**。
+
+**Lesson**: 缓存按维度/参数派生 cacheKey 时，**写入方（预生成）与读取方（路由命中 / 推送读取）必须共用同一 cacheKey 约定**：
+- composer 路径：`{pickDate}_{COMPOSER_VERSION}-{cacheKey ?? ${width}x${height}}.jpg`
+- 路由命中：`composedCachePath(pickDate, w, h)` 拼同一 `${w}x${h}`
+- **禁用语义别名**（"portrait"/"mobile"）给预生成，除非路由命中也用同一别名（需额外参数传递，徒增耦合）
+- 默认回退 `${width}x${height}` 是最稳的「写入=读取」闭合方案
+- 与 [2026-06-13] 双缓存失效（清缓存按 `pickDate_*` 前缀）**正交**：失效保证删除所有变体，闭合保证写入读取一致
+
+**自检**: 新增缓存变体时，三处（composer 拼路径 / 路由命中查找 / 推送读取）必须用同一 cacheKey——grep 三处确认闭合。

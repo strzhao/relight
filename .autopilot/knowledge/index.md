@@ -55,6 +55,8 @@
 
 ### 模式 (patterns.md)
 
+- [2026-07-29] Satori absolute+linear-gradient 多层叠加可行（spike 实证几何断言，铺开前必 spike）→ [image-processing](domains/image-processing.md)
+- [2026-07-29] 维度派生 cacheKey 三方闭合（预生成/路由命中/推送读取同一约定，禁语义别名）→ [image-processing](domains/image-processing.md)
 - [2026-07-20] vi.mock importOriginal 保留非 mock 导出 + sendFn 可注入解无 msw/nock 的 HTTP mock → [testing](domains/testing.md)
 - [2026-07-20] localhostOnly 对 GET 豁免 — 含 secret 端点须用 localhostOnlyStrict → [backend-infra](domains/backend-infra.md)
 - [2026-07-16] Turbopack client manifest 损坏（#85883）→ PM2 守护 web 改 webpack，手动 dev 留 turbopack → [release-ops](domains/release-ops.md)
