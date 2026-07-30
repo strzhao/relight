@@ -51,13 +51,13 @@ export async function registerDailyPushRepeatableJob(): Promise<void> {
   );
 }
 
-/** 注册每日视频生成重复任务（每天北京时间 03:00：daily-selection 0:00 / scan 2:00 之后，push 10:00 之前） */
+/** 注册每日视频生成重复任务（每天北京时间 10:00：和壁纸推送同期，早上人性化；生成完 ~10:15 推送企业微信） */
 export async function registerDailyVideoRepeatableJob(): Promise<void> {
   await dailyVideoQueue.add(
     "daily-video-cron",
     {},
     {
-      repeat: { pattern: "0 3 * * *", tz: "Asia/Shanghai" },
+      repeat: { pattern: "0 10 * * *", tz: "Asia/Shanghai" },
       jobId: "daily-video-cron",
     },
   );
