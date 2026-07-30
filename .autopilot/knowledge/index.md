@@ -16,11 +16,18 @@
 | 图片处理 | [domains/image-processing.md](domains/image-processing.md) | RAW/DNG、HEIC、EXIF、sharp、Satori 合成 |
 | 发布与运维 | [domains/release-ops.md](domains/release-ops.md) | PM2、Worktree、CI/CD、Homebrew、端口管理 |
 | 数据库 | [domains/database.md](domains/database.md) | Schema 设计、Migration、Drizzle 陷阱、技术选型 |
+| 视频生成 | [domains/video.md](domains/video.md) | memory-video/每日视频自动化、claude-p 编排、主题驱动、beat-sync、faststart |
 
 ## 全局时间线索引
 
 ### 决策 (decisions.md)
 
+- [2026-07-31] 每镜时长 8→16 拍 + MAX_SHOT_SEC 10（看清内容）→ [video](domains/video.md)
+- [2026-07-31] beat-sync pulse/breath 风景 vlog 违和，默认全去 → [video](domains/video.md)
+- [2026-07-31] mp4 必须 faststart（Remotion moov 尾部大文件播放失败）→ [video](domains/video.md)
+- [2026-07-31] AI 自主选片数（不限上限，只设 ≥20 下限）→ [video](domains/video.md)
+- [2026-07-30] 视频素材主题驱动（旅行/人物弧线），非时间切片 → [video](domains/video.md)
+- [2026-07-30] claude-p 编排架构（后端零业务逻辑，skill 单一真相源）→ [video](domains/video.md)
 - [2026-06-14] 扫描定时 BullMQ repeatable job → [backend-infra](domains/backend-infra.md)
 - [2026-06-02] macOS App 发布机制 → [release-ops](domains/release-ops.md)
 - [2026-06-02] 后端 API 纳入 PM2 开机自启 → [backend-infra](domains/backend-infra.md)
