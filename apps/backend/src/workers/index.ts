@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { analyzePhotoWorker } from "../jobs/analyze-photo";
 import { dailyPushWorker } from "../jobs/daily-push";
 import { dailySelectionWorker } from "../jobs/daily-selection";
+import { dailyVideoWorker } from "../jobs/daily-video";
 import { detectFacesWorker } from "../jobs/detect-faces";
 import { scanStorageWorker } from "../jobs/scan-storage";
 import { buildInfo } from "../lib/build-info";
@@ -69,6 +70,12 @@ const detectFacesWorkerInstance = new Worker("detect-faces", detectFacesWorker, 
 
 // 每日精选壁纸企业微信群推送 Worker — 每天 10:00 触发，串行单任务即可
 const dailyPushWorkerInstance = new Worker("daily-push", dailyPushWorker, {
+  connection,
+  prefix: config.bullmqPrefix,
+});
+
+// 每日视频生成 Worker — 每天 03:00 触发（有主题才做，spawn claude -p 渲染）
+const dailyVideoWorkerInstance = new Worker("daily-video", dailyVideoWorker, {
   connection,
   prefix: config.bullmqPrefix,
 });
@@ -143,6 +150,7 @@ async function shutdown(signal: string): Promise<void> {
       dailyWorker.close(false),
       detectFacesWorkerInstance.close(false),
       dailyPushWorkerInstance.close(false),
+      dailyVideoWorkerInstance.close(false),
       analyzeEvents.close(),
     ]);
     console.log("[workers] 所有 Worker 已关闭");
@@ -190,6 +198,13 @@ dailyPushWorkerInstance.on("completed", (job) => {
 });
 dailyPushWorkerInstance.on("failed", (job, err) => {
   console.error(`[daily-push] 任务失败: ${job?.id}`, err.message);
+});
+
+dailyVideoWorkerInstance.on("completed", (job) => {
+  console.log(`[daily-video] 任务完成: ${job.id}`);
+});
+dailyVideoWorkerInstance.on("failed", (job, err) => {
+  console.error(`[daily-video] 任务失败: ${job?.id}`, err.message);
 });
 
 console.log(

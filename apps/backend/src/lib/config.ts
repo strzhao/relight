@@ -1,5 +1,17 @@
+import { execSync } from "node:child_process";
 import "dotenv/config";
 import path from "node:path";
+
+/** 运行时解析 `which claude` 绝对路径（PM2 resurrect 时 nvm 不在 PATH，必须绝对路径） */
+function resolveClaudeCliPath(): string {
+  if (process.env.CLAUDE_CLI_PATH) return process.env.CLAUDE_CLI_PATH;
+  try {
+    return execSync("which claude", { encoding: "utf8" }).trim();
+  } catch {
+    // claude 未安装时返回空串，spawn 前存在校验会兜底 fail
+    return "";
+  }
+}
 
 export const config = {
   /** monorepo 根目录（child_process spawn cwd 用）。
@@ -47,6 +59,17 @@ export const config = {
    *  fillUp 第 5 源保持更严的 ≥7.5 不变（见 candidate-pool.ts 硬编码）。 */
   minAestheticScorePrimary:
     Number.parseFloat(process.env.DAILY_SELECT_MIN_AESTHETIC_SCORE ?? "7.0") || 7.0,
+  /** claude CLI 绝对路径（后端 spawn claude -p 调 memory-video skill）。
+   *  env CLAUDE_CLI_PATH 覆盖；默认运行时 `which claude` 解析（PM2 resurrect 时 nvm 不在 PATH）。 */
+  claudeCliPath: resolveClaudeCliPath(),
+  /** Remotion 项目根（含 src/public/node_modules/render-immersive.mjs），claude -p 的 cwd。
+   *  env VIDEO_WORKSPACE_PATH 覆盖；默认指向 <repo>/.autopilot 的 video-dryrun 目录。 */
+  videoWorkspacePath:
+    process.env.VIDEO_WORKSPACE_PATH ??
+    path.join(
+      process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
+      ".autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun",
+    ),
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),

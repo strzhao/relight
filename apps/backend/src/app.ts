@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { db, schema } from "./db";
-import { dailyPushQueue, dailyQueue, scanQueue } from "./jobs/queues";
+import { dailyPushQueue, dailyQueue, dailyVideoQueue, scanQueue } from "./jobs/queues";
 import { AppError } from "./lib/errors";
 import { localhostOnly, localhostOnlyStrict } from "./lib/middleware/localhost-only";
 import {
@@ -20,6 +20,7 @@ import {
   settingsRouter,
   storageRouter,
   tagsRouter,
+  videosRouter,
 } from "./routes";
 import { pushRouter } from "./routes/push";
 import { runtimeConfigRouter } from "./routes/runtime-config";
@@ -46,6 +47,18 @@ export async function registerDailyPushRepeatableJob(): Promise<void> {
     {
       repeat: { pattern: "0 10 * * *", tz: "Asia/Shanghai" },
       jobId: "daily-push-cron",
+    },
+  );
+}
+
+/** 注册每日视频生成重复任务（每天北京时间 03:00：daily-selection 0:00 / scan 2:00 之后，push 10:00 之前） */
+export async function registerDailyVideoRepeatableJob(): Promise<void> {
+  await dailyVideoQueue.add(
+    "daily-video-cron",
+    {},
+    {
+      repeat: { pattern: "0 3 * * *", tz: "Asia/Shanghai" },
+      jobId: "daily-video-cron",
     },
   );
 }
@@ -119,6 +132,7 @@ export function createApp(): Hono {
   app.route("/api/bursts", burstsRouter);
   app.route("/api/persons", personsRouter);
   app.route("/api/plugins", pluginsRouter);
+  app.route("/api/videos", videosRouter);
 
   return app;
 }

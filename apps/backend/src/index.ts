@@ -3,6 +3,7 @@ import {
   createApp,
   registerDailyPushRepeatableJob,
   registerDailyRepeatableJob,
+  registerDailyVideoRepeatableJob,
   registerScanRepeatableJob,
 } from "./app";
 import { config } from "./lib/config";
@@ -19,6 +20,11 @@ registerDailyRepeatableJob().catch((err) => {
 // 注册每日壁纸企业微信群推送定时任务（北京时间 10:00）
 registerDailyPushRepeatableJob().catch((err) => {
   console.error("[relight] 注册每日壁纸推送定时任务失败:", err);
+});
+
+// 注册每日视频生成定时任务（北京时间 03:00，有主题才做）
+registerDailyVideoRepeatableJob().catch((err) => {
+  console.error("[relight] 注册每日视频生成定时任务失败:", err);
 });
 
 // 注册扫描定时任务

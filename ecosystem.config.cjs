@@ -18,6 +18,13 @@ module.exports = {
         NODE_ENV: "development",
         REPO_ROOT: repoRoot,
         PATH: process.env.PATH,
+        // 视频生成（spawn claude -p）所需：PM2 resurrect 时 nvm 不在 PATH，必须绝对路径
+        HOME: process.env.HOME,
+        CLAUDE_CLI_PATH: process.env.CLAUDE_CLI_PATH || `${process.env.HOME}/.nvm/versions/node/v22.22.2/bin/claude`,
+        VIDEO_WORKSPACE_PATH: path.join(
+          repoRoot,
+          ".autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun",
+        ),
       },
     },
     {

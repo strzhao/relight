@@ -10,6 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 每日精选壁纸企业微信群推送（每天北京时间 10:00 自动推送横版 + 手机竖版 + mac 控制中心配置 webhook 与启用开关 + 测试发送）。
 
+每日视频自动化（每天 03:00 cron 跑 video-discovery 做主题发现——旅行 / 人物成长线；命中主题才 spawn `claude -p` 调 memory-video skill 生成 1080p vlog，落盘 + 写 videos/videoUsages 表 + 企业微信推送封面与详情链接；无主题静默跳过，质量优先、非每日必出）。
+
 ## 技术栈
 
 - **Monorepo**: pnpm workspaces + Turborepo

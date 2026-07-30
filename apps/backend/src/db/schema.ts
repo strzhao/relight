@@ -286,6 +286,52 @@ export const pluginTasks = sqliteTable("plugin_tasks", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+/** 每日视频产物（与 dailyPicks 解耦——有主题才做，非每天有） */
+export const videos = sqliteTable(
+  "videos",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /** 主题类型：旅行 / 人物成长线 */
+    themeKind: text("theme_kind", { enum: ["trip", "person"] }).notNull(),
+    /** 主题指纹：trip=`<regionSlug>-<year>` / person=`<personId>-<toYear>` */
+    themeKey: text("theme_key").notNull(),
+    title: text("title").notNull(),
+    outputPath: text("output_path").notNull(),
+    coverPath: text("cover_path").notNull(),
+    durationSec: integer("duration_sec"),
+    /** 使用的照片 id 列表（JSON 字符串） */
+    photoIds: text("photo_ids", { mode: "json" }).$type<string[]>(),
+    status: text("status", { enum: ["completed", "failed"] }).notNull(),
+    errorMsg: text("error_msg"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    // 同一主题（kind+key）只做一次，复访同地不同年 = 不同 themeKey 可重复
+    uniqTheme: unique().on(t.themeKind, t.themeKey),
+    idx_videos_created_at: index("idx_videos_created_at").on(t.createdAt),
+  }),
+);
+
+/** 视频主题已消耗的照片追踪（去重 + 跨主题排除） */
+export const videoUsages = sqliteTable(
+  "video_usages",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    themeKind: text("theme_kind").notNull(),
+    themeKey: text("theme_key").notNull(),
+    photoId: text("photo_id").notNull(),
+    consumedAt: text("consumed_at").notNull(),
+  },
+  (t) => ({
+    idx_video_usages_photo: index("idx_video_usages_photo").on(t.photoId),
+    idx_video_usages_theme: index("idx_video_usages_theme").on(t.themeKind, t.themeKey),
+  }),
+);
+
 /** 设置 (key-value) */
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

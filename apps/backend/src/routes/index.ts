@@ -12,3 +12,4 @@ export { analyzeRouter } from "./analyze";
 export { burstsRouter } from "./bursts";
 export { personsRouter } from "./persons";
 export { pluginsRouter } from "./plugins";
+export { videosRouter } from "./videos";
