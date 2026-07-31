@@ -700,9 +700,10 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       // cacheKey 用默认 `${width}x${height}` → 文件名 `..._v2-contain-1290x2796.jpg`，
       // 与路由 composedCachePath(pickDate,1290,2796) 命中契约一致（D2）。
       // 失败仅 log，不阻塞主流程（AP-6 竖版合成失败兜底）。
+      let portraitPath: string | null = null;
       try {
         job.log("阶段 3: 合成竖版手机壁纸 1290×2796");
-        const portraitPath = await composeAndSave({
+        portraitPath = await composeAndSave({
           pick: {
             ...pickRow,
             composedImageUrl: null,
@@ -718,6 +719,25 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
         job.log(
           `阶段 3 竖版失败（不影响横版/精选）: ${
             portraitErr instanceof Error ? portraitErr.message : String(portraitErr)
+          }`,
+        );
+      }
+
+      // 阶段 3.5: 画廊同步（上传壁纸 + 当日 entries 缩略图 + 刷 manifest 推 VPS）——
+      // 独立 try/catch 旁路，失败不阻塞精选主流程（画廊是旁路，容错契约 §契约规约）。
+      try {
+        const { syncDayToGallery } = await import("../lib/gallery/sync");
+        const entryPhotoIds = entryResults.map((e) => e.photoId);
+        await syncDayToGallery(
+          pickDate,
+          { landscape: composedPath, portrait: portraitPath },
+          entryPhotoIds,
+          (m: string) => job.log(m),
+        );
+      } catch (galleryErr) {
+        job.log(
+          `[gallery] 画廊同步失败（不阻塞精选）: ${
+            galleryErr instanceof Error ? galleryErr.message : String(galleryErr)
           }`,
         );
       }

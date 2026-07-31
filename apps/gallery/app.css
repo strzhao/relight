@@ -1,0 +1,453 @@
+/* 拾光画廊静态站 — OKLCH 品牌色（与 apps/web globals.css 同源）
+   设计哲学：温润、克制、有机、清醒（见 CLAUDE.md 设计体系）
+   纯 CSS 无框架；移动端优先适配（竖版壁纸给手机看）
+*/
+
+:root {
+  /* 色板（同 apps/web globals.css :root） */
+  --background: oklch(0.975 0.01 95); /* Paper 纸 */
+  --foreground: oklch(0.155 0.006 95); /* Ink 墨 */
+  --muted: oklch(0.945 0.004 95); /* Mist 雾 */
+  --muted-foreground: oklch(0.52 0.005 95); /* Smoke 烟 */
+  --primary: oklch(0.488 0.088 158); /* Sage 苔 */
+  --primary-foreground: oklch(0.975 0.01 95);
+  --card: oklch(0.992 0.006 95);
+  --border: oklch(0.9 0.004 95);
+  --radius: 12px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui,
+    sans-serif;
+  --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "Songti TC", serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ===== 顶栏 ===== */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.brand-mark {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--foreground);
+}
+
+.brand-sub {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.nav {
+  display: flex;
+  gap: 20px;
+  font-size: 14px;
+}
+
+.nav a {
+  color: var(--muted-foreground);
+  padding: 6px 2px;
+  border-bottom: 2px solid transparent;
+  transition: color 100ms, border-color 100ms;
+}
+
+.nav a:hover {
+  color: var(--foreground);
+}
+
+.nav a.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* ===== 主容器 ===== */
+.app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.loading,
+.error {
+  text-align: center;
+  padding: 80px 24px;
+  color: var(--muted-foreground);
+}
+
+.error-title {
+  font-size: 18px;
+  color: var(--foreground);
+  margin: 0 0 8px;
+}
+
+.error-msg {
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+.btn-retry {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 100ms, background 100ms;
+}
+
+.btn-retry:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* ===== 今日精选（DailyHero 布局） ===== */
+.hero-section {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 28px;
+  align-items: stretch;
+}
+
+.hero-image-wrap {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--muted);
+  aspect-ratio: 16 / 9;
+}
+
+.hero-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 200ms;
+}
+
+.hero-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 4px;
+}
+
+.hero-date {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.hero-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--foreground);
+}
+
+.hero-narrative {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.85;
+  color: var(--muted-foreground);
+  max-width: 42ch;
+}
+
+/* ===== 缩略图栅格 ===== */
+.thumb-strip {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.strip-title {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin: 0 0 16px;
+  font-weight: 500;
+}
+
+.thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--muted);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 100ms, outline-color 100ms;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb:hover {
+  transform: translateY(-2px);
+}
+
+.thumb[aria-selected="true"] {
+  outline-color: var(--primary);
+}
+
+/* ===== 历史列表 ===== */
+.history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-title {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  margin: 0 0 8px;
+}
+
+.day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.day-item {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--card);
+  border: 1px solid var(--border);
+  transition: border-color 100ms, transform 100ms;
+}
+
+.day-item:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.day-thumb {
+  width: 120px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--muted);
+}
+
+.day-info {
+  min-width: 0;
+}
+
+.day-date {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+  margin: 0 0 4px;
+}
+
+.day-title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-count {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.day-no-wallpaper {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  margin-left: 8px;
+}
+
+/* ===== 视频播放 ===== */
+.video-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.video-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.video-title {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  margin: 0;
+}
+
+.video-player {
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+  aspect-ratio: 16 / 9;
+}
+
+.video-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.back-link {
+  display: inline-block;
+  font-size: 14px;
+  color: var(--muted-foreground);
+  padding: 8px 0;
+}
+
+.back-link:hover {
+  color: var(--primary);
+}
+
+/* ===== 移动端适配（竖版壁纸给手机） ===== */
+@media (max-width: 768px) {
+  .app {
+    padding: 16px;
+  }
+
+  .topbar {
+    padding: 12px 16px;
+  }
+
+  .brand-sub {
+    display: none;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .hero-image-wrap {
+    aspect-ratio: 4 / 5;
+  }
+
+  .hero-text {
+    padding: 0;
+  }
+
+  .hero-title {
+    font-size: 24px;
+  }
+
+  .thumb-grid {
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+  }
+
+  .day-item {
+    grid-template-columns: 80px 1fr;
+  }
+
+  .day-thumb {
+    width: 80px;
+    height: 80px;
+  }
+
+  .day-count {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ===== 竖版壁纸专用展示（手机） ===== */
+.portrait-wallpaper {
+  margin-top: 16px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.portrait-wallpaper img {
+  width: 100%;
+  height: auto;
+  display: block;
+}

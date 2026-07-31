@@ -16,6 +16,7 @@
     "backfill:taken-at": "tsx src/cli/backfill-taken-at.ts",
     "backfill:thumbnails": "tsx src/cli/backfill-thumbnails.ts",
     "backfill:daily-picks": "tsx src/cli/backfill-daily-picks.ts",
+    "backfill:gallery": "tsx src/cli/backfill-gallery.ts",
     "models:download": "tsx scripts/download-models.ts"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "@relight/shared": "workspace:*",
     "@resvg/resvg-js": "^2.6.2",
     "bullmq": "^5.76.5",
+    "cos-nodejs-sdk-v5": "^3.0.0",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.45.2",
     "exifr": "^7.1.3",

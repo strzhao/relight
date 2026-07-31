@@ -9,7 +9,7 @@ import type Database from "better-sqlite3";
  *
  * 包含表：storage_sources / bursts / photos / tags / photo_tags / photo_analyses /
  *        daily_picks / daily_pick_entries / scan_logs / analyze_batches / analyze_batch_jobs /
- *        settings / persons / faces
+ *        settings / persons / faces / videos / video_usages
  */
 export interface SetupOptions {
   /**
@@ -216,5 +216,33 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
     );
     CREATE INDEX IF NOT EXISTS idx_faces_photo ON faces(photo_id);
     CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
+
+    -- 视频表（与 db/schema.ts videos 表同步）
+    CREATE TABLE IF NOT EXISTS videos (
+      id TEXT PRIMARY KEY,
+      theme_kind TEXT NOT NULL CHECK (theme_kind IN ('trip', 'person')),
+      theme_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      output_path TEXT NOT NULL,
+      cover_path TEXT NOT NULL,
+      duration_sec INTEGER,
+      photo_ids TEXT,
+      status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+      error_msg TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(theme_kind, theme_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at);
+
+    -- 视频主题已消耗的照片追踪（去重 + 跨主题排除）
+    CREATE TABLE IF NOT EXISTS video_usages (
+      id TEXT PRIMARY KEY,
+      theme_kind TEXT NOT NULL,
+      theme_key TEXT NOT NULL,
+      photo_id TEXT NOT NULL,
+      consumed_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_usages_photo ON video_usages(photo_id);
+    CREATE INDEX IF NOT EXISTS idx_video_usages_theme ON video_usages(theme_kind, theme_key);
   `);
 }

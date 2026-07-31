@@ -120,6 +120,26 @@ export async function dailyVideoWorker(job: Job): Promise<void> {
     );
     job.log(`[daily-video] success videoId=${videoId}`);
 
+    // 4.5 画廊同步（上传 mp4 + 封面 + 刷 manifest 推 VPS）——独立 try/catch 旁路，
+    // 失败不阻塞视频推送（画廊是旁路，容错契约 §契约规约）。
+    try {
+      const { syncVideoToGallery } = await import("../lib/gallery/sync");
+      await syncVideoToGallery(
+        {
+          themeKey: candidate.themeKey,
+          mp4Path: outputPath,
+          coverPath,
+        },
+        (m: string) => job.log(m),
+      );
+    } catch (galleryErr) {
+      job.log(
+        `[gallery] 视频画廊同步失败（不阻塞推送）: ${
+          galleryErr instanceof Error ? galleryErr.message : String(galleryErr)
+        }`,
+      );
+    }
+
     // 5. 推送（除非 skipPush）
     if (!skipPush) {
       pushed = await pushVideoNotification(videoId, candidate.titleHint, coverPath, job);
@@ -318,7 +338,9 @@ async function pushVideoNotification(
     job.log(`[daily-video] push cover 缺失: ${coverPath}（仅发文字消息）`);
   }
 
-  const videoUrl = `http://localhost:${config.port}/api/videos/${videoId}/stream`;
+  // 画廊公网 URL（修 localhost bug，state.md §契约规约 公网 URL 契约）：
+  //   `config.galleryPublicUrl + /#/video/<id>`（hash 路由，静态站渲染）
+  const videoUrl = `${config.galleryPublicUrl}/#/video/${videoId}`;
   const textMsg = `🎬 新视频：${titleHint}\n观看：${videoUrl}`;
 
   // 发文字消息

@@ -59,6 +59,35 @@ export const config = {
    *  fillUp 第 5 源保持更严的 ≥7.5 不变（见 candidate-pool.ts 硬编码）。 */
   minAestheticScorePrimary:
     Number.parseFloat(process.env.DAILY_SELECT_MIN_AESTHETIC_SCORE ?? "7.0") || 7.0,
+  /** 腾讯云 COS + VPS 画廊配置（每日精选/视频产物推送公网画廊，见 state.md VPS 画廊设计）。
+   *  凭据命名兼容（plan-reviewer 补强）：优先读 vps-ops 真源 `TENCENTCLOUD_SECRET_ID/SECRET_KEY/APPID/REGION`
+   *  （bucket = `little-bee-assets-${APPID}`），fallback `COS_SECRET_ID/SECRET_KEY/BUCKET/REGION`。
+   *  所有字段 env 注入，缺失时走默认值（本机开发不依赖画廊也能跑——画廊同步会 console.warn 旁路）。 */
+  cos: {
+    /** SecretId：优先 TENCENTCLOUD_SECRET_ID，fallback COS_SECRET_ID */
+    secretId: process.env.TENCENTCLOUD_SECRET_ID ?? process.env.COS_SECRET_ID ?? "",
+    /** SecretKey：优先 TENCENTCLOUD_SECRET_KEY，fallback COS_SECRET_KEY */
+    secretKey: process.env.TENCENTCLOUD_SECRET_KEY ?? process.env.COS_SECRET_KEY ?? "",
+    /** Bucket：bucket = `little-bee-assets-${APPID}`；显式 COS_BUCKET 优先，否则按 APPID 拼，再 fallback 硬编码默认桶 */
+    bucket:
+      process.env.COS_BUCKET ??
+      (process.env.TENCENTCLOUD_APPID
+        ? `little-bee-assets-${process.env.TENCENTCLOUD_APPID}`
+        : "little-bee-assets-1324334992"),
+    /** 地域：优先 TENCENTCLOUD_REGION/COS_REGION，默认 ap-shanghai */
+    region: process.env.TENCENTCLOUD_REGION ?? process.env.COS_REGION ?? "ap-shanghai",
+    /** COS key 前缀（公有读桶下的子路径，默认 relight/） */
+    prefix: process.env.COS_PREFIX ?? "relight",
+  },
+  /** VPS 画廊推送目标（SSH 免密 scp + ssh mv 原子覆盖 manifest.json） */
+  gallery: {
+    vpsHost: process.env.GALLERY_VPS_HOST ?? "43.143.124.222",
+    vpsUser: process.env.GALLERY_VPS_USER ?? "ubuntu",
+    vpsKey: process.env.GALLERY_VPS_KEY ?? "",
+    vpsPath: process.env.GALLERY_VPS_PATH ?? "/home/ubuntu/relight-gallery",
+  },
+  /** 画廊公网基址（daily-video 推送 URL + 静态站首页；禁止硬编码 localhost） */
+  galleryPublicUrl: process.env.GALLERY_PUBLIC_URL ?? "https://gallery.stringzhao.life",
   /** claude CLI 绝对路径（后端 spawn claude -p 调 memory-video skill）。
    *  env CLAUDE_CLI_PATH 覆盖；默认运行时 `which claude` 解析（PM2 resurrect 时 nvm 不在 PATH）。 */
   claudeCliPath: resolveClaudeCliPath(),

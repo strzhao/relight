@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>拾光 · Relight</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <!-- 顶栏：品牌 + 导航 -->
+    <header class="topbar">
+      <a class="brand" href="#/">
+        <span class="brand-mark">拾光</span>
+        <span class="brand-sub">Relight Chronicle</span>
+      </a>
+      <nav class="nav">
+        <a href="#/" data-nav="today">今日</a>
+        <a href="#/history" data-nav="history">历史</a>
+      </nav>
+    </header>
+
+    <!-- 主视图容器：JS 根据 hash 路由填充 -->
+    <main id="app" class="app">
+      <!-- 载入态 -->
+      <div class="loading" data-role="loading">
+        <p>正在加载画廊…</p>
+      </div>
+    </main>
+
+    <!-- 错误态（manifest fetch 失败） -->
+    <template id="error-tpl">
+      <div class="error" data-role="error">
+        <p class="error-title">画廊暂不可用</p>
+        <p class="error-msg"></p>
+        <button class="btn-retry" type="button">重试</button>
+      </div>
+    </template>
+
+    <!-- 今日精选模板（DailyHero 布局：左大图 + 右叙事 + 底部缩略图栅格） -->
+    <template id="today-tpl">
+      <section class="hero-section">
+        <article class="hero">
+          <div class="hero-image-wrap">
+            <img class="hero-image" data-role="hero" alt="" />
+          </div>
+          <div class="hero-text">
+            <p class="hero-date" data-role="hero-date"></p>
+            <h1 class="hero-title" data-role="hero-title"></h1>
+            <p class="hero-narrative" data-role="narrative"></p>
+          </div>
+        </article>
+
+        <!-- 底部缩略图栅格 -->
+        <section class="thumb-strip">
+          <h2 class="strip-title">今日精选</h2>
+          <div class="thumb-grid" data-role="thumb-grid"></div>
+        </section>
+      </section>
+    </template>
+
+    <!-- 历史列表模板 -->
+    <template id="history-tpl">
+      <section class="history-section">
+        <h1 class="page-title">历史精选</h1>
+        <ul class="day-list" data-role="day-list"></ul>
+      </section>
+    </template>
+
+    <!-- 视频播放模板 -->
+    <template id="video-tpl">
+      <section class="video-section">
+        <article class="video-card">
+          <h1 class="video-title" data-role="video-title"></h1>
+          <video
+            class="video-player"
+            data-role="video"
+            controls
+            playsinline
+            preload="metadata"
+          ></video>
+          <p class="video-meta" data-role="video-meta"></p>
+        </article>
+        <a class="back-link" href="#/">← 返回首页</a>
+      </section>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
