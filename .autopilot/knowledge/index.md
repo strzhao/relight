@@ -17,11 +17,15 @@
 | 发布与运维 | [domains/release-ops.md](domains/release-ops.md) | PM2、Worktree、CI/CD、Homebrew、端口管理 |
 | 数据库 | [domains/database.md](domains/database.md) | Schema 设计、Migration、Drizzle 陷阱、技术选型 |
 | 视频生成 | [domains/video.md](domains/video.md) | memory-video/每日视频自动化、claude-p 编排、主题驱动、beat-sync、faststart |
+| VPS 画廊 + COS | [domains/gallery.md](domains/gallery.md) | gallery.stringzhao.life、推送式同步、COS 上传容错、manifest 安全、企微 webhook 边界 |
 
 ## 全局时间线索引
 
 ### 决策 (decisions.md)
 
+- [2026-08-01] VPS 画廊推送式架构（复用 COS 桶+Caddy+域名，零新容器）→ [gallery](domains/gallery.md)
+- [2026-08-01] manifest 放 VPS 同源不放 COS（防公有读固定 key 被遍历绕过隐蔽）→ [gallery](domains/gallery.md)
+- [2026-08-01] 企微群机器人 webhook 不支持视频（靠公网 URL 播放）→ [gallery](domains/gallery.md)
 - [2026-07-31] 每镜时长 8→16 拍 + MAX_SHOT_SEC 10（看清内容）→ [video](domains/video.md)
 - [2026-07-31] beat-sync pulse/breath 风景 vlog 违和，默认全去 → [video](domains/video.md)
 - [2026-07-31] mp4 必须 faststart（Remotion moov 尾部大文件播放失败）→ [video](domains/video.md)
@@ -62,6 +66,7 @@
 
 ### 模式 (patterns.md)
 
+- [2026-08-01] COS 上传容错返回空串不 throw（画廊旁路，sync* 返回 void，凭据兼容 TENCENTCLOUD_*/COS_*）→ [gallery](domains/gallery.md)
 - [2026-07-29] Satori absolute+linear-gradient 多层叠加可行（spike 实证几何断言，铺开前必 spike）→ [image-processing](domains/image-processing.md)
 - [2026-07-29] 维度派生 cacheKey 三方闭合（预生成/路由命中/推送读取同一约定，禁语义别名）→ [image-processing](domains/image-processing.md)
 - [2026-07-20] vi.mock importOriginal 保留非 mock 导出 + sendFn 可注入解无 msw/nock 的 HTTP mock → [testing](domains/testing.md)
