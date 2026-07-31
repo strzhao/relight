@@ -51,6 +51,7 @@ pnpm --filter @relight/backend start       # 跑生产构建产物
 pnpm --filter @relight/backend tsx src/cli/backfill-media-type.ts  # 历史视频数据回填 mediaType / durationSec
 pnpm --filter @relight/backend tsx src/cli/detect-bursts.ts        # 历史照片连拍组回填（识别已有照片中的连拍关系）
 pnpm --filter @relight/backend backfill:daily-picks --dry-run       # 演练：列出历史缺失的每日精选日期（加 --yes 执行、--enqueue 入队）
+pnpm --filter @relight/backend backfill:gallery --dry-run           # 演练：列出待回填画廊的天数/视频（加 --yes 执行上传 COS + 推 manifest 到 VPS，--limit 限量）
 pnpm --filter @relight/backend models:download                     # 下载人脸识别 ONNX 模型权重（~16MB）
 
 # 前端专属
@@ -159,12 +160,19 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - 字体资产放在 `apps/backend/assets/fonts/`（Fraunces `.ttf` + Noto Serif SC `.otf`），tsup 构建时通过 `copyPublicDir` 自动复制到 `dist/assets/`。
 - `tsup.config.ts` — 后端独立构建配置，处理 Satori JSX 转换和字体资产复制。
 
+**VPS 画廊同步** (`src/lib/cos/` + `src/lib/gallery/`)：把每日精选 + 主题视频产物推送公网画廊（gallery.stringzhao.life，Caddy 静态托管 `apps/gallery/` 单页站）。架构为**推送式同步**——后端产物上传腾讯云 COS（公有读）→ 生成 manifest → scp+ssh mv 原子推到 VPS，静态站拉 manifest 渲染。
+- `cos/upload.ts` — COS 上传 lib（cos-nodejs-sdk-v5，重试 3 次；容错契约：失败返回空串不 throw，画廊是旁路不阻塞主流程）
+- `gallery/manifest.ts` — `buildManifest()` 全量读 DB → manifest（COS key 约定 `relight/daily/<date>/...` + `relight/videos/<themeKey>/...`；composedImagePath=null 边界跳过；durationSec 正整数门过滤无效视频）
+- `gallery/sync.ts` — `pushManifest`（本地写 tmp.json → `scp` 上传 → `ssh mv` 原子覆盖 VPS manifest.json，shellQuote 单引号转义防注入）+ `syncDayToGallery`/`syncVideoToGallery`（全部 `Promise<void>`，try/catch 旁路容错，失败 console.warn + job.log 不阻塞精选/视频主流程；调用方在 daily-selection 阶段 3.5、daily-video 步骤 4.5 各自独立 try/catch 包裹）
+- 凭据配置见 `config.cos`/`config.gallery`（凭据命名兼容：优先 `TENCENTCLOUD_SECRET_ID/SECRET_KEY/APPID/REGION`，fallback `COS_*`；bucket = `little-bee-assets-${APPID}`；缺失走默认值，本机开发画廊同步 console.warn 跳过）
+
 **CLI 工具** (`src/cli/`):
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
 - `e2e-verify.ts` — 端到端验证 AI 分析全链路（单张照片）
 - `repair-heic.ts` — 修复已有 HEIC 照片的缩略图（thumbnailPath IS NULL 且扩展名为 heic/heif）
 - `backfill-thumbnails.ts` — 补救 `thumbnail_path IS NULL` 的历史照片缩略图，复用 generateThumbnail，支持 `--dry-run`/`--limit`/`--media-type`（script: `backfill:thumbnails`）
 - `backfill-daily-picks.ts` — 补跑历史缺失的每日精选（检测 dailyPicks 表缺失日期，逐日回填；`--dry-run` 演练 / `--yes` 执行 / `--enqueue` 入队；默认 `--from=最早照片日`、`--to=今日`；复用 worker pickDate 覆盖，进程内顺序或 BullMQ 入队）（script: `backfill:daily-picks`）
+- `backfill-gallery.ts` — 历史回填画廊同步（遍历已有 dailyPicks/videos，复用 `uploadDayAssets`/`uploadVideoAssets` 上传 COS + 最后统一刷一次 manifest 推 VPS；`--dry-run` 演练 / `--yes` 执行 / `--limit` 限量；资源上传失败才 exit 2，manifest 推送失败仅 warn 不致命）（script: `backfill:gallery`）
 
 ### 前端架构 (apps/web)
 
@@ -211,6 +219,14 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                    手机竖版 1290×2796: 阶段3 预生成缓存 + 企业微信推送追加竖版
                        (缓存优先/现场合成兜底，独立 try/catch 不阻断横版)
+                                    ↓
+              VPS 画廊（gallery.stringzhao.life，Caddy 静态托管，推送式同步）:
+                  daily-selection 阶段 3.5 / daily-video 步骤 4.5 → syncDayToGallery /
+                  syncVideoToGallery（独立 try/catch 旁路）→ 产物上传腾讯云 COS（公有读）+
+                  buildManifest → scp+ssh mv 原子推 manifest.json 到 VPS → 静态站拉 manifest
+                  渲染 #/ #/history #/video/<id>（OKLCH 品牌色单页站）。daily-video 推送 URL
+                  改用 `config.galleryPublicUrl + /#/video/<id>`（修原 localhost bug）。
+                  历史回填走 `backfill:gallery` CLI。
 ```
 
 ## 设计体系
