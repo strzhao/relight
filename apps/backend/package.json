@@ -17,6 +17,7 @@
     "backfill:thumbnails": "tsx src/cli/backfill-thumbnails.ts",
     "backfill:daily-picks": "tsx src/cli/backfill-daily-picks.ts",
     "backfill:gallery": "tsx src/cli/backfill-gallery.ts",
+    "backfill:portraits": "tsx src/cli/backfill-portraits.ts",
     "models:download": "tsx scripts/download-models.ts"
   },
   "dependencies": {

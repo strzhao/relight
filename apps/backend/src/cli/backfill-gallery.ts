@@ -34,6 +34,7 @@ import {
   wallpaperPortraitCosKey,
 } from "../lib/gallery/manifest";
 import { pushManifest, uploadDayAssets, uploadVideoAssets } from "../lib/gallery/sync";
+import { composedCachePath } from "../lib/wallpaper/composer";
 
 // ===== 参数解析 =====
 
@@ -209,9 +210,16 @@ async function main(): Promise<void> {
     const t = Date.now();
     try {
       // 只上传当日资源（壁纸 + 缩略图），不刷 manifest（回填多天最后统一刷一次省 ssh）
-      // composedImagePath 为 null 的日子 uploadDayAssets 自动跳过壁纸
-      await uploadDayAssets(d.pickDate, d.composedImagePath, null, d.photoIds, (m: string) =>
-        console.log(`  [${i + 1}/${dayAssets.length}] ${m}`),
+      // composedImagePath 为 null 的日子 uploadDayAssets 自动跳过壁纸。
+      // portraitPath 取约定本地路径（与 composer 落盘 + manifest COS key 三方闭合）；
+      // 历史未生成竖版的日子本地文件不存在，safeUploadFile 内部 access 失败自动跳过。
+      const portraitPath = d.composedImagePath ? composedCachePath(d.pickDate, 1290, 2796) : null;
+      await uploadDayAssets(
+        d.pickDate,
+        d.composedImagePath,
+        portraitPath,
+        d.photoIds,
+        (m: string) => console.log(`  [${i + 1}/${dayAssets.length}] ${m}`),
       );
       daysOk++;
       console.log(

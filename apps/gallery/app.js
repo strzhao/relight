@@ -93,25 +93,29 @@
     const narrative = frag.querySelector('[data-role="narrative"]');
     const thumbGrid = frag.querySelector('[data-role="thumb-grid"]');
 
-    // hero 图：有壁纸用横版，否则用第一张缩略图
+    // hero 区数据驱动：图 + 标题 + 叙事 同步切到「当前选中照片」。
+    // 不用 wallpaperLandscape（合成图已印标题/叙事，会与 hero-text 文字重复 → 问题②）。
     const photos = day.photos || [];
+
+    const setActivePhoto = (p) => {
+      heroImg.src = p.original || p.thumbnail || "";
+      heroImg.alt = p.title || "";
+      heroTitle.textContent = p.title || "今日拾光";
+      narrative.textContent = p.narrative || "";
+    };
+
     const firstPhoto = photos[0];
-    if (day.wallpaperLandscape) {
-      heroImg.src = day.wallpaperLandscape;
-      heroImg.alt = day.title || "今日精选";
-    } else if (firstPhoto?.thumbnail) {
-      heroImg.src = firstPhoto.thumbnail;
-      heroImg.alt = day.title || "今日精选";
+    if (firstPhoto && (firstPhoto.original || firstPhoto.thumbnail)) {
+      setActivePhoto(firstPhoto);
     } else {
       heroImg.style.display = "none";
     }
 
+    // 日期仍取当日（pickDate 不随照片切换）
     heroDate.textContent = fmtDate(day.pickDate);
-    heroTitle.textContent = day.title || "今日拾光";
-    narrative.textContent = day.narrative || "";
 
-    // 缩略图栅格：点击切换 hero
-    for (const p of photos) {
+    // 缩略图栅格：点击切换 hero（图 + 标题 + 叙事 同步 → 问题③）
+    for (const [idx, p] of photos.entries()) {
       if (!p.thumbnail) continue;
       const btn = document.createElement("button");
       btn.type = "button";
@@ -119,15 +123,16 @@
       btn.setAttribute("data-role", "thumb");
       btn.setAttribute("data-photo-id", p.photoId || "");
       btn.setAttribute("aria-label", p.title || "查看照片");
+      // 第一张默认选中（与 hero 初始 firstPhoto 对齐）
+      if (idx === 0) btn.setAttribute("aria-selected", "true");
       const img = document.createElement("img");
       img.src = p.thumbnail;
       img.alt = p.title || "";
       img.loading = "lazy";
       btn.appendChild(img);
       btn.addEventListener("click", () => {
-        // 点击 thumb[N] → hero 切换为该 thumb 的 original URL（P29 谓词）
-        heroImg.src = p.original || p.thumbnail;
-        heroImg.alt = p.title || "";
+        // 点击 thumb[N] → hero 整体切到该照片（图 + 文字 同步，P29 谓词）
+        setActivePhoto(p);
         for (const t of thumbGrid.querySelectorAll(".thumb")) {
           t.setAttribute("aria-selected", "false");
         }
@@ -136,7 +141,8 @@
       thumbGrid.appendChild(btn);
     }
 
-    // 竖版壁纸（手机用）：附加在 hero-section 底部
+    // 竖版壁纸（手机用）：附加在 hero-section 底部。
+    // 历史 66 天本地未生成竖版（COS 404），onerror 隐藏区块避免裂图（问题①前端容错）。
     if (day.wallpaperPortrait) {
       const portrait = document.createElement("div");
       portrait.className = "portrait-wallpaper";
@@ -144,6 +150,7 @@
       pImg.src = day.wallpaperPortrait;
       pImg.alt = `${day.title || ""} 手机壁纸`;
       pImg.loading = "lazy";
+      pImg.addEventListener("error", () => portrait.remove());
       portrait.appendChild(pImg);
       frag.querySelector(".hero-section").appendChild(portrait);
     }
