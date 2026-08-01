@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 /**
  * manifest 生成（state.md §组件设计 2 / §manifest.json schema / §契约规约 COS key 命名）
  *
@@ -18,6 +19,9 @@
  */
 import type Database from "better-sqlite3";
 import { config } from "../config";
+
+// ESM 兼容：better-sqlite3 是 CJS，tsx 生产模式无 require，用 createRequire 动态加载
+const require = createRequire(import.meta.url);
 
 // ============================================================================
 // Manifest 类型（state.md §manifest.json schema 契约）

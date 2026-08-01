@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
 /**
  * manifest 推送 + 当日资源同步（state.md §组件设计 3 + §组件设计 4/5 接入点）
  *
@@ -19,8 +21,7 @@
  *   - manifest.ts（buildManifest）
  *   - config.ts（gallery VPS 目标）
  */
-import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import pLimit from "p-limit";
@@ -35,6 +36,8 @@ import {
   wallpaperPortraitCosKey,
 } from "./manifest";
 
+// ESM 兼容：better-sqlite3 是 CJS，tsx 生产模式无 require，用 createRequire 动态加载
+const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 
 // ============================================================================
