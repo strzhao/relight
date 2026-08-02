@@ -517,7 +517,7 @@ describe("P6/P7 buildManifest days[] 结构 — 验收测试（红队）", () =>
       },
     );
 
-    itOrSkip("P7.3 MVP 范围：original 暂等于 thumbnail（单页够看，YAGNI）", async () => {
+    itOrSkip("P7.3 original 指向 mid 尺寸图（~1600px，gallery 重设计后 ≠ thumbnail）", async () => {
       const photoId = "p7-orig-photo-0";
       insertPhotos(env.dbPath, [{ id: photoId }]);
       insertPick(env.dbPath, {
@@ -532,8 +532,12 @@ describe("P6/P7 buildManifest days[] 结构 — 验收测试（红队）", () =>
       const manifest = (await buildManifestFn!()) as Manifest;
       const day = manifest.days!.find((d) => d.pickDate === TODAY);
       const photo = day!.photos!.find((p) => p.photoId === photoId);
-      // MVP 契约：original == thumbnail（state.md §范围控制）
-      expect(photo!.original, "MVP original 应等于 thumbnail").toBe(photo!.thumbnail);
+      // 契约（gallery 重设计）：original 指 mid 尺寸图（relight/photos/<id>-mid.jpg），不再 === thumbnail；
+      // mid 生成/上传失败时由前端 <img onerror> fallback thumb（manifest 层始终写 mid 约定 URL）
+      expect(photo!.original, "original 应指向 mid 尺寸图").toMatch(/-mid\.jpg$/);
+      expect(photo!.original, "original 应与 thumbnail 不同（mid vs thumb）").not.toBe(
+        photo!.thumbnail,
+      );
     });
   });
 
