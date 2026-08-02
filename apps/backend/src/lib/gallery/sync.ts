@@ -26,15 +26,17 @@ import path from "node:path";
 import { promisify } from "node:util";
 import pLimit from "p-limit";
 import { config } from "../config";
-import { uploadFile } from "../cos/upload";
+import { uploadBuffer, uploadFile } from "../cos/upload";
 import {
   type Manifest,
   buildManifest,
+  photoMidCosKey,
   videoCoverCosKey,
   videoMp4CosKey,
   wallpaperLandscapeCosKey,
   wallpaperPortraitCosKey,
 } from "./manifest";
+import { generateMidBuffer } from "./mid-image";
 
 // ESM 兼容：better-sqlite3 是 CJS，tsx 生产模式无 require，用 createRequire 动态加载
 const require = createRequire(import.meta.url);
@@ -166,19 +168,45 @@ export async function uploadDayAssets(
   if (portraitPath) {
     await safeUploadFile(portraitPath, wallpaperPortraitCosKey(pickDate), "image/jpeg", safeLog);
   }
-  // 3. 并发上传缩略图（pLimit 5）
+  // 3. 并发上传缩略图 + 中尺寸图（pLimit 5，同队列）
   if (entryPhotoIds.length > 0) {
     const limit = pLimit(5);
-    const thumbPaths = await fetchThumbnailPaths(entryPhotoIds);
+    const photoFiles = await fetchPhotoFiles(entryPhotoIds);
     await Promise.all(
       entryPhotoIds.map((photoId) =>
         limit(async () => {
-          const local = thumbPaths.get(photoId);
-          if (!local) {
-            safeLog(`[gallery/sync] photoId=${photoId} thumbnailPath 为空，跳过上传`);
+          const info = photoFiles.get(photoId);
+          if (!info) {
+            safeLog(`[gallery/sync] photoId=${photoId} 不存在于 DB，跳过上传`);
             return;
           }
-          await safeUploadFile(local, photoThumbKey(photoId), "image/jpeg", safeLog);
+          // 3a. 缩略图（thumbnailPath 本地文件 → COS -thumb.jpg）
+          if (info.thumbnailPath) {
+            await safeUploadFile(info.thumbnailPath, photoThumbKey(photoId), "image/jpeg", safeLog);
+          } else {
+            safeLog(`[gallery/sync] photoId=${photoId} thumbnailPath 为空，跳过缩略图上传`);
+          }
+          // 3b. 中尺寸图（仅 local source——filePath 是绝对路径；SMB/WebDAV 未实现的 getFileBuffer
+          //     无法本地访问，跳过 mid，original 由前端 fallback thumb）
+          if (info.sourceType === "local") {
+            try {
+              const midBuf = await generateMidBuffer(info.filePath);
+              if (midBuf) {
+                await safeUploadBuffer(midBuf, photoMidCosKey(photoId), "image/jpeg", safeLog);
+              } else {
+                // generateMidBuffer 返回 null（HEIC 解码失败/原图缺失/NAS 漂移）→ 跳过 mid
+                // original 由前端 <img onerror> fallback thumb URL（约定式 COS key）
+                safeLog(`[gallery/sync] photoId=${photoId} mid 生成返回 null，跳过 mid 上传`);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              safeLog(`[gallery/sync] photoId=${photoId} mid 上传失败（不阻塞）: ${msg}`);
+            }
+          } else {
+            safeLog(
+              `[gallery/sync] photoId=${photoId} sourceType=${info.sourceType} 非 local，跳过 mid`,
+            );
+          }
         }),
       ),
     );
@@ -315,9 +343,35 @@ async function safeUploadFile(
   await uploadFile(localPath, cosKey, contentType);
 }
 
-/** 批量查 photoId → thumbnailPath（开只读 DB，与 manifest.ts 同模式） */
-async function fetchThumbnailPaths(photoIds: string[]): Promise<Map<string, string | null>> {
-  const out = new Map<string, string | null>();
+/**
+ * 安全上传 Buffer（mid 图是内存 Buffer，无文件存在检查）。
+ * uploadBuffer 内部已有重试 + 容错（失败返回空串不 throw）。
+ */
+async function safeUploadBuffer(
+  buf: Buffer,
+  cosKey: string,
+  contentType: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  const url = await uploadBuffer(buf, cosKey, contentType);
+  if (!url) {
+    // uploadBuffer 返回空串 = 重试耗尽或凭据缺失（底层已 console.warn）
+    log(`[gallery/sync] Buffer 上传返回空串（凭据缺失/重试耗尽）: ${cosKey}`);
+  }
+}
+
+interface PhotoFileInfo {
+  /** 本地绝对路径（local source 时与 STORAGE_ROOT 无关——scan 入库时已是绝对路径） */
+  filePath: string;
+  /** 缩略图本地路径（可空，空则跳过缩略图上传） */
+  thumbnailPath: string | null;
+  /** 存储源类型（仅 local 走 mid 生成；smb/webdav 跳过 mid） */
+  sourceType: string;
+}
+
+/** 批量查 photoId → {filePath, thumbnailPath, sourceType}（JOIN storage_sources 取 type） */
+async function fetchPhotoFiles(photoIds: string[]): Promise<Map<string, PhotoFileInfo>> {
+  const out = new Map<string, PhotoFileInfo>();
   if (photoIds.length === 0) return out;
   // 动态 require better-sqlite3（与 manifest.ts openReadonlyDb 一致）
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -331,11 +385,24 @@ async function fetchThumbnailPaths(photoIds: string[]): Promise<Map<string, stri
       const placeholders = batch.map(() => "?").join(",");
       const rows = db
         .prepare(
-          `SELECT id, thumbnail_path AS thumbnailPath FROM photos WHERE id IN (${placeholders})`,
+          `SELECT p.id, p.file_path AS filePath, p.thumbnail_path AS thumbnailPath,
+                  s.type AS sourceType
+           FROM photos p
+           JOIN storage_sources s ON s.id = p.storage_source_id
+           WHERE p.id IN (${placeholders})`,
         )
-        .all(...batch) as Array<{ id: string; thumbnailPath: string | null }>;
+        .all(...batch) as Array<{
+        id: string;
+        filePath: string;
+        thumbnailPath: string | null;
+        sourceType: string;
+      }>;
       for (const r of rows) {
-        out.set(r.id, r.thumbnailPath);
+        out.set(r.id, {
+          filePath: r.filePath,
+          thumbnailPath: r.thumbnailPath,
+          sourceType: r.sourceType,
+        });
       }
     }
     return out;

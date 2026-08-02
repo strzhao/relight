@@ -32,10 +32,22 @@ export interface ManifestPhoto {
   rank: number;
   title: string;
   narrative: string;
-  /** 缩略图 COS URL（800px JPEG） */
+  /** 缩略图 COS URL（800px JPEG，blur-up 占位 + 视口外懒加载） */
   thumbnail: string;
-  /** 原图 URL（MVP === thumbnail；P2 增强后独立） */
+  /** 中尺寸图 COS URL（~1600px，全屏铺满清晰）；mid 生成/上传失败时 === thumbnail（800px fallback） */
   original: string;
+  /** 拍摄时刻 ISO 8601 字符串或 null（dateline 缺失不渲染） */
+  takenAt: string | null;
+  /** 原图像素宽（流单元占位防 CLS，0=未知前端 fallback 3/4） */
+  width: number;
+  /** 原图像素高（0=未知） */
+  height: number;
+  /**
+   * 人脸聚焦中心（归一化 0-1，4 位小数）；null = 无人脸/全低质，前端 fallback center。
+   * 来源：faces 表最大面积脸（bboxW*bboxH DESC）的 bbox 中心，按 photo.width/height 归一化，
+   * 钳制 [0.02, 0.98] 防贴边脸把图推出视口；detection_score < qualityLowDetectionScore 的脸不参与。
+   */
+  faceFocus: { x: number; y: number } | null;
 }
 
 export interface ManifestDay {
@@ -85,6 +97,11 @@ export function wallpaperPortraitCosKey(pickDate: string): string {
 /** 单张缩略图 key：`relight/photos/{photoId}-thumb.jpg` */
 export function photoThumbCosKey(photoId: string): string {
   return `${config.cos.prefix}/photos/${photoId}-thumb.jpg`;
+}
+
+/** 单张中尺寸图 key：`relight/photos/{photoId}-mid.jpg`（~1600px，与 thumb 同目录平铺） */
+export function photoMidCosKey(photoId: string): string {
+  return `${config.cos.prefix}/photos/${photoId}-mid.jpg`;
 }
 
 /** 视频封面 key：`relight/videos/{themeKey}.jpg` */
@@ -141,6 +158,16 @@ interface EntryRow {
 interface PhotoRow {
   id: string;
   thumbnailPath: string | null;
+  takenAt: string | null;
+  width: number;
+  height: number;
+}
+interface FaceRow {
+  photoId: string;
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
 }
 interface VideoRow {
   id: string;
@@ -191,37 +218,85 @@ export async function buildManifest(): Promise<Manifest> {
         )
         .all(p.id) as EntryRow[];
 
-      // 批量取 thumbnailPath（photoId IN (...)）
+      // 批量取 thumbnailPath + takenAt + width + height（photoId IN (...)）
       const photoIds = entries.map((e) => e.photoId);
-      const photoMap = new Map<string, string | null>();
+      const photoMap = new Map<string, PhotoRow>();
+      // 人脸聚焦：photoId → 主脸（最大面积 bboxW*bboxH DESC，score >= qualityLowDetectionScore）
+      const faceMap = new Map<string, FaceRow>();
       if (photoIds.length > 0) {
         // 用占位符列表（SQLite 参数上限 999，单日 entries ≤20 安全）
         const placeholders = photoIds.map(() => "?").join(",");
         const rows = sqlite
           .prepare(
-            `SELECT id, thumbnail_path AS thumbnailPath FROM photos WHERE id IN (${placeholders})`,
+            `SELECT id, thumbnail_path AS thumbnailPath, taken_at AS takenAt,
+                    width, height
+             FROM photos WHERE id IN (${placeholders})`,
           )
           .all(...photoIds) as PhotoRow[];
         for (const r of rows) {
-          photoMap.set(r.id, r.thumbnailPath);
+          photoMap.set(r.id, r);
+        }
+        // 人脸聚焦主脸查询：窗口函数取每 photoId 最大面积脸（SQLite ≥3.25，better-sqlite3 自带）。
+        // try/catch 旁路容错：faces 表缺失/查询失败 → faceMap 空 → 全部 faceFocus=null（不阻塞 manifest）
+        try {
+          const lowScore = config.face.qualityLowDetectionScore;
+          const faceRows = sqlite
+            .prepare(
+              `SELECT photo_id AS photoId, bbox_x AS bboxX, bbox_y AS bboxY,
+                      bbox_w AS bboxW, bbox_h AS bboxH
+               FROM (
+                 SELECT f.photo_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY f.photo_id
+                          ORDER BY (f.bbox_w * f.bbox_h) DESC, f.detection_score DESC
+                        ) AS rn
+                 FROM faces f
+                 WHERE f.photo_id IN (${placeholders}) AND f.detection_score >= ?
+               )
+               WHERE rn = 1`,
+            )
+            .all(...photoIds, lowScore) as FaceRow[];
+          for (const f of faceRows) {
+            faceMap.set(f.photoId, f);
+          }
+        } catch (err) {
+          console.warn(
+            "[gallery/manifest] faces 查询失败，faceFocus 全部为 null:",
+            err instanceof Error ? err.message : err,
+          );
         }
       }
 
       const photos: ManifestPhoto[] = entries.map((e) => {
-        const thumb = photoMap.get(e.photoId) ?? null;
         // thumbnailPath 缺失时仍生成约定 key（上传时若文件不存在会跳过，manifest 保持 key 一致）
-        // 但为避免静态站显示裂图，缺 thumbnailPath 时也按 photoId 拼约定 URL（上传后即生效）
-        const thumbUrl = cosPublicUrlForPhoto(e.photoId);
-        // 显式标记 thumb 是否存在（未触发上传时 COS 返回 403/404，但 key 约定不变）
-        // MVP：始终用约定 URL（cosPublicUrlForPhoto 内部用 config 拼接）
-        void thumb; // 暂不区分 thumbnailPath null（上传逻辑保证 photoId 缩略图存在）
+        const thumbUrl = cosPublicUrl(photoThumbCosKey(e.photoId));
+        // original 指向 mid 尺寸图（~1600px）；mid 生成/上传失败时由前端 <img onerror> fallback thumb
+        // （约定式 COS key——buildManifest 全量重生成不查 COS，保持无状态；S9.PM3 fixture 在测试层注入）
+        const midUrl = cosPublicUrl(photoMidCosKey(e.photoId));
+        const row = photoMap.get(e.photoId);
+        // 人脸聚焦归一化：主脸 bbox 中心 / 原图像素维度，钳制 [0.02, 0.98] 防贴边脸把图推出视口
+        let faceFocus: { x: number; y: number } | null = null;
+        const face = faceMap.get(e.photoId);
+        const w = row?.width ?? 0;
+        const h = row?.height ?? 0;
+        if (face && w > 0 && h > 0) {
+          const clamp = (v: number) => Math.max(0.02, Math.min(0.98, v));
+          faceFocus = {
+            x: Number(clamp((face.bboxX + face.bboxW / 2) / w).toFixed(4)),
+            y: Number(clamp((face.bboxY + face.bboxH / 2) / h).toFixed(4)),
+          };
+        }
         return {
           photoId: e.photoId,
           rank: e.rank,
           title: e.title,
           narrative: e.narrative,
           thumbnail: thumbUrl,
-          original: thumbUrl, // MVP：original === thumbnail（state.md §范围控制）
+          original: midUrl,
+          takenAt: row?.takenAt ?? null,
+          width: w,
+          height: h,
+          faceFocus,
         };
       });
 
@@ -285,8 +360,4 @@ export async function buildManifest(): Promise<Manifest> {
 // 为避免与 upload.ts 重复，直接内联（保持 manifest 零依赖 cos 模块，单测可独立跑）
 function cosPublicUrl(cosKey: string): string {
   return `https://${config.cos.bucket}.cos.${config.cos.region}.myqcloud.com/${cosKey}`;
-}
-
-function cosPublicUrlForPhoto(photoId: string): string {
-  return cosPublicUrl(photoThumbCosKey(photoId));
 }

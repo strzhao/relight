@@ -27,6 +27,7 @@ import { db, schema } from "../db";
 import { config } from "../lib/config";
 import {
   buildManifest,
+  photoMidCosKey,
   photoThumbCosKey,
   videoCoverCosKey,
   videoMp4CosKey,
@@ -184,6 +185,9 @@ async function main(): Promise<void> {
       }
       for (const pid of d.photoIds) {
         console.log(`  [缩略图] ${d.pickDate} photo=${pid} → ${photoThumbCosKey(pid)}`);
+        console.log(
+          `  [中尺寸] ${d.pickDate} photo=${pid} → ${photoMidCosKey(pid)}（仅 local source）`,
+        );
       }
     }
     for (const v of videos) {
