@@ -8,20 +8,26 @@ import { readFile } from "node:fs/promises";
  *    - webhook 空 → skip + log reason=no_webhook（场景 7）
  * 2. 取当天 daily_pick（beijingDateOf）：无 → skip + log reason=no_pick（场景 5）
  * 3. 解析 composedImagePath；缺失则尝试 composedCachePath 兜底读取
- * 4. compressForWeCom → sendWallpaperToWeCom
+ * 4. 横版壁纸：compressForWeCom → sendWallpaperToWeCom
  *    - errcode=0 → log `[daily-push] success ...`（场景 1.P3）
  *    - errcode≠0 → log `[daily-push] failed ...` + throw（场景 6.P1，触发 BullMQ 重试）
  *    - 网络异常 → log `[daily-push] failed ...` + throw（同上）
+ * 5. 竖版手机壁纸（1290×2796）：横版成功后追加，best-effort（失败只 log 不阻断/不重试）。
+ *    缓存优先，缺失现场 composeAndSave 兜底。
+ * 6. 文字导读消息：横版+竖版发完后追加，best-effort。今日精选数量 + hero 标题
+ *    + 叙事摘要 + 画廊当天深链（galleryPublicUrl/#/?date=），给读者点击的理由。
  *
- * 结构化状态行约定：`[daily-push] <state> key=value ...`
+ * 结构化状态行约定：`[daily-push] <state> [key=value ...] [variant=portrait|summary]`
  *   state ∈ { success, skipped, failed }
  *   skipped reason ∈ { disabled, no_webhook, no_pick }
+ *   variant 标记竖版/文字导读（best-effort，不阻断横版）
  *
  * QA 时 worker 进程 stdout 重定向到 /tmp/autopilot-artifacts/worker-stdout.log 供 fs-grep。
  */
 import type { Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
+import { config } from "../lib/config";
 import { beijingDateOf } from "../lib/datetime";
 import {
   WECOM_WEBHOOK_REGEX,
@@ -126,6 +132,15 @@ export async function dailyPushWorker(job: Job): Promise<void> {
       console.log(`[daily-push] failed pickDate=${pickDate} variant=portrait err=${msg}`);
     });
 
+    // 文字导读消息（横版+竖版发完后追加）：今日精选数量 + hero 标题 + 叙事摘要 + 画廊当天深链，
+    // 给读者点击进入画廊的理由（纯发两张图没上下文）。
+    // best-effort（同竖版契约）：失败只 log，不阻断横版（已 success）、不触发重试。
+    await pushDailySummaryText(job, settings.webhook, pickDate).catch((summaryErr) => {
+      const msg = summaryErr instanceof Error ? summaryErr.message : String(summaryErr);
+      job.log(`[daily-push] failed variant=summary non_blocking err=${msg}`);
+      console.log(`[daily-push] failed pickDate=${pickDate} variant=summary err=${msg}`);
+    });
+
     return;
   } catch (err) {
     // 基于 errcode 字段判断(而非错误类):任何带 errcode 的 error(含 WeComRejectedError 与
@@ -212,4 +227,49 @@ async function pushPortraitWallpaper(
     `[daily-push] success pickDate=${pickDate} variant=portrait errcode=${portraitResult.errcode}`,
   );
   job.log(`[daily-push] success variant=portrait errcode=${portraitResult.errcode}`);
+}
+
+/**
+ * 文字导读消息（横版+竖版发完后追加）：今日精选数量 + hero 标题 + 叙事摘要 + 画廊当天深链。
+ *
+ * 流程：查 dailyPicks hero（title/narrative）+ dailyPickEntries 数量 → 拼文案 → sendWeComText。
+ * 独立 try/catch（调用方 .catch）：失败只 log，不阻断横版（已 success）。
+ * 数量用 `select photoId → rows.length`（复用 backfill-gallery.ts 范式，mock 友好且真实场景正确）。
+ */
+async function pushDailySummaryText(job: Job, webhook: string, pickDate: string): Promise<void> {
+  const pickRows = await db
+    .select({
+      id: schema.dailyPicks.id,
+      title: schema.dailyPicks.title,
+      narrative: schema.dailyPicks.narrative,
+    })
+    .from(schema.dailyPicks)
+    .where(eq(schema.dailyPicks.pickDate, pickDate))
+    .limit(1);
+  const pick = pickRows[0] as
+    | { id: string; title: string | null; narrative: string | null }
+    | undefined;
+  if (!pick) {
+    job.log("[daily-push] skipped variant=summary reason=no_pick");
+    return;
+  }
+
+  const entryRows = await db
+    .select({ photoId: schema.dailyPickEntries.photoId })
+    .from(schema.dailyPickEntries)
+    .where(eq(schema.dailyPickEntries.dailyPickId, pick.id));
+  const n = entryRows.length;
+  if (n === 0) {
+    job.log("[daily-push] skipped variant=summary reason=no_entries");
+    return;
+  }
+
+  const url = `${config.galleryPublicUrl}/#/?date=${pickDate}`;
+  const narrative = (pick.narrative ?? "").slice(0, 80);
+  const content = `🖼️ 今日精选 ${n} 张\n\n「${pick.title ?? ""}」\n${narrative}\n\n查看 → ${url}`;
+
+  const { sendWeComText } = await import("../lib/push/wechat-text");
+  await sendWeComText(webhook, content);
+  console.log(`[daily-push] success pickDate=${pickDate} variant=summary`);
+  job.log("[daily-push] success variant=summary");
 }

@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 /**
  * daily-video Worker：每天北京时间 03:00 自动生成「照片→叙事短片」视频。
@@ -9,19 +9,14 @@ import path from "node:path";
  * 2. 选 1 个候选（新鲜度最高）→ runVideoGeneration（spawn claude -p）
  *    - 失败 → 写 failed 行 → 不推送（场景 NO-PUSH-ON-NO-VIDEO / FAILURE-NO-DEGRADE）
  * 3. 成功 → 事务写 videos（completed）+ videoUsages（去重行）
- * 4. 推送企业微信（封面 + 标题 + /api/videos/:id 链接，场景 WECOM-PUSH-ON-NEW-VIDEO）
+ * 4. 推送企业微信（标题 + 视频链接，场景 WECOM-PUSH-ON-NEW-VIDEO；封面不再推群——首帧文字卡不好看）
  *
  * 时序：daily-selection 0:00 / scan 2:00 之后，push 10:00 之前，避开 CPU/GPU 竞争。
  */
 import type { Job } from "bullmq";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
-import {
-  WECOM_WEBHOOK_REGEX,
-  compressForWeCom,
-  getDailyPushSettings,
-  sendWallpaperToWeCom,
-} from "../lib/push/wechat";
+import { WECOM_WEBHOOK_REGEX, getDailyPushSettings } from "../lib/push/wechat";
 import {
   type VideoGenResult,
   type VideoTheme,
@@ -313,7 +308,7 @@ async function ensureCoverFromVideo(videoPath: string, coverPath: string, job: J
   }
 }
 
-/** 推送企业微信：封面图 + 标题 + /api/videos/:id 链接 */
+/** 推送企业微信：标题 + 视频链接（封面不再推群，保留生成给画廊）*/
 async function pushVideoNotification(
   videoId: string,
   titleHint: string,
@@ -330,13 +325,8 @@ async function pushVideoNotification(
     return false;
   }
 
-  // 读封面（缺失则跳过封面只发文字）
-  let coverBuf: Buffer | null = null;
-  try {
-    coverBuf = await readFile(coverPath);
-  } catch {
-    job.log(`[daily-video] push cover 缺失: ${coverPath}（仅发文字消息）`);
-  }
+  // 封面不再推送到群（视频首帧多为文字卡，作封面不好看）；coverPath 仍持久化给画廊卡片，参数此处不用
+  void coverPath;
 
   // 画廊公网 URL（修 localhost bug，state.md §契约规约 公网 URL 契约）：
   //   `config.galleryPublicUrl + /#/video/<id>`（hash 路由，静态站渲染）
@@ -350,17 +340,6 @@ async function pushVideoNotification(
     job.log("[daily-video] push text sent");
   } catch (e) {
     job.log(`[daily-video] push text failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  // 发封面（image 消息）
-  if (coverBuf) {
-    try {
-      const compressed = await compressForWeCom(coverBuf);
-      await sendWallpaperToWeCom(settings.webhook, compressed);
-      job.log("[daily-video] push cover sent");
-    } catch (e) {
-      job.log(`[daily-video] push cover failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
   }
 
   console.log(`[daily-video] pushed videoId=${videoId} title=${titleHint}`);

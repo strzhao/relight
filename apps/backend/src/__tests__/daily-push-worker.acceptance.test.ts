@@ -55,6 +55,12 @@ const mockSchema = vi.hoisted(() => ({
     id: "dailyPicks.id",
     pickDate: "dailyPicks.pick_date",
     composedImagePath: "dailyPicks.composed_image_path",
+    title: "dailyPicks.title",
+    narrative: "dailyPicks.narrative",
+  },
+  dailyPickEntries: {
+    dailyPickId: "dailyPickEntries.daily_pick_id",
+    photoId: "dailyPickEntries.photo_id",
   },
   settings: { key: "settings.key", value: "settings.value" },
 }));
@@ -68,6 +74,7 @@ const mockCompressForWeCom = vi.hoisted(() => vi.fn((buf: Buffer) => Promise.res
 const mockGetDailyPushSettings = vi.hoisted(() =>
   vi.fn(async () => ({ webhook: "", enabled: false })),
 );
+const mockSendWeComText = vi.hoisted(() => vi.fn(async () => ({ errcode: 0, errmsg: "ok" })));
 
 vi.mock("../lib/push/wechat", async (importOriginal) => {
   // 保留实际模块的非 mock 导出(含 WECOM_WEBHOOK_REGEX 等 worker 依赖的公开常量),
@@ -80,6 +87,10 @@ vi.mock("../lib/push/wechat", async (importOriginal) => {
     getDailyPushSettings: mockGetDailyPushSettings,
   };
 });
+
+vi.mock("../lib/push/wechat-text", () => ({
+  sendWeComText: mockSendWeComText,
+}));
 
 // ---- Mock wallpaper composer（worker 触发合成的路径）----
 vi.mock("../lib/wallpaper/composer", () => ({
@@ -113,6 +124,7 @@ vi.mock("../lib/config", () => ({
   config: {
     redisUrl: "redis://localhost:6379",
     bullmqPrefix: "relight",
+    galleryPublicUrl: "https://gallery.stringzhao.life",
     ai: { baseUrl: "", apiKey: "", visionModel: "", model: "", promptVersion: "" },
     daily: { cronTime: "0 6 * * *", maxCandidates: 20, timezone: "Asia/Shanghai" },
   },
@@ -172,6 +184,7 @@ function setupDailyPickExists(pickOverrides: Record<string, unknown> = {}) {
         photoId: "photo-001",
         pickDate: TODAY,
         title: "金色黄昏",
+        narrative: "夕阳把江面染成蜜色，归船的灯火次第亮起。",
         composedImagePath: "/tmp/composed-today.jpg",
         ...pickOverrides,
       },
@@ -198,6 +211,7 @@ describe("daily-push Worker — 验收测试（场景1.P3 / 4.P1 / 5.P1 / 5.P2 /
     mockCompressForWeCom.mockImplementation((buf: Buffer) => Promise.resolve(buf));
     // 默认 send 成功
     mockSendWallpaperToWeCom.mockResolvedValue({ errcode: 0, errmsg: "ok" });
+    mockSendWeComText.mockResolvedValue({ errcode: 0, errmsg: "ok" });
     // 默认 settings 开启 + 配置好 webhook
     mockGetDailyPushSettings.mockResolvedValue({ webhook: VALID_WEBHOOK, enabled: true });
     // 默认当天有精选
@@ -223,6 +237,21 @@ describe("daily-push Worker — 验收测试（场景1.P3 / 4.P1 / 5.P1 / 5.P2 /
       // 传入的 webhookUrl 是 settings.webhook
       const callArgs = mockSendWallpaperToWeCom.mock.calls[0] as unknown[];
       expect(callArgs[0]).toBe(VALID_WEBHOOK);
+    });
+
+    it("happy path：发完壁纸后追加 1 条文字导读（sendWeComText）含数量/标题/画廊链接", async () => {
+      const job = createMockJob({ pickDate: TODAY });
+      await dailyPushWorker(job);
+
+      // 文字导读发 1 次
+      expect(mockSendWeComText).toHaveBeenCalledTimes(1);
+      const [webhookArg, content] = mockSendWeComText.mock.calls[0] as unknown[];
+      expect(webhookArg).toBe(VALID_WEBHOOK);
+      // content 含精选数量、hero 标题、画廊当天深链、查看引导
+      expect(content as string).toContain("今日精选");
+      expect(content as string).toContain("金色黄昏");
+      expect(content as string).toContain(`gallery.stringzhao.life/#/?date=${TODAY}`);
+      expect(content as string).toContain("查看 →");
     });
 
     it("场景1.P1：传入 sendWallpaperToWeCom 的第二参是 buffer（压缩输出）", async () => {

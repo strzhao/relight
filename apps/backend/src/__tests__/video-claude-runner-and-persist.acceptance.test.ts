@@ -137,6 +137,7 @@ const wechatMocks = vi.hoisted(() => ({
     webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-token-001",
     enabled: true,
   })),
+  sendWeComText: vi.fn(async (_url: string, _content: string) => ({ errcode: 0, errmsg: "ok" })),
 }));
 vi.mock("../lib/push/wechat", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/push/wechat")>();
@@ -147,6 +148,10 @@ vi.mock("../lib/push/wechat", async (importOriginal) => {
     getDailyPushSettings: wechatMocks.getDailyPushSettings,
   };
 });
+
+vi.mock("../lib/push/wechat-text", () => ({
+  sendWeComText: wechatMocks.sendWeComText,
+}));
 
 // ============================================================================
 // 临时环境
@@ -381,6 +386,7 @@ describe("claude runner + DB 持久化 — 验收测试（谓词 5/6/9）", () =
     }
     wechatMocks.sendWallpaperToWeCom.mockClear();
     wechatMocks.compressForWeCom.mockClear();
+    wechatMocks.sendWeComText.mockClear();
     wechatMocks.getDailyPushSettings.mockClear();
   });
 
@@ -675,27 +681,29 @@ describe("claude runner + DB 持久化 — 验收测试（谓词 5/6/9）", () =
 
   // ==========================================================================
   // 谓词 7：WECOM-PUSH-ON-NEW-VIDEO
-  // completed 后 mock webhook 收到 ≥1 次 POST（含封面 + title + /api/videos/:id 链接）
+  // completed 后 mock webhook 收到 ≥1 次 POST（文字消息：title + 视频链接；封面不再推群——首帧文字卡不好看）
   // 复用本文件已有的真实 DB + worker + wechatMocks 环境（dailyVideoWorker 成功路径触发推送）
   // ==========================================================================
 
   describe("WECOM-PUSH-ON-NEW-VIDEO：新视频 completed → 推企业微信", () => {
-    it("成功完成视频后 sendWallpaperToWeCom 至少调用 1 次（推封面图）", async () => {
+    it("成功完成视频后 sendWeComText 至少调用 1 次（推文字消息：标题+视频链接）", async () => {
       holder.fakeClaudePath = writeFakeClaude(env.tmpRoot, "ok", testMp8Template);
       seedTripPhotos(env.sqlite, "push7");
 
       const { dailyVideoWorker } = await import("../jobs/daily-video");
       await dailyVideoWorker(makeJob("job-push7-001") as never);
 
-      // 契约：completed 后触发推送（至少封面图 1 次；文字消息若独立则 +1）
+      // 契约：completed 后推送文字消息（封面不再推群——首帧文字卡不好看）
       expect(
-        wechatMocks.sendWallpaperToWeCom,
-        "completed 后应调用 sendWallpaperToWeCom 推封面",
+        wechatMocks.sendWeComText,
+        "completed 后应调用 sendWeComText 推文字消息",
       ).toHaveBeenCalled();
       expect(
-        wechatMocks.sendWallpaperToWeCom.mock.calls.length,
-        "至少 1 次 POST",
+        wechatMocks.sendWeComText.mock.calls.length,
+        "至少 1 次文字 POST",
       ).toBeGreaterThanOrEqual(1);
+      // 封面不再推送：sendWallpaperToWeCom 不应被调用
+      expect(wechatMocks.sendWallpaperToWeCom).not.toHaveBeenCalled();
     });
 
     it("推送的 webhook URL = settings.webhook（企业微信群机器人 URL 透传）", async () => {
@@ -707,34 +715,35 @@ describe("claude runner + DB 持久化 — 验收测试（谓词 5/6/9）", () =
       const { dailyVideoWorker } = await import("../jobs/daily-video");
       await dailyVideoWorker(makeJob("job-push7-url") as never);
 
-      expect(wechatMocks.sendWallpaperToWeCom.mock.calls.length).toBeGreaterThanOrEqual(1);
-      // 第一次调用的首参应严格等于 settings.webhook
-      const firstCallUrl = wechatMocks.sendWallpaperToWeCom.mock.calls[0]?.[0] as string;
+      expect(wechatMocks.sendWeComText.mock.calls.length).toBeGreaterThanOrEqual(1);
+      // 文字消息第一次调用的首参应严格等于 settings.webhook
+      const firstCallUrl = wechatMocks.sendWeComText.mock.calls[0]?.[0] as string;
       expect(firstCallUrl, "webhook URL 应透传 settings.webhook").toBe(expectedWebhook);
     });
 
-    it("推送的封面 buffer 非空（经 compressForWeCom 处理后的字节）", async () => {
+    it("文字消息内容含「新视频」前缀 + 视频链接（galleryPublicUrl/#/video/<id>）", async () => {
       holder.fakeClaudePath = writeFakeClaude(env.tmpRoot, "ok", testMp8Template);
       seedTripPhotos(env.sqlite, "push7buf");
 
       const { dailyVideoWorker } = await import("../jobs/daily-video");
       await dailyVideoWorker(makeJob("job-push7-buf") as never);
 
-      expect(wechatMocks.sendWallpaperToWeCom.mock.calls.length).toBeGreaterThanOrEqual(1);
-      const sentBuffer = wechatMocks.sendWallpaperToWeCom.mock.calls[0]?.[1] as Buffer;
-      expect(Buffer.isBuffer(sentBuffer), "推送的应是 Buffer").toBe(true);
-      expect(sentBuffer.length, "封面 buffer size > 0").toBeGreaterThan(0);
+      expect(wechatMocks.sendWeComText.mock.calls.length).toBeGreaterThanOrEqual(1);
+      const content = wechatMocks.sendWeComText.mock.calls[0]?.[1] as string;
+      expect(content, "含「新视频」前缀").toContain("新视频");
+      expect(content, "含视频链接路径 /#/video/").toContain("/#/video/");
     });
 
-    it("compressForWeCom 被调用（不允许 worker 直传原图）", async () => {
+    it("封面已去掉：compressForWeCom / sendWallpaperToWeCom 都不应被调用", async () => {
       holder.fakeClaudePath = writeFakeClaude(env.tmpRoot, "ok", testMp8Template);
       seedTripPhotos(env.sqlite, "push7compress");
 
       const { dailyVideoWorker } = await import("../jobs/daily-video");
       await dailyVideoWorker(makeJob("job-push7-compress") as never);
 
-      // 契约：封面必须经 compressForWeCom 处理（≤2MB 企业微信上限）
-      expect(wechatMocks.compressForWeCom, "应调用 compressForWeCom 压缩封面").toHaveBeenCalled();
+      // 封面不再推群：压缩与图片发送都不应触发
+      expect(wechatMocks.compressForWeCom, "封面去掉后不应再压缩").not.toHaveBeenCalled();
+      expect(wechatMocks.sendWallpaperToWeCom, "封面去掉后不应再推图").not.toHaveBeenCalled();
     });
   });
 
