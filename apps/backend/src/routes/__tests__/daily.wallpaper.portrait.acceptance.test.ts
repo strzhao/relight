@@ -101,7 +101,16 @@ let testSqlite: Database.Database;
 let testDb: ReturnType<typeof drizzle>;
 let app: import("hono").Hono;
 
-const PICK_DATE = "2026-07-29";
+// select 端点按「今天（上海时区 YYYY-MM-DD）」查 dailyPicks，fixture 必须用动态今天，
+// 否则跨天运行（如硬编码 2026-07-29 在 08-02 跑）select 查不到记录 → 404。
+// 参考 daily-select-acceptance.test.ts:166 的 todayPickDate 算法保持一致。
+const PICK_DATE = (() => {
+  const now = new Date();
+  const shanghai = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+  return `${shanghai.getFullYear()}-${String(shanghai.getMonth() + 1).padStart(2, "0")}-${String(
+    shanghai.getDate(),
+  ).padStart(2, "0")}`;
+})();
 const SOURCE_ID = "src-wallpaper-portrait";
 
 function createTestDb() {

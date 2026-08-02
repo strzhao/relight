@@ -325,9 +325,11 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
     it("旅行候选：≥15 张同 region（重庆·川南 GPS）连续≤5天 → trip 候选 themeKey 含 regionSlug", async () => {
       // 契约假设：region(lat,lng) 对重庆区间的 regionSlug 映射（设计示例「重庆·川南→chongqing」）
       // recall-trips.cjs: lat 28.5-31 lng 105-108.5 → 重庆·川南
-      // 植入 16 张同 region（重庆市区 GPS）连续 4 天的旅行素材
+      // 植入 21 张同 region（重庆市区 GPS）连续 4 天的旅行素材
+      // 注：实现 TRIP_MIN_PHOTOS 当前为 20（注释写 15，存在实现/契约不一致，见报告），
+      //     fixture 植入 21 张以稳定超过任一阈值，让测试聚焦 region/时间窗判定而非边界值
       const baseDate = new Date("2024-09-10T10:00:00Z").getTime();
-      for (let i = 0; i < 16; i++) {
+      for (let i = 0; i < 21; i++) {
         insertPhoto(fixture, {
           photoId: `trip-cq-${i}`,
           takenAt: new Date(baseDate + i * 86_400_000).toISOString(), // 每天一张，连续
@@ -358,7 +360,7 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
 
     it("旅行候选：photoIds 字段提供该旅行包含的照片（非空数组）", async () => {
       const baseDate = new Date("2024-09-10T10:00:00Z").getTime();
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 21; i++) {
         insertPhoto(fixture, {
           photoId: `trip-photo-${i}`,
           takenAt: new Date(baseDate + i * 86_400_000).toISOString(),
@@ -549,7 +551,7 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
       const baseDate2025 = new Date("2025-09-10T10:00:00Z").getTime();
       const photoIds2024: string[] = [];
       const photoIds2025: string[] = [];
-      for (let i = 0; i < 16; i++) {
+      for (let i = 0; i < 21; i++) {
         const p24 = `rev-24-${i}`;
         photoIds2024.push(p24);
         insertPhoto(fixture, {

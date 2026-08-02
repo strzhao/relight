@@ -314,7 +314,7 @@ exit 1
 // 辅助：植入旅行素材（重庆·川南 GPS lat29.5 lng106.5，连续天）
 // ============================================================================
 
-function seedTripPhotos(sqlite: Database.Database, prefix: string, count = 16): void {
+function seedTripPhotos(sqlite: Database.Database, prefix: string, count = 21): void {
   const baseDate = new Date("2024-09-10T10:00:00Z").getTime();
   const stmt = sqlite.prepare(
     `INSERT INTO photos (id, storage_source_id, file_path, file_hash, width, height,
