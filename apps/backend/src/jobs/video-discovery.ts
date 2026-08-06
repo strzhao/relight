@@ -200,12 +200,26 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
     }
   }
 
-  // 取已生成过的 trip themeKey（仅按 themeKey 去重，不按 photoId；仅 completed 参与去重，failed 不阻塞重试）
+  // 取已生成过的 trip themeKey（仅按 themeKey 去重，不按 photoId）。
+  // completed 永久去重；failed 7 天内冷却去重——杜绝确定性失败死循环
+  // （曾因 finalize 脚本拷错目录，japan-2018 每天失败每天重选，锁死出片名额 5 天）；
+  // 7 天后放开，给偶发失败（LLM 超时、临时渲染崩）一次重试机会。
+  const cooldownIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
   const existingTrips = await db
-    .select({ themeKey: schema.videos.themeKey })
+    .select({
+      themeKey: schema.videos.themeKey,
+      status: schema.videos.status,
+      createdAt: schema.videos.createdAt,
+    })
     .from(schema.videos)
-    .where(and(eq(schema.videos.themeKind, "trip"), eq(schema.videos.status, "completed")));
-  const usedKeys = new Set(existingTrips.map((r) => r.themeKey));
+    .where(eq(schema.videos.themeKind, "trip"));
+  const usedKeys = new Set(
+    existingTrips
+      .filter(
+        (r) => r.status === "completed" || (r.status === "failed" && r.createdAt >= cooldownIso),
+      )
+      .map((r) => r.themeKey),
+  );
 
   const candidates: VideoCandidate[] = [];
   for (const t of trips) {

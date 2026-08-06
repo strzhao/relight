@@ -22,7 +22,7 @@ registerDailyPushRepeatableJob().catch((err) => {
   console.error("[relight] 注册每日壁纸推送定时任务失败:", err);
 });
 
-// 注册每日视频生成定时任务（北京时间 03:00，有主题才做）
+// 注册每日视频生成定时任务（北京时间 10:00，有主题才做）
 registerDailyVideoRepeatableJob().catch((err) => {
   console.error("[relight] 注册每日视频生成定时任务失败:", err);
 });

@@ -146,9 +146,12 @@ export async function runVideoGeneration(
     if (exitCode !== 0) {
       // 清理 .tmp mp4（可能渲染到一半）
       await cleanupTmp(outputPath).catch(() => {});
+      // err 必须同时带 stdout：memory-video skill 的真实报错（脚本异常、路径错误等）
+      // 几乎都在 stdout（claude -p 默认 text 输出），stderr 通常只有无害的 connectors 警告。
+      // 曾只记 stderr 导致 japan-2018 连挂 5 天看不到真因（实为 finalize 脚本拷错目录）。
       return {
         ok: false,
-        err: `claude -p 退出码 ${exitCode}（stderr=${stderr.slice(-500) || "（空）"}）`,
+        err: `claude -p 退出码 ${exitCode}（stderr=${stderr.slice(-500) || "（空）"} | stdout=${stdout.slice(-2000) || "（空）"}）`,
       };
     }
 
