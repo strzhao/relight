@@ -7,7 +7,7 @@
  * - spawn 用绝对路径 `config.claudeCliPath`（不依赖 PATH——PM2 resurrect 时 nvm 不在 PATH）
  * - cwd = `config.videoWorkspacePath`（Remotion 项目根）
  * - spawn 前三存在校验：node_modules + render-immersive.mjs + ~/.claude/skills/memory-video/SKILL.md
- * - AbortController + 1200s 超时 + SIGTERM + 清理 .tmp mp4
+ * - AbortController + config.videoSpawnTimeoutMs 超时（env 可调，默认 45min）+ SIGTERM + 清理 .tmp mp4
  * - 失败不降级、不重试渲染（返回 err 让 job 写 failed 行）
  */
 import { spawn } from "node:child_process";
@@ -16,8 +16,19 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { config } from "../config";
 
-/** spawn 超时（ms）——dry-run 实测 20 张照片 ~1156s，给 1.5x 余量防 LLM 延迟偶发超时 */
-const SPAWN_TIMEOUT_MS = 1800_000;
+/**
+ * spawn 超时（ms）——读 config.videoSpawnTimeoutMs（env VIDEO_SPAWN_TIMEOUT_MS 可调，
+ * 默认 45 分钟：实测 137 张素材渲染 29 分钟撞原 30 分钟硬编码线被 SIGTERM）。
+ *
+ * 兜底防御：config 值缺失/非法（NaN / ≤0，如测试 mock 的局部 config 对象没有该字段、
+ * env 配了非数字）时回退默认值——setTimeout(NaN|undefined) 会被当成 0ms 立即 abort。
+ */
+const DEFAULT_SPAWN_TIMEOUT_MS = 2700_000;
+
+function spawnTimeoutMs(): number {
+  const v = config.videoSpawnTimeoutMs;
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_SPAWN_TIMEOUT_MS;
+}
 
 /** 主题描述（trip 传 photoIds / person 传 personId+截止年） */
 export interface VideoTheme {
@@ -105,8 +116,9 @@ export async function runVideoGeneration(
   }
 
   const prompt = buildPrompt(theme, outputPath, metaPath);
+  const timeoutMs = spawnTimeoutMs();
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), SPAWN_TIMEOUT_MS);
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   let stdout = "";
   let stderr = "";
@@ -159,7 +171,12 @@ export async function runVideoGeneration(
     try {
       await access(outputPath);
     } catch {
-      return { ok: false, err: `mp4 产物缺失: ${outputPath}` };
+      // err 必须带 stdout tail：claude 正常退出却没渲染时，真实回复（拒做原因、
+      // 查证日志）全在 stdout——曾因此类分支不记 stdout 导致连续多天诊断盲区。
+      return {
+        ok: false,
+        err: `mp4 产物缺失: ${outputPath}（stdout=${stdout.slice(-2000) || "（空）"}）`,
+      };
     }
 
     // 3. 读元数据 json
@@ -186,7 +203,7 @@ export async function runVideoGeneration(
   } catch (e) {
     await cleanupTmp(outputPath).catch(() => {});
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, err: ac.signal.aborted ? `claude -p 超时（${SPAWN_TIMEOUT_MS}ms）` : msg };
+    return { ok: false, err: ac.signal.aborted ? `claude -p 超时（${timeoutMs}ms）` : msg };
   } finally {
     clearTimeout(timer);
   }

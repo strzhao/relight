@@ -14,6 +14,7 @@ import path from "node:path";
  * 时序：daily-selection 0:00 / scan 2:00 之后，push 10:00 之前，避开 CPU/GPU 竞争。
  */
 import type { Job } from "bullmq";
+import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { WECOM_WEBHOOK_REGEX, getDailyPushSettings } from "../lib/push/wechat";
@@ -217,7 +218,15 @@ interface FailedVideoInput {
   errorMsg: string;
 }
 
-/** 写 failed videos 行（诊断用，不影响后续生成） */
+/**
+ * 写 failed videos 行（诊断用，不影响后续生成）。
+ *
+ * 幂等语义：同 (themeKind, themeKey) 已有行时改为 UPDATE 刷新 errorMsg/createdAt
+ * （最后一次失败即 7 天冷却的起点，与 discovery 的 failed 冷却联动自洽；
+ * 原 onConflictDoNothing 会把后续失败全部吞掉，errorMsg/createdAt 永不更新）。
+ * setWhere status='failed' 保留原「同 themeKey 已有 completed 行时不覆盖」语义——
+ * 冲突行已是 completed 时 WHERE 不命中，DO UPDATE 落空。
+ */
 async function writeFailedVideo(input: FailedVideoInput, now: string): Promise<string> {
   const videoId = crypto.randomUUID();
   const db2 = (await import("../db")).db;
@@ -235,7 +244,11 @@ async function writeFailedVideo(input: FailedVideoInput, now: string): Promise<s
         errorMsg: input.errorMsg,
         createdAt: now,
       })
-      .onConflictDoNothing() // 同 themeKey 已有 completed 行时不覆盖
+      .onConflictDoUpdate({
+        target: [schema.videos.themeKind, schema.videos.themeKey],
+        set: { errorMsg: input.errorMsg, createdAt: now },
+        setWhere: eq(schema.videos.status, "failed"),
+      })
       .run();
   });
   return videoId;

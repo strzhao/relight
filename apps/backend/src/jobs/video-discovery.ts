@@ -11,6 +11,49 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { cosineSim } from "../lib/face/clustering";
+import { getSettingValue } from "../lib/settings";
+
+/** videos 表 themeKey 去重集合（loadVideoDedup 返回） */
+interface VideoDedup {
+  /** 已成功出片的 themeKey——永久去重 */
+  completedKeys: Set<string>;
+  /** 失败但在冷却期内的 themeKey（failed 且 createdAt >= now-7d） */
+  coolingKeys: Set<string>;
+}
+
+/**
+ * 加载某 themeKind 的 videos 表去重键。
+ *
+ * completed 永久去重；failed 7 天内冷却去重——杜绝确定性失败死循环
+ * （曾因 finalize 脚本拷错目录，japan-2018 每天失败每天重选，锁死出片名额 5 天；
+ * person 线 aa17477e 因去重盲区连挂 16 天，见 20260827 修复每日视频自动化死循环诊断）；
+ * 7 天后放开，给偶发失败（LLM 超时、临时渲染崩）一次重试机会。
+ *
+ * trip / person 两分支共用；videoUsages 表只在成功路径写、失败主题对它不可见，
+ * 因此失败可见性必须查 videos 表本表。
+ */
+async function loadVideoDedup(themeKind: "trip" | "person"): Promise<VideoDedup> {
+  const cooldownIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const rows = await db
+    .select({
+      themeKey: schema.videos.themeKey,
+      status: schema.videos.status,
+      createdAt: schema.videos.createdAt,
+    })
+    .from(schema.videos)
+    .where(eq(schema.videos.themeKind, themeKind));
+
+  const completedKeys = new Set<string>();
+  const coolingKeys = new Set<string>();
+  for (const r of rows) {
+    if (r.status === "completed") {
+      completedKeys.add(r.themeKey);
+    } else if (r.status === "failed" && r.createdAt >= cooldownIso) {
+      coolingKeys.add(r.themeKey);
+    }
+  }
+  return { completedKeys, coolingKeys };
+}
 
 /** region 中文 → 英文 slug 映射（themeKey 用 `<regionSlug>-<year>`） */
 const REGION_SLUG: Record<string, string> = {
@@ -201,25 +244,8 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
   }
 
   // 取已生成过的 trip themeKey（仅按 themeKey 去重，不按 photoId）。
-  // completed 永久去重；failed 7 天内冷却去重——杜绝确定性失败死循环
-  // （曾因 finalize 脚本拷错目录，japan-2018 每天失败每天重选，锁死出片名额 5 天）；
-  // 7 天后放开，给偶发失败（LLM 超时、临时渲染崩）一次重试机会。
-  const cooldownIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-  const existingTrips = await db
-    .select({
-      themeKey: schema.videos.themeKey,
-      status: schema.videos.status,
-      createdAt: schema.videos.createdAt,
-    })
-    .from(schema.videos)
-    .where(eq(schema.videos.themeKind, "trip"));
-  const usedKeys = new Set(
-    existingTrips
-      .filter(
-        (r) => r.status === "completed" || (r.status === "failed" && r.createdAt >= cooldownIso),
-      )
-      .map((r) => r.themeKey),
-  );
+  // completed 永久去重；failed 7 天内冷却（语义见 loadVideoDedup 注释）
+  const { completedKeys, coolingKeys } = await loadVideoDedup("trip");
 
   const candidates: VideoCandidate[] = [];
   for (const t of trips) {
@@ -227,7 +253,8 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
     const slug = REGION_SLUG[t.region];
     if (!slug) continue; // 未知 region 不出片
     const themeKey = `${slug}-${t.year}`;
-    if (usedKeys.has(themeKey)) continue; // 已生成过跳过
+    if (completedKeys.has(themeKey)) continue; // 已生成过跳过
+    if (coolingKeys.has(themeKey)) continue; // failed 冷却期内跳过
 
     // 选片：给该旅行全部可用照片（按美学降序，不限上限）——让 AI(claude-p) 按旅行丰富度自主决定最终片数（≥20，素材多就做完整 vlog，不限制发挥）
     const photoIds = t.photos.map((p) => p.id);
@@ -269,6 +296,17 @@ async function pickTopAesthetic(photoIds: string[], n: number): Promise<string[]
 
 /** 人物成长线主题发现（移植 recall-growth + personId toYear 去重 + photoId 排除） */
 async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
+  // 脏聚类跳过名单（settings key video.skipPersonIds，逗号分隔 personId 标量字符串）。
+  // 命中者连候选都不进——比 themeKey 去重更早。用于聚类污染且 cos 分不开的必败主题
+  // （如外婆/女儿混淆聚类，每天选它每天失败锁死出片名额）；缺失/空 = 无跳过。
+  const skipRaw = await getSettingValue("video.skipPersonIds");
+  const skipPersonIds = new Set(
+    (skipRaw ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+
   // 取所有 displayable 的人物（displayThreshold 已在聚类阶段设置）
   const persons = await db
     .select({
@@ -281,6 +319,10 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
     .from(schema.persons)
     .where(eq(schema.persons.displayable, true));
 
+  // videos 表去重与 trip 分支对称（completed 永久 / failed 7 天冷却）。
+  // videoUsages 只在成功时写、失败主题对它不可见——去重盲区曾是死循环根因。
+  const { completedKeys, coolingKeys } = await loadVideoDedup("person");
+
   const candidates: VideoCandidate[] = [];
 
   // 全局已 consumed photoId（跨主题排除亲子照陷阱，预取一次复用，避免循环内 N 次 O(M) 查询）
@@ -290,6 +332,7 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
   const consumedPhotoIds = new Set(allConsumedRows.map((r) => r.photoId));
 
   for (const person of persons) {
+    if (skipPersonIds.has(person.id)) continue; // 脏聚类跳过名单
     // 人物主题无最低照片门槛（旅行才需 ≥15 张；人物按年选片，样本天然较少）
 
     // 取该 person 所有 face + 关联 photo 的年份
@@ -361,6 +404,10 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
 
     const toYear = maxYear;
     const themeKey = `${person.id}-${toYear}`;
+
+    // 与 trip 分支对称的 videos 表去重：completed 永久 / failed 7 天冷却
+    if (completedKeys.has(themeKey)) continue;
+    if (coolingKeys.has(themeKey)) continue;
 
     // 选片：每年取 top（早期少取近期多取，仿 recall-growth.cjs:51-57），排除已 consumed photoId
     const picks: string[] = [];

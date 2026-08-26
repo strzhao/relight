@@ -99,6 +99,10 @@ export const config = {
       process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
       ".autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun",
     ),
+  /** spawn claude -p 视频生成超时（ms）。默认 45 分钟（实测 137 张素材渲染 29 分钟撞原
+   *  30 分钟硬编码线被 SIGTERM，finalize 未执行）；cron 每天 10:00，45 分钟完成可接受。
+   *  env VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */
+  videoSpawnTimeoutMs: Number.parseInt(process.env.VIDEO_SPAWN_TIMEOUT_MS ?? "2700000", 10),
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),

@@ -44,3 +44,24 @@
 
 - **Lesson**：风景/细节丰富的照片需要更长停留让用户看清。beat-sync 的 BEATS_PER_SHOT 决定每镜时长，但要同时放宽 MAX_SHOT_SEC（原 7s 会 clamp 截短）。
 - **Choice**：BEATS_PER_SHOT 8→16（每镜 ~8.8s），MAX_SHOT_SEC 7→10。旅行 vlog 每张 ~9s 起步。
+
+## 多分支去重语义必须对称（person 死循环 16 天）
+
+[2026-08-27] 08-06 修死循环只修了 trip 分支，person 分支去重盲区让外婆主题连挂 16 天锁死出片名额——同构分支修 bug 必须逐一对称检查。
+
+- **Lesson**：videoUsages 只在成功路径写，失败主题对它不可见；失败的可见性必须查 videos 本表（status + createdAt）。修「去重失效」类 bug 时，同构分支（trip/person）共享同一语义却各有独立实现——只修先发现的一半，另一半会以同样的方式咬人，且被名额独占机制放大（每天只出 1 片）。
+- **Choice**：`loadVideoDedup(themeKind)` helper 双分支共用（completed 永久去重 + failed 7 天冷却，冷却起点=最后一次失败）；`writeFailedVideo` 用 `onConflictDoUpdate + setWhere(status='failed')` 让 failed 行每次失败刷新 errorMsg/createdAt（诊断不再被 onConflictDoNothing 吞掉），completed 行永不污染。
+
+## 脏聚类跳过名单走 settings 标量（displayable 不可用作 skip）
+
+[2026-08-27] 母女混淆聚类（cos≥0.5 分不开）每天被选中每天必败，settings key `video.skipPersonIds`（逗号分隔 personId）在 discovery 循环头 continue 跳过。
+
+- **Lesson**：`displayable` 会被 detect-faces/person-merge 按 memberCount≥displayThreshold **重算写回**，不是可靠的持久 skip 位；且有 /photos 人物条隐藏的副作用。运行时跳过名单放 settings 表标量字符串（复用 selfPersonId scalar 先例），缺失/空=无跳过。
+- **Choice**：机制（settings 过滤）+ 数据（运维写 aa17477e）双层；脏聚类在 skill 侧的对抗手段是视觉二次确认选片（08-23 skill 用 qwen vision 逐张确认外婆在场，选出的 16 张是干净的——脏聚类不代表不能出片，是 cos 过滤不够）。
+
+## 超时被杀 ≠ 没渲染（排查必看 workspace out/）
+
+[2026-08-27] 30 分钟超时 SIGTERM 时 mp4 已渲完 130MB 躺在 workspace `out/`，job 却报「mp4 产物缺失」——finalize 拷贝没来得及跑，产物文件名还是 skill 自拟的（`person-xuqunxian-2026.mp4` ≠ 约定 themeKey 名）。
+
+- **Lesson**：失败/超时排查必 `ls -lat <videoWorkspacePath>/out/`——渲染成功但没拷走的 mp4 会躺在那里，可挽救（校验 faststart + ffprobe 后补 writeCompletedVideo）。大素材（137 张成长线）渲染 29min+，30min 硬编码超时太紧。
+- **Choice**：超时默认 45min（`config.videoSpawnTimeoutMs`，env `VIDEO_SPAWN_TIMEOUT_MS` 覆盖）；「mp4 产物缺失」err 必附 stdout tail（claude -p 退出码 0 却没出片是常见失败形态，真实回复全在 stdout，不记录=诊断盲区）。
