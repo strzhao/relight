@@ -29,3 +29,10 @@
 
 - **Lesson**：旁路功能失败不能拖垮主流程。与 [[backend-infra]]「格式门 return 非 throw」、[[release-ops]]「PM2 reload in-flight」同构——容错边界用「不 throw + 记录」而非「抛错给上层」。
 - **Choice**：`uploadFile` / `uploadBuffer` 返回空串（非 throw）；`sync*` 返回 `Promise<void>`（不暴露成功/失败，`pushManifest` 内部 console.log/warn 自记录）；daily-selection / daily-video 接入点双层 try/catch。COS 凭据命名兼容 `TENCENTCLOUD_*`（vps-ops 真源）/ `COS_*`（relight env 别名）—— config 优先读前者 fallback 后者。
+
+## gallery 视频全屏（方案 B：原生全屏 API + 物理横屏引导）
+
+[2026-08-29] 竖屏沉浸流里 16:9 横屏视频 `contain` 只占 ~26% 屏高、不沉浸。用户知情选原生全屏（接受 iOS 物理转手机），弃 CSS 伪横屏/竖版重渲染/纯排版三案。入口 = 声音按钮下方 `⛶` 圆钮，保留"点视频=切静音"。
+
+- **Lesson**（探针实证，勿信老资料）：Chromium（@playwright/test 1.59.1 内置）`video.webkitEnterFullscreen` 是 **undefined**；`video.requestFullscreen()` 正常派发 `fullscreenchange` 且 **target 是 VIDEO 元素**。老 XWeb 可能只有前缀事件——退出监听必须 `fullscreenchange` + `webkitfullscreenchange` 双挂（restore 幂等靠 lastFullscreenVideo 空守卫）+ video 元素 `webkitendfullscreen`（iOS 原生播放器）。
+- **Choice**：探测顺序 `requestFullscreen` 优先（Chromium/XWeb 全程标准事件）、`webkitEnterFullscreen` 仅 iOS WKWebView 兜底（iPhone 无 Element.requestFullscreen）；进全屏先 unmute + 未播则手势内起播，退出恢复 muted + try orientation.unlock；视频 404 用纯 CSS 门 `[data-load-state=error]` 隐藏按钮；双 API 均缺 → 单元内 toast「建议横屏观看」≤3000ms 自动隐藏。验收谓词 FS.PM1-5 见 `apps/gallery/__tests__/gallery-video-fullscreen.e2e.acceptance.test.ts`（PM3 退出断言有毫秒竞态，见 [[testing]]）。

@@ -391,6 +391,48 @@ video {
   align-items: center;
   justify-content: center;
 }
+/* 全屏按钮（声音按钮正下方同列，top = 声音按钮 top + 2.8rem） */
+.unit-video .video-fullscreen {
+  position: absolute;
+  top: calc(max(env(safe-area-inset-top), 4.5rem) + 2.8rem);
+  right: 1.25rem;
+  z-index: 4;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  border: 1px solid oklch(0.975 0.01 95 / 0.3);
+  background: oklch(0.08 0.004 95 / 0.4);
+  color: var(--fg);
+  font-size: 1rem;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 错误态门：视频加载失败 → 隐藏全屏入口（纯 CSS 门） */
+.unit-video[data-load-state="error"] .video-fullscreen {
+  display: none;
+}
+/* 降级 toast（当前环境不支持全屏 → 提示横屏观看；[hidden] 时全局规则不占位） */
+.unit-video .video-hint {
+  position: absolute;
+  bottom: max(env(safe-area-inset-bottom), 9rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 0.5rem 1rem;
+  background: oklch(0.08 0.004 95 / 0.6);
+  color: var(--fg);
+  font-family: var(--font-serif-cn);
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  border: 1px solid oklch(0.975 0.01 95 / 0.3);
+  border-radius: 99px;
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+}
 .unit-video .video-text {
   position: absolute;
   left: 0;
