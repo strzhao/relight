@@ -601,6 +601,35 @@ describe("claude runner + DB 持久化 — 验收测试（谓词 5/6/9）", () =
       );
     });
 
+    it("陈旧 failed 行（冷却过期）后成功：接管为 completed 而非撞 UNIQUE 死循环", async () => {
+      holder.fakeClaudePath = writeFakeClaude(env.tmpRoot, "ok", testMp8Template);
+      seedTripPhotos(env.sqlite, "stalefail");
+
+      // 预置 8 天前的 failed 行（7 天冷却已过期，discovery 会重选同 themeKey）——
+      // 复现 20260829 vietnam-2026：渲染成功却因 UNIQUE(theme_kind, theme_key)
+      // 落库崩，BullMQ 重试整段重渲染，日级死循环。
+      const staleIso = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
+      env.sqlite
+        .prepare(
+          `INSERT INTO videos (id, theme_kind, theme_key, title, output_path, cover_path,
+                                status, error_msg, created_at)
+           VALUES ('stale-failed-1', 'trip', 'chongqing-2024', '旧失败', 'x.mp4', 'x.jpg',
+                   'failed', 'claude -p 超时（旧）', ?)`,
+        )
+        .run(staleIso);
+
+      const { dailyVideoWorker } = await import("../jobs/daily-video");
+      await dailyVideoWorker(makeJob("job-stale-001") as never);
+
+      const rows = env.sqlite
+        .prepare(`SELECT status, error_msg, title FROM videos WHERE theme_key='chongqing-2024'`)
+        .all() as Array<{ status: string; error_msg: string | null; title: string }>;
+      expect(rows.length, "同 themeKey 仅 1 行（接管不新增）").toBe(1);
+      expect(rows[0]!.status, "failed 行被接管为 completed").toBe("completed");
+      expect(rows[0]!.error_msg, "接管后 error_msg 清空").toBeNull();
+      expect(rows[0]!.title, "title 刷新为本次成功值").not.toBe("旧失败");
+    });
+
     it("video_usages 行与 videos 行 themeKind/themeKey 一致（跨表去重追踪）", async () => {
       holder.fakeClaudePath = writeFakeClaude(env.tmpRoot, "ok", testMp8Template);
       seedTripPhotos(env.sqlite, "consist");

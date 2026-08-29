@@ -173,7 +173,15 @@ interface CompletedVideoInput {
   photoIds: string[];
 }
 
-/** 写 completed videos 行 + videoUsages 去重行（事务） */
+/**
+ * 写 completed videos 行 + videoUsages 去重行（事务）。
+ *
+ * 幂等语义：同 (themeKind, themeKey) 已有行时改为 UPDATE 接管为 completed——
+ * failed 冷却（7 天）过期后重试成功是正常路径，裸 INSERT 会撞
+ * UNIQUE(theme_kind, theme_key)（20260829 vietnam-2026：渲染成功却落库崩，
+ * BullMQ 重试整段重渲染，日级死循环）。setWhere status='failed' 保留
+ * 「已有 completed 行不覆盖」语义（与 writeFailedVideo 对称）。
+ */
 async function writeCompletedVideo(input: CompletedVideoInput, now: string): Promise<string> {
   const videoId = crypto.randomUUID();
   const db2 = (await import("../db")).db;
@@ -191,6 +199,20 @@ async function writeCompletedVideo(input: CompletedVideoInput, now: string): Pro
         photoIds: input.photoIds,
         status: "completed",
         createdAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [schema.videos.themeKind, schema.videos.themeKey],
+        set: {
+          title: input.title,
+          outputPath: input.outputPath,
+          coverPath: input.coverPath,
+          durationSec: input.durationSec,
+          photoIds: input.photoIds,
+          status: "completed",
+          errorMsg: null,
+          createdAt: now,
+        },
+        setWhere: eq(schema.videos.status, "failed"),
       })
       .run();
 

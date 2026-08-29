@@ -61,6 +61,7 @@ const REGION_SLUG: Record<string, string> = {
   日本: "japan",
   韩国: "korea",
   越南: "vietnam",
+  海南: "hainan",
   福建·粤东: "fujian-guangdong",
   重庆·川南: "chongqing",
   贵州·云贵: "guizhou-yungui",
@@ -78,6 +79,10 @@ function region(lat: number, lng: number): string | null {
   if (lat >= 31 && lat <= 46 && lng >= 130 && lng <= 146) return "日本";
   if (lat >= 33 && lat <= 38.5 && lng >= 125.5 && lng <= 130) return "韩国";
   if (lat >= 10 && lat <= 23 && lng >= 102 && lng <= 110) return "越南";
+  // 海南岛先于越南收回：岛体（18-20.5N, 108.5-111.3E）整个落在越南围栏内——
+  // 20260829 vietnam-2026 实为三亚海棠湾/蜈支洲岛之行被误标越南。
+  // 围栏只含海南岛+北部湾海面，不含越南陆地（越南 18N+ 的国土在 108.5E 以西）。
+  if (lat >= 18 && lat <= 20.5 && lng >= 108.5 && lng <= 111.3) return "海南";
   if (lat >= 22 && lat <= 27.5 && lng >= 115 && lng <= 121) return "福建·粤东";
   if (lat >= 28.5 && lat <= 31 && lng >= 105 && lng <= 108.5) return "重庆·川南"; // 先于贵州
   if (lat >= 24 && lat <= 28.5 && lng >= 102 && lng <= 108.5) return "贵州·云贵";
