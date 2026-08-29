@@ -122,3 +122,29 @@
 2. **vi.hoisted 必须在 vi.mock 外**(工厂内调 vi.hoisted → SyntaxError)。
 3. **无 msw/nock 时,给外部 HTTP 调用加 `sendFn: typeof fetch = fetch` 可注入参数**(默认原生 fetch,测试注入 `vi.fn<typeof fetch>` 计数 mock),等价 interceptor 但走公开 API、零依赖。
 4. **mock fetch 类型签名须对齐 `typeof fetch`**(第一参 `RequestInfo | URL`,非 `string`)——TS 逆变:`vi.fn<(url: string, ...)>` 不可赋给 `typeof fetch`,用 `vi.fn<typeof fetch>` 让参数自动宽化。
+
+---
+
+### [2026-08-29] 全屏退出事件毫秒竞态——事件驱动派生状态的 e2e 断言用 bounded waitForFunction
+
+<!-- tags: playwright, e2e, fullscreen, race-condition, waitforfunction, gallery, red-team, probe -->
+
+**Pattern**: `document.exitFullscreen()` 后 `fullscreenElement` 置 null 与 `fullscreenchange` 事件任务之间存在毫秒级交错窗口。测试 waitForFunction(fsNull) 观测到属性变化后**立即 evaluate** 断言事件驱动的派生状态（app 监听事件后 restore 的 muted=true）会在窗口内抢先读旧值——3/3 确定性失败，而实现正确（探针时间线：退出事件与 restore 同毫秒，≤100ms 完成；unmute t=52 → 退出+restore t=145 → +100ms 全部就绪）。
+
+**Fix / Lesson**:
+1. 事件驱动的派生状态断言一律 `waitForFunction(终态谓词, ≤契约预算)`（本例与进入侧对称取 1000ms），**不要**属性观测后立即 evaluate。若这是红队测试的隐式时序假设严于契约 → 走铁律例外：AskUserQuestion 用户授权 + 测试注释记录依据（断言值不弱化）。
+2. 竞态定位探针方法论：`addInitScript` 里 `Object.defineProperty(HTMLMediaElement.prototype, "muted", ...)` 包装 setter 记每次变更的时间戳+栈顶 + PM 序列精确镜像 ×N——一轮跑出完整时间线。本案首轮"前缀事件"假设即被能力探针证伪（`wkEnter: undefined`），说明先跑能力/事件探针再定假设。
+3. 探针输出别用 grep 过滤多行 JSON（pretty-print 内容行不匹配模式会被整段隐藏，曾据此误判 EVENTS 为空）——tail 全量看。
+
+---
+
+### [2026-08-29] 本机 getfqdn("") 挂死 → python http.server 卡 server_bind（Playwright webServer 15s 超时根因）
+
+<!-- tags: python, http-server, getfqdn, dns, playwright, webserver, local-env, sandbox -->
+
+**Pattern**: 本机（疑似 VPN/resolver）`socket.getfqdn("")` 反向解析本机主机名挂死 >5s，而 `getfqdn("127.0.0.1")` 秒回。`python3 -m http.server` 默认绑全接口时 `HTTPServer.server_bind()` 内调 `getfqdn` → 卡在 bind 后、listen 前。lsof 特征：socket 存在但 **CLOSED**（非 LISTEN）、进程活着、stdout 零输出 → Playwright `config.webServer` 15s 超时，测试自 spawn 的静态服务同样中招。
+
+**Fix / Lesson**:
+1. 判别：两个 getfqdn 探针对比即实锤；`--bind 127.0.0.1` 可绕（fqdn("127.0.0.1") 快），但改不了 Playwright 配置命令时无效。
+2. 通用解：`sitecustomize.py` 桩掉 `socket.getfqdn`（返回 name 或 "localhost"，server_name 仅日志/CGI 用），`PYTHONPATH=/tmp/xxx` 注入全部 python 子进程，零仓库改动：`PYTHONPATH=... npx playwright test`。
+3. 关联坑：Claude Code Bash 沙箱会拦截 localhost 端口绑定（后台 server 起了也不 LISTEN）——跑 e2e 需 dangerouslyDisableSandbox；CI Linux 无此二坑。

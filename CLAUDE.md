@@ -160,7 +160,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - 字体资产放在 `apps/backend/assets/fonts/`（Fraunces `.ttf` + Noto Serif SC `.otf`），tsup 构建时通过 `copyPublicDir` 自动复制到 `dist/assets/`。
 - `tsup.config.ts` — 后端独立构建配置，处理 Satori JSX 转换和字体资产复制。
 
-**VPS 画廊同步** (`src/lib/cos/` + `src/lib/gallery/`)：把每日精选 + 主题视频产物推送公网画廊（gallery.stringzhao.life，Caddy 静态托管 `apps/gallery/` 单页站）。架构为**推送式同步**——后端产物上传腾讯云 COS（公有读）→ 生成 manifest → scp+ssh mv 原子推到 VPS，静态站拉 manifest 渲染。
+**VPS 画廊同步** (`src/lib/cos/` + `src/lib/gallery/`)：把每日精选 + 主题视频产物推送公网画廊（gallery.stringzhao.life，Caddy 静态托管 `apps/gallery/` 单页站）。架构为**推送式同步**——后端产物上传腾讯云 COS（公有读）→ 生成 manifest → scp+ssh mv 原子推到 VPS，静态站拉 manifest 渲染。画廊前端（`apps/gallery/`）视频单元支持真全屏观看（原生全屏 API + 横屏引导，requestFullscreen 优先、iOS webkit 兜底、双 API 均缺降级横屏提示 toast）。
 - `cos/upload.ts` — COS 上传 lib（cos-nodejs-sdk-v5，重试 3 次；容错契约：失败返回空串不 throw，画廊是旁路不阻塞主流程）
 - `gallery/manifest.ts` — `buildManifest()` 全量读 DB → manifest（COS key 约定 `relight/daily/<date>/...` + `relight/videos/<themeKey>/...`；composedImagePath=null 边界跳过；durationSec 正整数门过滤无效视频）
 - `gallery/sync.ts` — `pushManifest`（本地写 tmp.json → `scp` 上传 → `ssh mv` 原子覆盖 VPS manifest.json，shellQuote 单引号转义防注入）+ `syncDayToGallery`/`syncVideoToGallery`（全部 `Promise<void>`，try/catch 旁路容错，失败 console.warn + job.log 不阻塞精选/视频主流程；调用方在 daily-selection 阶段 3.5、daily-video 步骤 4.5 各自独立 try/catch 包裹）

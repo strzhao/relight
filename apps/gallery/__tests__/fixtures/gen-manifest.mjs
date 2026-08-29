@@ -218,11 +218,13 @@ export function generateFixture() {
     ],
     videos: [
       {
+        id: "fixture-video-1",
         themeKey: videoThemeKey,
+        themeKind: "trip",
         title: "2024 夏日旅行",
         narrative: "旅行主题视频。",
         mp4: videoMp4,
-        coverImage: videoCover,
+        cover: videoCover,
         durationSec: 60,
         photoCount: 12,
         // 归属昨日（day-index=1）：今日（流顶）跳过 date-separator 后首单元必须是 rank=1 photo（S1.PM1），

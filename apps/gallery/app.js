@@ -223,6 +223,165 @@
   }
 
   // ============================================================================
+  // 视频全屏（原生全屏 API + 物理横屏引导）
+  // ============================================================================
+
+  /** 当前全屏中的视频元素（模块级追踪，避免多视频串扰） */
+  let lastFullscreenVideo = null;
+  /** 当前全屏视频所属卡的静音按钮刷新回调（renderVideoCard 内注册，退出恢复用） */
+  let fullscreenSoundRestore = null;
+  /** document fullscreenchange 惰性单例监听已注册标记 */
+  let documentFullscreenWired = false;
+
+  /** hint 自动隐藏计时器（按 hint 节点隔离，重复触发重置计时） */
+  const hintTimers = new WeakMap();
+
+  /**
+   * 降级 toast（当前环境不支持全屏 → 提示横屏观看）：
+   * ≤3000ms 自动隐藏，重复触发重置计时。仅降级路径调用。
+   */
+  function showVideoHint(hintEl) {
+    if (!hintEl) return;
+    hintEl.hidden = false;
+    clearTimeout(hintTimers.get(hintEl));
+    hintTimers.set(
+      hintEl,
+      setTimeout(() => {
+        hintEl.hidden = true;
+      }, 3000),
+    );
+  }
+
+  /** 尝试锁横屏（typeof 守卫 + catch 静默，lock 失败不影响全屏本体） */
+  function tryLockLandscape() {
+    if (
+      typeof screen !== "undefined" &&
+      screen.orientation &&
+      typeof screen.orientation.lock === "function"
+    ) {
+      try {
+        const p = screen.orientation.lock("landscape");
+        if (p && typeof p.then === "function") p.catch(() => {});
+      } catch (e) {
+        // 静默：部分环境 lock 会同步 throw
+      }
+    }
+  }
+
+  /** 解除横屏锁（typeof 守卫 + catch 静默） */
+  function tryUnlockOrientation() {
+    try {
+      if (
+        typeof screen !== "undefined" &&
+        screen.orientation &&
+        typeof screen.orientation.unlock === "function"
+      ) {
+        screen.orientation.unlock();
+      }
+    } catch (e) {
+      // 静默
+    }
+  }
+
+  /** 退出全屏恢复：回静音 + 刷新声音按钮 + 解横屏锁 */
+  function restoreAfterVideoFullscreenExit() {
+    if (!lastFullscreenVideo) return;
+    lastFullscreenVideo.muted = true;
+    if (fullscreenSoundRestore) fullscreenSoundRestore();
+    lastFullscreenVideo = null;
+    fullscreenSoundRestore = null;
+    tryUnlockOrientation();
+  }
+
+  /**
+   * document 全屏事件惰性单例监听（全屏退出 → 恢复静音）。
+   * 同时挂标准 fullscreenchange 与 webkit 前缀 webkitfullscreenchange：
+   * Chromium 的 video.webkitEnterFullscreen() 走 legacy 全屏路径，退出时只派发
+   * 前缀事件（QA FS.PM3 实证），仅听标准事件会漏掉恢复时机。
+   * restore 幂等（lastFullscreenVideo 空守卫），双事件不会重复生效。
+   */
+  function ensureDocumentFullscreenListener() {
+    if (documentFullscreenWired) return;
+    documentFullscreenWired = true;
+    const onFullscreenChange = () => {
+      const inactive = !(document.fullscreenElement || document.webkitFullscreenElement);
+      if (inactive) restoreAfterVideoFullscreenExit();
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  }
+
+  /**
+   * 进视频全屏（能力探测顺序，全在按钮 click 手势内同步发起）：
+   *   1. W3C requestFullscreen（Chromium / Android XWeb 均有）→ 标准事件路径，
+   *      resolved 后 try 锁横屏，rejected → hint 降级
+   *   2. iOS 原生 webkitEnterFullscreen（iPhone WKWebView 无 Element.requestFullscreen）
+   *      → 调用（try/catch），随后 try 锁横屏；退出走 webkitendfullscreen / 前缀事件
+   *   3. 两者均无 / 调用同步 throw → hint 降级
+   * 进全屏前先出声：muted=false + 刷新按钮 + 未播则手势内起播（catch 忽略）。
+   *
+   * 顺序说明：标准优先可让 Chromium 系全程走 fullscreenchange（Chromium 的
+   * webkitEnterFullscreen 是 legacy 路径，退出只派发前缀事件）；iOS 无标准
+   * API 自然落入 webkit 兜底，行为不变。
+   *
+   * @param videoEl 目标视频元素
+   * @param onSoundChange 静音态变化后的按钮刷新回调（卡内 updateSoundBtn）
+   * @param hintEl 降级 toast 节点（仅降级路径显示）
+   */
+  function enterVideoFullscreen(videoEl, onSoundChange, hintEl) {
+    ensureDocumentFullscreenListener();
+
+    // 进全屏自动出声 + 未播则起播
+    videoEl.muted = false;
+    onSoundChange();
+    if (videoEl.paused === true) {
+      const p = videoEl.play();
+      if (p && typeof p.then === "function") p.catch(() => {});
+    }
+
+    // 路径 1：W3C 全屏（退出走 document fullscreenchange）
+    if (typeof videoEl.requestFullscreen === "function") {
+      let req;
+      try {
+        req = videoEl.requestFullscreen();
+      } catch (e) {
+        // 同步 throw → 落入 webkit 兜底（可能仅标准 API 异常而 legacy 可用）
+        return enterVideoFullscreenViaWebkit(videoEl, hintEl);
+      }
+      if (req && typeof req.then === "function") {
+        req
+          .then(() => tryLockLandscape())
+          .catch(() => {
+            // FULLSCREEN_REJECTED → hint 降级
+            showVideoHint(hintEl);
+          });
+      } else {
+        tryLockLandscape();
+      }
+      return;
+    }
+
+    // 路径 2：iOS 原生播放器 legacy 兜底（退出走 webkitendfullscreen / 前缀事件）
+    enterVideoFullscreenViaWebkit(videoEl, hintEl);
+  }
+
+  /** legacy webkitEnterFullscreen 路径（iOS 原生播放器；不可用则 hint 降级） */
+  function enterVideoFullscreenViaWebkit(videoEl, hintEl) {
+    if (typeof videoEl.webkitEnterFullscreen !== "function") {
+      // 路径 3：FULLSCREEN_UNSUPPORTED → hint 降级
+      showVideoHint(hintEl);
+      return;
+    }
+    try {
+      videoEl.webkitEnterFullscreen();
+      tryLockLandscape();
+    } catch (e) {
+      // 同步 throw → hint 降级
+      showVideoHint(hintEl);
+    }
+  }
+
+  // ============================================================================
   // 流单元渲染（4 类）
   // ============================================================================
 
@@ -459,6 +618,43 @@
       updateSoundBtn();
     });
     unit.appendChild(soundBtn);
+
+    // 降级 toast（当前环境不支持全屏 → 提示横屏观看，默认不可见）
+    const videoHint = el(
+      "div",
+      {
+        class: "video-hint",
+        "data-role": "video-hint",
+        hidden: "",
+      },
+      ["当前环境不支持全屏，建议横屏观看"],
+    );
+
+    // 全屏按钮（声音按钮正下方同列；click stopPropagation 不触发视频静音切换）
+    const fullscreenBtn = el(
+      "button",
+      {
+        type: "button",
+        class: "video-fullscreen",
+        "data-role": "video-fullscreen",
+        "aria-label": "全屏观看",
+      },
+      ["⛶"],
+    );
+    fullscreenBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // 模块级追踪当前全屏视频 + 注册本卡静音恢复回调（避免多视频串扰）
+      lastFullscreenVideo = videoEl;
+      fullscreenSoundRestore = updateSoundBtn;
+      enterVideoFullscreen(videoEl, updateSoundBtn, videoHint);
+    });
+    // iOS 原生播放器退出（webkitEnterFullscreen 不走 document fullscreenchange）
+    videoEl.addEventListener("webkitendfullscreen", (e) => {
+      if (e.target !== lastFullscreenVideo) return;
+      restoreAfterVideoFullscreenExit();
+    });
+    unit.appendChild(fullscreenBtn);
+    unit.appendChild(videoHint);
 
     // 底部文字 + 进度条
     const metaParts = [];
