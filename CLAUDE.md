@@ -165,6 +165,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `gallery/manifest.ts` — `buildManifest()` 全量读 DB → manifest（COS key 约定 `relight/daily/<date>/...` + `relight/videos/<themeKey>/...`；composedImagePath=null 边界跳过；durationSec 正整数门过滤无效视频）
 - `gallery/sync.ts` — `pushManifest`（本地写 tmp.json → `scp` 上传 → `ssh mv` 原子覆盖 VPS manifest.json，shellQuote 单引号转义防注入）+ `syncDayToGallery`/`syncVideoToGallery`（全部 `Promise<void>`，try/catch 旁路容错，失败 console.warn + job.log 不阻塞精选/视频主流程；调用方在 daily-selection 阶段 3.5、daily-video 步骤 4.5 各自独立 try/catch 包裹）
 - 凭据配置见 `config.cos`/`config.gallery`（凭据命名兼容：优先 `TENCENTCLOUD_SECRET_ID/SECRET_KEY/APPID/REGION`，fallback `COS_*`；bucket = `little-bee-assets-${APPID}`；缺失走默认值，本机开发画廊同步 console.warn 跳过）
+- 画廊卡下载（apps/gallery）：照片/视频/壁纸三类卡统一下载按钮——iOS 走 Web Share API 弹系统分享面板存相册（微信/企微内置浏览器检测 MicroMessenger UA 弹「在 Safari 中打开」引导遮罩；fetch 失败兜底开直链）；跨域 fetch 依赖桶 CORS，由 `cos:cors` CLI 一次性配置
 
 **CLI 工具** (`src/cli/`):
 - `evaluate.ts` — 对 AI 响应文件运行评估器，退出码 0=通过 1=未通过
@@ -173,6 +174,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `backfill-thumbnails.ts` — 补救 `thumbnail_path IS NULL` 的历史照片缩略图，复用 generateThumbnail，支持 `--dry-run`/`--limit`/`--media-type`（script: `backfill:thumbnails`）
 - `backfill-daily-picks.ts` — 补跑历史缺失的每日精选（检测 dailyPicks 表缺失日期，逐日回填；`--dry-run` 演练 / `--yes` 执行 / `--enqueue` 入队；默认 `--from=最早照片日`、`--to=今日`；复用 worker pickDate 覆盖，进程内顺序或 BullMQ 入队）（script: `backfill:daily-picks`）
 - `backfill-gallery.ts` — 历史回填画廊同步（遍历已有 dailyPicks/videos，复用 `uploadDayAssets`/`uploadVideoAssets` 上传 COS + 最后统一刷一次 manifest 推 VPS；`--dry-run` 演练 / `--yes` 执行 / `--limit` 限量；资源上传失败才 exit 2，manifest 推送失败仅 warn 不致命）（script: `backfill:gallery`）
+- `setup-cos-cors.ts` — 一次性配置 COS 桶 CORS 放行画廊站跨域 fetch（幂等 getBucketCors → mergeCorsRules 合并只追加不删除、单/复数键双兼容 + 重复规则去重自愈 → putBucketCors；默认 dry-run / `--yes` 执行；退出码 0 成功含幂等 skip、1 凭据缺失、2 API 失败）（script: `cos:cors`）
 
 ### 前端架构 (apps/web)
 

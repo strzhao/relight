@@ -66,6 +66,13 @@
 
 ### 模式 (patterns.md)
 
+- [2026-08-30] cos-nodejs-sdk-v5 getBucketCors 回读复数键，幂等判存与单测须双键兼容 → [gallery](domains/gallery.md)
+- [2026-08-30] manifest 按约定 key 拼 URL 会给从未生成的对象造死链（确定性重合成补救）→ [gallery](domains/gallery.md)
+- [2026-08-30] iOS 网页下载三件套：Web Share files / 跨域 a.download 无效 / 微信 Safari 引导 → [gallery](domains/gallery.md)
+- [2026-08-30] e2e 自 spawn python http.server 必须 --bind 127.0.0.1（dual-stack 半死态顺序性 flake）→ [testing](domains/testing.md)
+- [2026-08-29] gallery 视频全屏方案 B + Chromium 无 webkitEnterFullscreen 实证（requestFullscreen 优先 / 双事件退出监听）→ [gallery](domains/gallery.md)
+- [2026-08-29] 全屏退出事件毫秒竞态：派生状态断言用 bounded waitForFunction + muted-setter 探针方法论 → [testing](domains/testing.md)
+- [2026-08-29] 本机 getfqdn("") 挂死致 python http.server 卡 server_bind（sitecustomize 桩 + PYTHONPATH 注入绕过）→ [testing](domains/testing.md)
 - [2026-08-01] COS 上传容错返回空串不 throw（画廊旁路，sync* 返回 void，凭据兼容 TENCENTCLOUD_*/COS_*）→ [gallery](domains/gallery.md)
 - [2026-07-29] Satori absolute+linear-gradient 多层叠加可行（spike 实证几何断言，铺开前必 spike）→ [image-processing](domains/image-processing.md)
 - [2026-07-29] 维度派生 cacheKey 三方闭合（预生成/路由命中/推送读取同一约定，禁语义别名）→ [image-processing](domains/image-processing.md)

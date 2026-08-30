@@ -36,3 +36,26 @@
 
 - **Lesson**（探针实证，勿信老资料）：Chromium（@playwright/test 1.59.1 内置）`video.webkitEnterFullscreen` 是 **undefined**；`video.requestFullscreen()` 正常派发 `fullscreenchange` 且 **target 是 VIDEO 元素**。老 XWeb 可能只有前缀事件——退出监听必须 `fullscreenchange` + `webkitfullscreenchange` 双挂（restore 幂等靠 lastFullscreenVideo 空守卫）+ video 元素 `webkitendfullscreen`（iOS 原生播放器）。
 - **Choice**：探测顺序 `requestFullscreen` 优先（Chromium/XWeb 全程标准事件）、`webkitEnterFullscreen` 仅 iOS WKWebView 兜底（iPhone 无 Element.requestFullscreen）；进全屏先 unmute + 未播则手势内起播，退出恢复 muted + try orientation.unlock；视频 404 用纯 CSS 门 `[data-load-state=error]` 隐藏按钮；双 API 均缺 → 单元内 toast「建议横屏观看」≤3000ms 自动隐藏。验收谓词 FS.PM1-5 见 `apps/gallery/__tests__/gallery-video-fullscreen.e2e.acceptance.test.ts`（PM3 退出断言有毫秒竞态，见 [[testing]]）。
+## cos-nodejs-sdk-v5 getBucketCors 回读复数键，幂等判存与单测须双键兼容
+
+[2026-08-30] <!-- tags: cos, sdk, cors, 单测-fixture -->
+
+- **Scenario**：用 cos-nodejs-sdk-v5 读写桶 CORS（或任何 get/put 键名不对称的 SDK API）做幂等判断时
+- **Lesson**：SDK 读回键名可能与写入键名不对称——getBucketCors 回读**复数键**（AllowedOrigins/AllowedMethods/AllowedHeaders，MaxAgeSeconds 回读为字符串），putBucketCors 则单复数都收；幂等判存必须 `复数键 ?? 单数键` 双兼容。单测 fixture 必须镜像 **SDK 真实回读 shape**（读 SDK 源码求证），而非镜像自己实现的假设——否则单测与实现共享同一错误假设，绿灯是假阴性
+- **Evidence**：mergeCorsRules 只查单数键 → 生产桶被重复写入 2 条相同规则（验收谓词 C2 FAIL）；SDK base.js 单复数互转源码实证；fixture 换复数键后单测 10/10 仍绿并补去重用例（核对锚点：2026-08-30 源码版本）
+
+## manifest 按约定 key 拼 URL 会给从未生成的对象造死链
+
+[2026-08-30] <!-- tags: gallery, manifest, cos, 死链, 回填 -->
+
+- **Scenario**：manifest/清单类产物按「约定 key 拼 URL」而非「上传成功回执」生成资源链接时
+- **Lesson**：约定 key 拼 URL 隐含「对象必然存在」假设——晚于数据区间的功能（如竖版壁纸晚于早期精选日）会产出系统性死链，且**本地产物从未生成 ≠ 上传失败**，先盘点本地再选策略。补救首选「确定性重合成」：幂等脚本（线上 HEAD 找缺 → 从 DB 原始数据按当日管线同参重新生成 → 上传 → 复核），比改 manifest 守卫更能兑现已发布的链接；legacy 无明细表的历史行回退主记录字段
+- **Evidence**：39 个历史日竖版 404（05-08~06-17 + 06-26 本地从未合成）+ 07-31 横版本地丢失；`apps/backend/scripts/recompose-wallpapers.ts` 40/40 恢复、线上 196 条壁纸直链全 200；05-08 无 dailyPickEntries 按主记录回退成功（核对锚点：2026-08-30）
+
+## iOS 网页下载三件套：Web Share files、跨域 a.download 无效、微信引导
+
+[2026-08-30] <!-- tags: ios, web-share, 下载, 微信, 兼容性 -->
+
+- **Scenario**：静态站要在 iPhone 上提供图片/视频「保存到相册」能力时
+- **Lesson**：iOS Safari 对跨域 URL 忽略 `<a download>`；唯一可靠路径是 Web Share API level 2（`navigator.share({files})`，iOS 15+）弹系统分享面板。三个配套坑：① `AbortSignal.timeout` 需 Safari 16+，iOS 15 同步抛 TypeError → 手动 AbortController + setTimeout；② fetch 失败后兜底 `window.open` 会因 transient activation 过期被弹窗拦截（返回 null）→ 级联 `location.href` 当前页导航；③ 微信/企微内置浏览器（群推送链接第一跳）无 Web Share → 检测 MicroMessenger UA 弹「在 Safari 中打开」引导遮罩，深链 hash 保留回原位。跨域 fetch 需目标桶配 CORS（公有读只放行标签加载，不放行 XHR）
+- **Evidence**：画廊下载功能 48 条验收谓词全过；Playwright 用 addInitScript stub share/canShare + UA 注入覆盖微信分支与取消分享路径（核对锚点：2026-08-30 apps/gallery/app.js）

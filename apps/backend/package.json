@@ -1,6 +1,6 @@
 {
   "name": "@relight/backend",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,6 +18,7 @@
     "backfill:daily-picks": "tsx src/cli/backfill-daily-picks.ts",
     "backfill:gallery": "tsx src/cli/backfill-gallery.ts",
     "backfill:portraits": "tsx src/cli/backfill-portraits.ts",
+    "cos:cors": "tsx src/cli/setup-cos-cors.ts",
     "models:download": "tsx scripts/download-models.ts"
   },
   "dependencies": {

@@ -11,8 +11,16 @@
  * 产物（写入 process.env.GALLERY_FIXTURE_DIR 或默认 /tmp/relight-gallery-fixture）：
  *   - manifest.json（含至少 2 天 + 1 视频 + 1 无壁纸天 + 三变体 photo）
  *   - photos/<id>-thumb.jpg / <id>-mid.jpg（占位 JPEG，可加载）
- *   - wallpapers/<date>_v2-contain-default.jpg / -1290x2796.jpg
+ *   - wallpapers/<date>_v2-contain-default.jpg / -1290x2796.jpg（非方形：横 8×4 / 竖 4×8）
  *   - videos/<themeKey>.mp4（可播放 mp4，从 fixtures/video-sample.mp4 二进制 copy）
+ *
+ * 下载验收扩展（2026-08-29 红队，设计 Tier 0 声明，只增不改既有语义）：
+ *   A. 壁纸占位图从 1×1 方形改为非方形（横 8×4 / 竖 4×8 最小合法 JPEG，离线 sharp 生成后
+ *      base64 内嵌）——满足下载验收场景 5.P3「横版宽>高、竖版高>宽」的文件头解析断言。
+ *      manifest URL 字符串不变，既有测试对壁纸仅断言 src 非空（S6.PM2），无尺寸断言。
+ *   B. `generateFixture({ missingLinks: true })` 变体：产出独立目录 `${FIXTURE_DIR}-missing`，
+ *      manifest 注入缺直链条目（视频 mp4 空串 / 壁纸横版空串 / 照片 original 空串），
+ *      满足下载验收场景 11（缺直链不渲染死链下载控件）。默认（无参）行为与产物完全不变。
  *
  * 纯 Node，零运行时依赖（JPEG 占位手写最小字节；可播放 mp4 用预生成的二进制样本，
  * 避免 base64 在源码粘贴时损坏，且确保 Chromium 能解码 autoplay 满足 S4 契约）。
@@ -39,6 +47,19 @@ function writeTinyJpeg(filePath) {
   fs.writeFileSync(filePath, Buffer.from(TINY_JPEG_B64, "base64"));
 }
 
+// 非方形壁纸占位 JPEG（红队下载验收 场景5.P3 方向断言）：横 8×4（宽>高）/ 竖 4×8（高>宽），
+// 离线 sharp 一次性生成的最小合法 JPEG，base64 内嵌保持工厂零运行时依赖。
+const WP_LANDSCAPE_JPEG_B64 =
+  "/9j/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAEAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJAA/9k=";
+const WP_PORTRAIT_JPEG_B64 =
+  "/9j/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAIAAQDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJAAP//Z";
+
+function writeWallpaperJpeg(filePath, orientation) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const b64 = orientation === "landscape" ? WP_LANDSCAPE_JPEG_B64 : WP_PORTRAIT_JPEG_B64;
+  fs.writeFileSync(filePath, Buffer.from(b64, "base64"));
+}
+
 // 可播放 mp4 从预生成二进制样本 copy（见 VIDEO_SAMPLE_PATH）。
 // 旧 TINY_MP4_HEX 是无帧 ftyp+moov，Chromium 解码报 MEDIA_ERR_SRC_NOT_SUPPORTED(code=4)，
 // 导致 video 始终 paused=true，S4.PM1/PM3/PM5 全失败。
@@ -49,12 +70,16 @@ function writeTinyMp4(filePath) {
 
 /**
  * 生成完整 fixture。
+ * @param {{missingLinks?: boolean}} [opts] missingLinks=true 时产出下载验收场景 11 用的
+ *   缺直链变体（独立目录，默认产物不受影响）。
  * @returns {{manifestDir: string, manifestPath: string, manifest: object}}
  */
-export function generateFixture() {
+export function generateFixture(opts = {}) {
+  const missingLinks = opts?.missingLinks === true;
+  const dir = missingLinks ? `${FIXTURE_DIR}-missing` : FIXTURE_DIR;
   // 清空重建
-  fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
-  fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
 
   const today = new Date();
   const iso = (d) => d.toISOString().slice(0, 10);
@@ -75,6 +100,7 @@ export function generateFixture() {
     let midFailed = false;
     let dirtyTakenAt = false;
     let nullTakenAt = false;
+    let emptyOriginal = false; // 缺直链变体（场景11.P4）：original 空串 → 照片卡不渲染下载控件
     let faceFocus = null; // 默认无人脸（验 S17.PM2 默认 center）
     if (rank === 3) {
       // 变体 ⑤ faceFocus={0.5,0.26}（S17.PM1/PM3：模拟「那年溪水的温度」中央偏上人脸）
@@ -109,10 +135,14 @@ export function generateFixture() {
       // 变体 ④ mid 失败 fallback original===thumbnail（S9.PM3）
       midFailed = true;
     }
+    if (rank === 20 && missingLinks) {
+      // 缺直链变体（下载验收场景 11.P4）：original 空串，仅存在于 missingLinks manifest
+      emptyOriginal = true;
+    }
 
     // 占位图
-    writeTinyJpeg(path.join(FIXTURE_DIR, "photos", `${photoId}-thumb.jpg`));
-    writeTinyJpeg(path.join(FIXTURE_DIR, "photos", `${photoId}-mid.jpg`));
+    writeTinyJpeg(path.join(dir, "photos", `${photoId}-thumb.jpg`));
+    writeTinyJpeg(path.join(dir, "photos", `${photoId}-mid.jpg`));
 
     const thumbUrl = `photos/${photoId}-thumb.jpg`;
     const midUrl = `photos/${photoId}-mid.jpg`;
@@ -122,13 +152,19 @@ export function generateFixture() {
       title: `今日第 ${rank} 张`,
       narrative: `今日第 ${rank} 张的叙事文案，长度足够通过非空断言。`,
       thumbnail: thumbUrl,
-      original: midFailed ? thumbUrl : midUrl, // mid 失败时 original === thumbnail
+      original: emptyOriginal ? "" : midFailed ? thumbUrl : midUrl, // mid 失败时 original === thumbnail
       takenAt,
       width,
       height,
       faceFocus,
       // 测试辅助标记（蓝队实现不消费这些字段，仅红队 fixture 自省用；JSON.stringify 保留）
-      _fixtureFlags: { midFailed, dirtyTakenAt, nullTakenAt, widthZero: width === 0 },
+      _fixtureFlags: {
+        midFailed,
+        dirtyTakenAt,
+        nullTakenAt,
+        widthZero: width === 0,
+        originalEmpty: emptyOriginal,
+      },
     });
   }
 
@@ -170,23 +206,40 @@ export function generateFixture() {
     });
   }
 
-  // 壁纸（今日 + 昨日有，前天无）
+  // 壁纸（今日 + 昨日有，前天无）。非方形占位：横版 8×4 / 竖版 4×8（场景5.P3 方向断言）
   const wpTodayLandscape = `wallpapers/${todayStr}_v2-contain-default.jpg`;
   const wpTodayPortrait = `wallpapers/${todayStr}_v2-contain-1290x2796.jpg`;
   const wpYesterdayLandscape = `wallpapers/${yesterdayStr}_v2-contain-default.jpg`;
   const wpYesterdayPortrait = `wallpapers/${yesterdayStr}_v2-contain-1290x2796.jpg`;
-  writeTinyJpeg(path.join(FIXTURE_DIR, wpTodayLandscape));
-  writeTinyJpeg(path.join(FIXTURE_DIR, wpTodayPortrait));
-  writeTinyJpeg(path.join(FIXTURE_DIR, wpYesterdayLandscape));
-  writeTinyJpeg(path.join(FIXTURE_DIR, wpYesterdayPortrait));
+  writeWallpaperJpeg(path.join(dir, wpTodayLandscape), "landscape");
+  writeWallpaperJpeg(path.join(dir, wpTodayPortrait), "portrait");
+  writeWallpaperJpeg(path.join(dir, wpYesterdayLandscape), "landscape");
+  writeWallpaperJpeg(path.join(dir, wpYesterdayPortrait), "portrait");
 
   // 视频（归属昨日，验 S4 全套 + S14.PM2 深链）
   const videoThemeKey = "trip-2024-summer";
   const videoMp4 = `videos/${videoThemeKey}.mp4`;
-  writeTinyMp4(path.join(FIXTURE_DIR, videoMp4));
+  writeTinyMp4(path.join(dir, videoMp4));
   // 视频封面
   const videoCover = `videos/${videoThemeKey}-cover.jpg`;
-  writeTinyJpeg(path.join(FIXTURE_DIR, videoCover));
+  writeTinyJpeg(path.join(dir, videoCover));
+
+  // 缺直链变体的第二视频（场景11.P1）：mp4 空串 → 该卡不渲染下载控件。
+  // createdAt 晚于正常视频（同日序列后位），保证既有测试 querySelector 命中的首个
+  // video 单元仍是正常视频，向后兼容。
+  const missingVideo = {
+    themeKey: "trip-missing-mp4",
+    title: "缺直链视频",
+    narrative: "缺直链变体视频。",
+    mp4: "",
+    coverImage: "videos/trip-missing-mp4-cover.jpg",
+    durationSec: 60,
+    photoCount: 3,
+    createdAt: `${yesterdayStr}T04:00:00.000Z`,
+  };
+  if (missingLinks) {
+    writeTinyJpeg(path.join(dir, missingVideo.coverImage));
+  }
 
   const manifest = {
     generatedAt: new Date().toISOString(),
@@ -195,7 +248,8 @@ export function generateFixture() {
         pickDate: todayStr,
         title: "今日精选",
         narrative: "今日的整体叙事。",
-        wallpaperLandscape: wpTodayLandscape,
+        // 缺直链变体（场景11.P2）：横版空串 → 横版下载入口不渲染；竖版保持非空
+        wallpaperLandscape: missingLinks ? "" : wpTodayLandscape,
         wallpaperPortrait: wpTodayPortrait,
         photos: photosToday,
       },
@@ -233,13 +287,14 @@ export function generateFixture() {
         // video 仍在流内可达（S4 全套 / S14.PM2 深链），且 video 后面紧跟 photo（S4.PM5 ended 后落 photo）。
         createdAt: `${yesterdayStr}T03:00:00.000Z`,
       },
+      ...(missingLinks ? [missingVideo] : []),
     ],
   };
 
-  const manifestPath = path.join(FIXTURE_DIR, "manifest.json");
+  const manifestPath = path.join(dir, "manifest.json");
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-  return { manifestDir: FIXTURE_DIR, manifestPath, manifest };
+  return { manifestDir: dir, manifestPath, manifest };
 }
 
 // CLI 直接跑：node gen-manifest.mjs

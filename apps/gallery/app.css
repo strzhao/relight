@@ -496,21 +496,187 @@ video {
   object-fit: contain;
   border-radius: 0.5rem;
 }
-.unit-wallpaper .save-hint {
+/* 旧 .save-hint「长按图片保存到相册」样式已随节点一并删除（契约演进：被下载按钮取代） */
+
+/* ===== 下载按钮（复用 .video-sound 玻璃拟态语言；移动端常显，不依赖 hover） ===== */
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 2.4rem;
+  height: 2.4rem;
+  padding: 0 0.7rem;
+  border-radius: 99px;
+  border: 1px solid oklch(0.975 0.01 95 / 0.3);
+  background: oklch(0.08 0.004 95 / 0.4);
+  color: var(--fg);
+  font-family: var(--font-serif-cn);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+.download-btn:active {
+  background: oklch(0.08 0.004 95 / 0.6);
+}
+.download-btn:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.download-btn[data-download-state="error"] {
+  /* 错误态描边：与主站 vermillion 错误色同源（本文件无该 token，按文件惯例内联 OKLCH） */
+  border-color: oklch(0.55 0.19 30 / 0.7);
+}
+.download-btn .download-btn-text {
+  white-space: nowrap;
+}
+.download-btn[data-download-state="loading"] .download-btn-icon {
+  display: none;
+}
+
+/* 内嵌 CSS spinner：仅 loading 态显示 */
+.download-btn .download-btn-spinner {
+  display: none;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid oklch(0.975 0.01 95 / 0.25);
+  border-top-color: var(--fg);
+  border-radius: 50%;
+  animation: download-spin 0.8s linear infinite;
+}
+.download-btn[data-download-state="loading"] .download-btn-spinner {
+  display: inline-block;
+}
+@keyframes download-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 位置：photo 卡 → 右上 photo-rank 下方；video 卡 → 声音按钮下方（同一右列） */
+.unit-photo [data-role="photo-download"] {
+  position: absolute;
+  top: calc(max(env(safe-area-inset-top), 4.5rem) + 2.6rem);
+  right: 1.25rem;
+  z-index: 4;
+}
+.unit-video [data-role="video-download"] {
+  position: absolute;
+  /* 声音按钮 → 全屏按钮（+2.8rem）→ 下载按钮（+5.6rem），右列 2.8rem 等距堆叠 */
+  top: calc(max(env(safe-area-inset-top), 4.5rem) + 5.6rem);
+  right: 1.25rem;
+  z-index: 4;
+}
+
+/* 壁纸卡底部按钮排（竖版主按钮 + 横版次按钮，取代原 save-hint 文案区） */
+.unit-wallpaper .download-bar {
   position: absolute;
   bottom: max(env(safe-area-inset-bottom), 2rem);
   left: 50%;
   transform: translateX(-50%);
   z-index: 3;
-  padding: 0.5rem 1rem;
-  background: oklch(0.08 0.004 95 / 0.6);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: calc(100vw - 2rem);
+}
+
+/* ===== 微信内置浏览器引导遮罩（纯文字 + CSS 箭头，不引图片） ===== */
+.wechat-guide {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  padding: 2rem;
+  background: oklch(0.08 0.004 95 / 0.82);
+  backdrop-filter: blur(12px);
+}
+.wechat-guide-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1.5rem 1.75rem;
+  border: 1px solid oklch(0.975 0.01 95 / 0.2);
+  border-radius: 1rem;
+  background: oklch(0.155 0.006 95 / 0.9);
+  max-width: 22rem;
+  text-align: center;
+}
+.wechat-guide-text {
+  font-family: var(--font-serif-cn);
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: var(--fg);
+}
+.wechat-guide-arrow {
+  font-size: 1.8rem;
+  color: var(--sage);
+  animation: guide-arrow-bob 1.6s ease-in-out infinite;
+}
+@keyframes guide-arrow-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(6px);
+    opacity: 1;
+  }
+}
+.wechat-guide-close {
+  padding: 0.6rem 1.6rem;
+  border: 1px solid var(--sage);
+  border-radius: 99px;
+  background: transparent;
+  color: var(--sage);
+  font-family: var(--font-serif-cn);
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.wechat-guide-close:hover,
+.wechat-guide-close:active {
+  background: var(--sage);
+  color: var(--fg);
+}
+
+/* ===== 下载 toast（底部浮出，2.5s 自动消失） ===== */
+.download-toast {
+  position: fixed;
+  bottom: calc(max(env(safe-area-inset-bottom), 2rem) + 3.2rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 210;
+  padding: 0.55rem 1.1rem;
+  background: oklch(0.08 0.004 95 / 0.75);
   color: var(--fg);
   font-family: var(--font-serif-cn);
   font-size: 0.8rem;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+  border: 1px solid oklch(0.975 0.01 95 / 0.2);
   border-radius: 99px;
   backdrop-filter: blur(8px);
   white-space: nowrap;
+  max-width: calc(100vw - 3rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+.download-toast.is-visible {
+  visibility: visible;
+  opacity: 1;
 }
 
 /* ===== 载入态 / 错误态 ===== */
@@ -574,6 +740,10 @@ video {
     transition: none !important;
   }
   .unit-date-separator .date-hint {
+    animation: none;
+  }
+  .download-btn .download-btn-spinner,
+  .wechat-guide-arrow {
     animation: none;
   }
 }

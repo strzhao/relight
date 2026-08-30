@@ -12,7 +12,10 @@
  *     data-load-state = loading | loaded | error
  *   photo 单元额外：data-day-date / data-day-index / data-photo-rank / data-photo-id / data-takenat-absent
  *   video 单元额外：data-media-type="video" / data-video-id
- *   wallpaper 单元：data-role="wallpaper-card" + [data-role="save-hint"]
+ *   wallpaper 单元：data-role="wallpaper-card" + 底部 download-bar
+ *     （旧 [data-role="save-hint"] 已按契约演进删除，被下载按钮取代——state.md 实现计划 3）
+ *   下载：[data-role="photo-download" | "video-download" | "wallpaper-download-portrait"
+ *     | "wallpaper-download-landscape"]，均带 aria-label + data-download-state 状态机
  *
  * 深链路由（state.md §深链路由契约）：
  *   #/                    → stream scrollTop = 0
@@ -145,6 +148,301 @@
       node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
     }
     return node;
+  }
+
+  // ============================================================================
+  // 下载基础设施（state.md §方案架构 1/2/4/5）
+  //
+  //   shareOrDownload(url, filename, opts) — fetch → Web Share（iOS 15+ 存相册/文件）
+  //     → 降级 a.download blob（桌面/旧 iOS）→ fetch 失败兜底 window.open 直链
+  //   createDownloadButton — 圆形玻璃按钮 + data-download-state 状态机
+  //   isWeChat / showWeChatGuide — 微信内置浏览器「在 Safari 中打开」引导遮罩
+  //   showToast — 底部浮出提示，2.5s 自动消失
+  // ============================================================================
+
+  /** 下载超时默认值：图片/壁纸 60s；视频由调用方传 300s（~119MB 弱网余量） */
+  const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
+  const VIDEO_DOWNLOAD_TIMEOUT_MS = 300000;
+
+  /** 微信引导遮罩文案（纯文字 + CSS 箭头，不引图片资源） */
+  const WECHAT_GUIDE_MESSAGE = "点击右下角「···」→ 在 Safari 中打开，即可下载保存";
+
+  /** 手动 AbortController + setTimeout 实现超时信号——
+   *  AbortSignal.timeout 需 Safari 16+，iOS 15 无此 API 会同步抛 TypeError，必须手动实现 */
+  function fetchWithTimeout(url, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // 注意：timer 在 body 读完（readResponseBlob 返回）后才 clear——abort 信号对
+    // 流式读 body 同样生效，超时语义是「整个下载动作」的预算而非仅响应头
+    return {
+      signal: controller.signal,
+      done: () => clearTimeout(timer),
+    };
+  }
+
+  /** 读取响应为 Blob；有 Content-Length 且调用方传了 onProgress 时走流式读回报整数百分比 0-100 */
+  async function readResponseBlob(res, onProgress) {
+    if (!onProgress || !res.body || typeof res.body.getReader !== "function") {
+      return res.blob();
+    }
+    const lenHeader = res.headers.get("Content-Length");
+    const total = lenHeader ? Number.parseInt(lenHeader, 10) : 0;
+    if (!total || !Number.isFinite(total)) {
+      // Content-Length 缺失（chunked 等）→ 无百分比依据，不调用 onProgress（§实现规约）
+      return res.blob();
+    }
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const pct = Math.min(100, Math.max(0, Math.round((received / total) * 100)));
+      onProgress(pct);
+    }
+    onProgress(100);
+    return new Blob(chunks, { type: res.headers.get("Content-Type") || "" });
+  }
+
+  /** 扩展名 → MIME 推断（blob.type 为空时兜底，保证 iOS 分享面板识别文件类型） */
+  function mimeFromFilename(name) {
+    if (/\.jpe?g$/i.test(name)) return "image/jpeg";
+    if (/\.png$/i.test(name)) return "image/png";
+    if (/\.webp$/i.test(name)) return "image/webp";
+    if (/\.mp4$/i.test(name)) return "video/mp4";
+    if (/\.mov$/i.test(name)) return "video/quicktime";
+    return "application/octet-stream";
+  }
+
+  /** fetch 失败最后兜底：开直链。异步上下文 transient activation 多已过期，
+   *  window.open 会被弹窗拦截返回 null → 级联当前页导航（导航不受拦截），功能不静默失败 */
+  function openDirectLink(url) {
+    const w = window.open(url, "_blank");
+    if (!w) location.href = url;
+  }
+
+  /** 降级路径：blob URL + <a download> 触发浏览器下载（桌面落盘 / iOS 13+ 进文件 App） */
+  function triggerAnchorDownload(blob, filename) {
+    const objectUrl = URL.createObjectURL(blob);
+    const a = el("a", { href: objectUrl, download: filename });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // 延迟 revoke：点击处理期间 Safari 仍需解析 blob URL
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+  }
+
+  /**
+   * 统一下载核心（state.md §方案架构 1）。
+   *
+   * @returns "shared"（Web Share 面板已唤起，含用户取消的静默路径）
+   *          | "downloaded"（a.download 降级落盘）
+   *          | "opened"（fetch 失败兜底打开直链）
+   */
+  async function shareOrDownload(url, filename, opts = {}) {
+    const timeoutMs = opts.timeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
+
+    // ---- 阶段 1：fetch（失败 → 兜底开直链） ----
+    const t = fetchWithTimeout(url, timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, { signal: t.signal });
+      if (!res.ok) {
+        t.done();
+        openDirectLink(url);
+        showToast("已打开原文件，可长按/右键保存");
+        return "opened";
+      }
+    } catch {
+      t.done();
+      openDirectLink(url);
+      showToast("已打开原文件，可长按/右键保存");
+      return "opened";
+    }
+
+    // ---- 阶段 2：读 body 为 Blob（中途断流同 fetch 失败路径） ----
+    let blob;
+    try {
+      blob = await readResponseBlob(res, onProgress);
+    } catch {
+      t.done();
+      openDirectLink(url);
+      showToast("已打开原文件，可长按/右键保存");
+      return "opened";
+    }
+    t.done();
+
+    // ---- 阶段 3：构造 File → Web Share 优先，降级 a.download ----
+    const file = new File([blob], filename, { type: blob.type || mimeFromFilename(filename) });
+    const nav = navigator;
+    if (nav.canShare && nav.share) {
+      try {
+        if (nav.canShare({ files: [file] })) {
+          await nav.share({ files: [file] });
+          return "shared";
+        }
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          // 用户取消分享面板 → 非错误，静默返回（场景 7：不降级下载、不开直链）
+          return "shared";
+        }
+        // 其他 share 失败（少见的 NotAllowedError 等）→ 手里已有 blob，降级下载保住文件
+      }
+    }
+    triggerAnchorDownload(blob, filename);
+    return "downloaded";
+  }
+
+  /** 文件名 sanitize：文件系统/分享面板非法字符替换为全角横线；超长截断 80 字符 */
+  function sanitizeFilename(name) {
+    const cleaned = String(name || "").replace(/[\\/:*?"<>|]/g, "－");
+    return cleaned.length > 80 ? cleaned.slice(0, 80) : cleaned;
+  }
+
+  /**
+   * 下载按钮工厂（state.md §方案架构 2）。
+   * data-download-state ∈ {idle, loading, error}；loading 时 disabled + CSS spinner，
+   * 传入百分比文本时同步 aria-valuenow（0-100）供自动化断言。
+   */
+  function createDownloadButton(config) {
+    const btn = el(
+      "button",
+      {
+        type: "button",
+        class: "download-btn",
+        "data-role": config.role,
+        "aria-label": config.ariaLabel,
+      },
+      [
+        el("span", { class: "download-btn-spinner", "aria-hidden": "true" }),
+        el("span", { class: "download-btn-icon", "aria-hidden": "true" }, ["⬇"]),
+        el("span", { class: "download-btn-text" }, ["下载"]),
+      ],
+    );
+    btn.dataset.downloadState = "idle";
+
+    function setState(state, text) {
+      btn.dataset.downloadState = state;
+      btn.disabled = state === "loading";
+      if (state === "loading") {
+        if (text !== undefined && text !== null) {
+          btn.querySelector(".download-btn-text").textContent = text;
+          const num = /(\d+)/.exec(text);
+          if (num) btn.setAttribute("aria-valuenow", num[1]);
+        }
+      } else {
+        // 离开 loading → 复位文案与 aria-valuenow
+        btn.querySelector(".download-btn-text").textContent = "下载";
+        btn.removeAttribute("aria-valuenow");
+      }
+    }
+    return { btn, setState };
+  }
+
+  // ---- 微信内置浏览器引导（state.md §方案架构 4） ----
+
+  function isWeChat() {
+    return /MicroMessenger/i.test(navigator.userAgent);
+  }
+
+  let wechatGuideEl = null;
+
+  /** 单例遮罩：微信环境点下载 → 引导「在 Safari 中打开」（hash 深链保留，Safari 打开回原位） */
+  function showWeChatGuide() {
+    if (wechatGuideEl?.isConnected) {
+      wechatGuideEl.hidden = false;
+      return;
+    }
+    wechatGuideEl = el(
+      "div",
+      {
+        class: "wechat-guide",
+        "data-role": "wechat-guide",
+        role: "dialog",
+        "aria-label": "下载引导",
+      },
+      [
+        el("div", { class: "wechat-guide-panel" }, [
+          el("p", { class: "wechat-guide-text" }, [WECHAT_GUIDE_MESSAGE]),
+          el("div", { class: "wechat-guide-arrow", "aria-hidden": "true" }, ["↗"]),
+        ]),
+        el(
+          "button",
+          {
+            type: "button",
+            class: "wechat-guide-close",
+            "data-role": "wechat-guide-close",
+            "aria-label": "关闭引导",
+          },
+          ["知道了"],
+        ),
+      ],
+    );
+    wechatGuideEl
+      .querySelector('[data-role="wechat-guide-close"]')
+      .addEventListener("click", () => {
+        wechatGuideEl.hidden = true;
+      });
+    // 点遮罩空白处也可关闭
+    wechatGuideEl.addEventListener("click", (e) => {
+      if (e.target === wechatGuideEl) wechatGuideEl.hidden = true;
+    });
+    document.body.appendChild(wechatGuideEl);
+  }
+
+  // ---- toast（state.md §方案架构 5） ----
+
+  let toastTimer = null;
+
+  /** 底部浮出提示，2.5s 自动消失（CSS animation）；重复调用复用单例并刷新计时 */
+  function showToast(msg) {
+    let toast = document.querySelector('[data-role="download-toast"]');
+    if (!toast) {
+      toast = el("div", { class: "download-toast", "data-role": "download-toast" });
+      document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    // 强制 reflow 重启 CSS 入场动画
+    toast.classList.remove("is-visible");
+    void toast.offsetWidth;
+    toast.classList.add("is-visible");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2500);
+  }
+
+  /**
+   * 三卡接线共用点击绑定：微信分支 → 引导遮罩（不触发下载）；
+   * 非微信 → 状态机 loading → shareOrDownload → 回 idle。
+   * 进行中（loading）重复点击无副作用（按钮 disabled + 状态守卫双保险）。
+   */
+  function bindDownloadClick(btnCtl, url, filename, opts = {}) {
+    const timeoutMs = opts.timeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    const withProgress = Boolean(opts.withProgress);
+    btnCtl.btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (isWeChat()) {
+        showWeChatGuide();
+        return;
+      }
+      if (btnCtl.btn.dataset.downloadState === "loading") return; // STATE_INVARIANT 防重
+      btnCtl.setState("loading");
+      try {
+        await shareOrDownload(url, filename, {
+          timeoutMs,
+          onProgress: withProgress ? (pct) => btnCtl.setState("loading", `${pct}%`) : undefined,
+        });
+      } catch (err) {
+        // shareOrDownload 已兜底全部失败路径；此处防御未预期异常，不静默卡 loading
+        console.warn("[gallery] 下载未预期失败:", err);
+        showToast("下载未完成，请重试");
+      } finally {
+        // FETCH_FAILED 契约：按钮回 idle（含兜底 opened 路径）；用户取消 share 同样回 idle
+        btnCtl.setState("idle");
+      }
+    });
   }
 
   // ============================================================================
@@ -512,6 +810,16 @@
     // 右上序号
     photoUnit.appendChild(el("div", { class: "photo-rank" }, [`${photo.rank} / ${totalPhotos}`]));
 
+    // 下载按钮（photo-rank 下方）。original 空串 → 不渲染死链下载控件（场景 11.P4）
+    if (photo.original) {
+      const dl = createDownloadButton({
+        role: "photo-download",
+        ariaLabel: `下载这张照片：${photo.title || "拾光"}`,
+      });
+      bindDownloadClick(dl, photo.original, `拾光-${day.pickDate}-${photo.rank}.jpg`);
+      photoUnit.appendChild(dl.btn);
+    }
+
     // 底部文字（title + narrative + dateline）
     const textChildren = [
       el("h2", { class: "photo-title", "data-role": "title" }, [photo.title || "拾光"]),
@@ -655,6 +963,20 @@
     });
     unit.appendChild(fullscreenBtn);
     unit.appendChild(videoHint);
+    // 下载按钮（声音按钮下方同列）。mp4 空串 → 不渲染死链下载控件（场景 11.P1）；
+    // 300s 超时 + onProgress 回报 loading 百分比（aria-valuenow 同步，场景 3.P4）
+    if (video.mp4) {
+      const dl = createDownloadButton({
+        role: "video-download",
+        ariaLabel: `下载这个视频：${video.title || "未命名视频"}`,
+      });
+      const baseName = video.title ? sanitizeFilename(video.title) : `拾光视频-${video.themeKey}`;
+      bindDownloadClick(dl, video.mp4, `${baseName}.mp4`, {
+        timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS,
+        withProgress: true,
+      });
+      unit.appendChild(dl.btn);
+    }
 
     // 底部文字 + 进度条
     const metaParts = [];
@@ -721,9 +1043,29 @@
     });
     unit.appendChild(img);
 
-    unit.appendChild(
-      el("div", { class: "save-hint", "data-role": "save-hint" }, ["长按图片保存到相册"]),
-    );
+    // 底部下载按钮排（取代旧 save-hint「长按图片保存到相册」——契约演进见 state.md 实现计划 3：
+    // 长按语义被下载按钮覆盖且优于长按，S6.PM2 已按契约演进协议同步反转）。
+    // 竖版主按钮常驻（本卡仅在 wallpaperPortrait 非空时渲染）；横版次按钮仅直链非空时渲染（场景 11.P2）。
+    const bar = el("div", { class: "download-bar" });
+    const portraitDl = createDownloadButton({
+      role: "wallpaper-download-portrait",
+      ariaLabel: "下载手机竖版壁纸",
+    });
+    bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
+    bar.appendChild(portraitDl.btn);
+    if (day.wallpaperLandscape) {
+      const landscapeDl = createDownloadButton({
+        role: "wallpaper-download-landscape",
+        ariaLabel: "下载桌面横版壁纸",
+      });
+      bindDownloadClick(
+        landscapeDl,
+        day.wallpaperLandscape,
+        `拾光壁纸-${day.pickDate}-桌面横版.jpg`,
+      );
+      bar.appendChild(landscapeDl.btn);
+    }
+    unit.appendChild(bar);
 
     return unit;
   }

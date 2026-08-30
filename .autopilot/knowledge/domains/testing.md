@@ -148,3 +148,10 @@
 1. 判别：两个 getfqdn 探针对比即实锤；`--bind 127.0.0.1` 可绕（fqdn("127.0.0.1") 快），但改不了 Playwright 配置命令时无效。
 2. 通用解：`sitecustomize.py` 桩掉 `socket.getfqdn`（返回 name 或 "localhost"，server_name 仅日志/CGI 用），`PYTHONPATH=/tmp/xxx` 注入全部 python 子进程，零仓库改动：`PYTHONPATH=... npx playwright test`。
 3. 关联坑：Claude Code Bash 沙箱会拦截 localhost 端口绑定（后台 server 起了也不 LISTEN）——跑 e2e 需 dangerouslyDisableSandbox；CI Linux 无此二坑。
+## e2e 自 spawn python http.server 必须显式 --bind 127.0.0.1
+
+[2026-08-30] <!-- tags: playwright, e2e, python-http-server, 端口绑定 -->
+
+- **Scenario**：测试代码（或 playwright webServer）自起 python `http.server` 做静态托管时
+- **Lesson**：无 `--bind` 的默认 dual-stack 绑定在本机会进入半死态（连接 SYN 全丢、服务慢启动），导致首几个用例 waitForSelector 超时——表现为「全量跑挂、单文件跑过」的顺序性 flake。显式 `--bind 127.0.0.1` 一并绕过 dual-stack 与启动期域名解析两个坑；webServer 卡死时不必改配置：预启同端口实例，playwright `reuseExistingServer` 会直接复用
+- **Evidence**：gallery-stream 既有测试 S1.PM1-4 全量跑 4 挂、单文件 28/28 全过；红队 3 个新文件全部 --bind 127.0.0.1 无此问题；预启 8088 实例后 webServer 15s 超时消失（核对锚点：2026-08-30）

@@ -469,19 +469,28 @@ describe("[S6.PM1/S6.PM2] 当日流末尾 wallpaper-card 含 img + save-hint", (
     expect(lastRole).toBe("wallpaper-card");
   });
 
-  it("wallpaper-card 含可保存 img + save-hint", async ({ page }) => {
+  it("wallpaper-card 含可保存 img + 下载按钮（save-hint 已契约演进删除）", async ({ page }) => {
     await page.goto(`${STATIC_BASE}/#/`);
     await page.waitForSelector('[data-role="wallpaper-card"]', { timeout: 8000 });
 
     const card = page.locator('[data-role="wallpaper-card"]').first();
     const img = card.locator("img").first();
     const src = await img.getAttribute("src");
+    // 契约演进（2026-08-29，state.md 实现计划 3 / testing.md [2026-07-02] 协议）：「长按图片保存到相册」
+    // 提示（save-hint）被下载按钮覆盖且优于长按语义，机械同步反转为 save-hint 不存在 + 下载按钮存在。
     const saveHintExists = await card.locator('[data-role="save-hint"]').count();
+    const downloadBtnExists = await card
+      .locator('[data-role="wallpaper-download-portrait"]')
+      .count();
 
-    await writeArtifact("S6.PM2", JSON.stringify({ src, saveHintExists }));
+    await writeArtifact("S6.PM2", JSON.stringify({ src, saveHintExists, downloadBtnExists }));
     expect(src, "wallpaper-card img src 非空").toBeTruthy();
     expect(src!.length).toBeGreaterThanOrEqual(1);
-    expect(saveHintExists, "save-hint 必须存在").toBeGreaterThanOrEqual(1);
+    expect(saveHintExists, "save-hint 必须不存在（契约演进）").toBe(0);
+    expect(
+      downloadBtnExists,
+      "wallpaper-download-portrait 按钮必须存在（取代 save-hint）",
+    ).toBeGreaterThanOrEqual(1);
   });
 });
 
