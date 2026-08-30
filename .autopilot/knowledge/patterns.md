@@ -97,3 +97,6 @@
 | 2026-05-01 | pnpm onlyBuiltDependencies | [release-ops](domains/release-ops.md) |
 | 2026-05-01 | Vitest workspace 根安装 | [testing](domains/testing.md) |
 | 2026-05-01 | Biome organizeImports 顶层键 | [testing](domains/testing.md) |
+
+| 2026-08-31 | scroll anchoring 使旋转保持修复桌面观测等价（真机 WebKit 才漂移） | [gallery](domains/gallery.md) |
+| 2026-08-31 | Playwright 全屏态窗口操作 CDP 拒绝 → 契约 seam stub | [testing](domains/testing.md) |
