@@ -155,3 +155,13 @@
 - **Scenario**：测试代码（或 playwright webServer）自起 python `http.server` 做静态托管时
 - **Lesson**：无 `--bind` 的默认 dual-stack 绑定在本机会进入半死态（连接 SYN 全丢、服务慢启动），导致首几个用例 waitForSelector 超时——表现为「全量跑挂、单文件跑过」的顺序性 flake。显式 `--bind 127.0.0.1` 一并绕过 dual-stack 与启动期域名解析两个坑；webServer 卡死时不必改配置：预启同端口实例，playwright `reuseExistingServer` 会直接复用
 - **Evidence**：gallery-stream 既有测试 S1.PM1-4 全量跑 4 挂、单文件 28/28 全过；红队 3 个新文件全部 --bind 127.0.0.1 无此问题；预启 8088 实例后 webServer 15s 超时消失（核对锚点：2026-08-30）
+
+## Playwright 真全屏态窗口操作被 CDP 拒绝 + 契约 seam stub 模式
+
+[2026-08-31] <!-- tags: playwright, fullscreen, e2e, 红队, stub -->
+
+- **Scenario**：e2e 需在「元素真全屏」期间做视口翻转/窗口操作；或任何「契约以某全局状态非空定义，但真状态与驱动操作互斥」的场景
+- **Lesson**：Chromium 对 element-fullscreen 页面拒绝窗口尺寸操作（CDP 报 "restore it to normal state first"）——真全屏与视口翻转在协议层互斥，属驱动不可能性而非实现 bug。绕过模式：先真全屏一次背书状态真实可达 → 退出 → `Object.defineProperty`（configurable: true）stub 契约规定的观测属性维持前提 → 执行真实驱动 → `Reflect.deleteProperty` 还原。stub 前后各加硬断言排除「退出/副作用假绿」，收尾必须还原避免污染同 worker 后续用例；断言取「用户可感契约」而非依赖 UA 行为的机制观测。
+- **Evidence**：gallery OR-C4 两轮修复——原「真全屏中 setViewportSize」被 CDP 拒绝；探针证伪漂移前提后断言反转为「不被甩离视频单元」；`document.fullscreenElement` stub + 真实翻转通过（核对锚点：2026-08-31 apps/gallery/__tests__/gallery-orientation.e2e.acceptance.test.ts）
+
+<!-- SIZE WARNING (2026-08-31): 本文件已超 150 行，建议下次整理时拆分或裁剪旧条目 -->

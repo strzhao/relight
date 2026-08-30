@@ -27,6 +27,17 @@
  *   #/                    → stream scrollTop = 0
  *   #/?date=YYYY-MM-DD    → 该 date-separator scrollIntoView
  *   #/video/<id>          → 该 video 单元 scrollIntoView + 自动 play
+ *
+ * 横竖屏重锚（orientation re-anchor，行为契约 OR-C1..C4，红队/QA 断言依据）：
+ *   根因——旋转时 100dvh 单元高度突变而 scrollTop 按绝对像素保留 + mandatory snap
+ *   re-snap 策略不可靠，翻转后常吸附到错误相邻单元，hudIO 随后把错误单元当 best
+ *   写进 HUD 日期与 URL 深链（300ms debounce），错误被固化到地址栏。
+ *   契约：
+ *     OR-C1 朝向翻转 settle（≥800ms）后视口命中的 [data-stream-unit] 与翻转前同一单元
+ *     OR-C2 重锚 settle 后 URL hash 与翻转前一致（不被过渡态改写）
+ *     OR-C3 同朝向 resize（toolbar 折叠等，高度 ±10% 内）不触发单元级滚动跳变
+ *     OR-C4 视频全屏期间（document.fullscreenElement 非空）翻转不执行重锚
+ *   纯 app.js 行为增强：不改 DOM 契约、不改深链路由语义、不改 CSS 布局。
  */
 
 (() => {
@@ -1316,6 +1327,8 @@
     lastSyncedUnitKey = key;
     clearTimeout(urlUpdateTimer);
     urlUpdateTimer = setTimeout(() => {
+      // 闸门①复查：关闭「翻转/深链前调度、翻转后 300ms 落盘」的竞态缝（OR-C2）
+      if (Date.now() < programmaticScrollUntil) return;
       if (window.location.hash !== hash) {
         history.replaceState(null, "", hash); // 闸门③：不触发 hashchange，根上断环
       }
@@ -1349,6 +1362,12 @@
           const dayDate = best.dataset.dayDate;
           if (dayDate) {
             hudDateEl.textContent = fmtPickDateCn(dayDate);
+          }
+          // 活跃单元跟踪（横竖屏重锚目标，OR-C1）：双守卫防过渡态污染锚点——
+          //   ① mandatory snap 静止态单元占比必然 ≥0.5，过渡中间态不更新；
+          //   ② programmatic 闸门窗口内（深链滚动/翻转重锚）不更新。
+          if (bestRatio >= 0.5 && Date.now() >= programmaticScrollUntil) {
+            activeUnit = best;
           }
           scheduleUrlSync(best); // URL 随滚动联动（S18）
         }
@@ -1443,6 +1462,116 @@
   }
 
   // ============================================================================
+  // 横竖屏重锚（orientation re-anchor，行为契约 OR-C1..C4 见文件头）
+  //
+  //   跟踪用户当前阅读单元（activeUnit）→ 检测朝向翻转 → 布局稳定后瞬时滚回同一
+  //   单元，整个过渡窗口由既有 programmaticScrollUntil 闸门（闸门①）覆盖，
+  //   防 URL/HUD 被过渡态污染。仅朝向翻转触发重锚，同朝向 resize 不动。
+  // ============================================================================
+
+  /** 用户当前阅读单元（hudIO 选 best 处同步，重锚目标） */
+  let activeUnit = null;
+  /** 上一次朝向（innerHeight >= innerWidth，与 CSS @media (orientation: portrait) 同语义） */
+  let lastPortrait = null;
+  /** 用户手势进行中（stream pointerdown/touchstart 置位，window 级抬起/取消复位） */
+  let userGestureActive = false;
+  /** settle 重锚计时器（250ms 防抖锚 + 800ms 兜底锚） */
+  let settleAnchorTimer = null;
+  let fallbackAnchorTimer = null;
+  /** resize/手势监听已接线标记（retry 重入 init 防重复注册，同 documentFullscreenWired） */
+  let orientationAnchorWired = false;
+
+  /** 单元在 stream 滚动坐标系内的目标 scrollTop（几何计算，不依赖 offsetParent） */
+  function getStreamScrollTopFor(unit) {
+    const unitRect = unit.getBoundingClientRect();
+    const streamRect = streamEl.getBoundingClientRect();
+    return unitRect.top - streamRect.top + streamEl.scrollTop;
+  }
+
+  /**
+   * 瞬时滚回 activeUnit（幂等：与目标差 < 4px 视为已就位 no-op）。
+   * 守卫序：错误态 hidden → 视频全屏中（OR-C4）→ 锚点失效 → 用户手势进行中。
+   * 执行：style.scrollBehavior = "auto" 覆盖 CSS scroll-behavior: smooth（否则直赋
+   * scrollTop 仍会平滑动画）→ 直赋 scrollTop → 下一帧还原样式。
+   * 成功后设 900ms programmatic 闸门 + 清未落盘的 URL debounce，防地址栏被改写。
+   */
+  function restoreActiveUnit() {
+    if (streamEl.hidden) return; // 错误态（S11）流不可见，不重锚
+    if (document.fullscreenElement || document.webkitFullscreenElement) return; // OR-C4
+    if (!activeUnit || !activeUnit.isConnected) return; // 锚点缺失/已随增量挂载卸载
+    if (userGestureActive) return; // 用户拖拽中，不与其对抗
+
+    const target = getStreamScrollTopFor(activeUnit);
+    if (Math.abs(streamEl.scrollTop - target) < 4) return; // 已就位
+
+    streamEl.style.scrollBehavior = "auto";
+    streamEl.scrollTop = target;
+    requestAnimationFrame(() => {
+      streamEl.style.scrollBehavior = "";
+    });
+
+    // 闸门①覆盖整个过渡窗口：挡同帧/后续过渡态 hudIO 改 URL、改 activeUnit
+    programmaticScrollUntil = Date.now() + 900;
+    clearTimeout(urlUpdateTimer); // 防翻转前已调度的 debounce 把错误 hash 落盘
+  }
+
+  /** 清理本翻转窗口内所有待执行重锚（用户开始手势即放弃，避免手势后突跳） */
+  function cancelPendingReanchor() {
+    clearTimeout(settleAnchorTimer);
+    clearTimeout(fallbackAnchorTimer);
+    settleAnchorTimer = null;
+    fallbackAnchorTimer = null;
+  }
+
+  /**
+   * 朝向翻转检测 + 稳定窗口多重锚（幂等）：
+   *   翻转 → rAF 立即锚一次 + 250ms 防抖 settle 锚（iOS Safari dvh 旋转后二段更新）
+   *   + 800ms 兜底再锚后清理。翻转瞬间即设闸门：resize 在渲染步骤先于同帧 IO 回调
+   *   派发，可挡住过渡中间态 hudIO 污染锚点/URL。
+   *   仅朝向翻转触发（toolbar 折叠等同朝向 resize 直接 return，OR-C3 不引入新跳变）。
+   */
+  function initOrientationAnchor() {
+    if (orientationAnchorWired) return; // retry 重入 init → 不重复注册监听
+    orientationAnchorWired = true;
+    // 用户手势让位：手势起点置位 + 取消待执行重锚；window 级抬起/取消复位
+    const onGestureStart = () => {
+      userGestureActive = true;
+      cancelPendingReanchor();
+    };
+    streamEl.addEventListener("pointerdown", onGestureStart, { passive: true });
+    streamEl.addEventListener("touchstart", onGestureStart, { passive: true });
+    const onGestureEnd = () => {
+      userGestureActive = false;
+    };
+    window.addEventListener("pointerup", onGestureEnd, { passive: true });
+    window.addEventListener("touchend", onGestureEnd, { passive: true });
+    window.addEventListener("pointercancel", onGestureEnd, { passive: true });
+
+    lastPortrait = window.innerHeight >= window.innerWidth;
+
+    window.addEventListener("resize", () => {
+      const portrait = window.innerHeight >= window.innerWidth;
+      if (portrait === lastPortrait) return; // 同朝向 resize（OR-C3）→ 不重锚
+      lastPortrait = portrait;
+
+      // 翻转即设闸门 + 清未落盘 debounce（resize 先于同帧 IO 回调派发）
+      programmaticScrollUntil = Date.now() + 900;
+      clearTimeout(urlUpdateTimer);
+      cancelPendingReanchor();
+
+      // ① rAF 立即锚（此时布局已按新视口重排）
+      requestAnimationFrame(() => restoreActiveUnit());
+      // ② 250ms 防抖 settle 锚（dvh / URL bar 二段变化）
+      settleAnchorTimer = setTimeout(() => restoreActiveUnit(), 250);
+      // ③ 800ms 兜底再锚后清理（OR-C1 settle 窗口下界）
+      fallbackAnchorTimer = setTimeout(() => {
+        restoreActiveUnit();
+        cancelPendingReanchor();
+      }, 800);
+    });
+  }
+
+  // ============================================================================
   // 错误态（S11）
   // ============================================================================
 
@@ -1490,6 +1619,7 @@
       hideLoading();
       mountInitial();
       setupHudScroll();
+      initOrientationAnchor(); // 横竖屏翻转重锚（OR-C1..C4）
 
       // HUD IO 观察所有已挂载单元（增量挂载的新单元也需观察——用 mutation observer）
       const mo = new MutationObserver((mutations) => {

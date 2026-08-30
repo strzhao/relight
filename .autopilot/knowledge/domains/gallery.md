@@ -59,3 +59,11 @@
 - **Scenario**：静态站要在 iPhone 上提供图片/视频「保存到相册」能力时
 - **Lesson**：iOS Safari 对跨域 URL 忽略 `<a download>`；唯一可靠路径是 Web Share API level 2（`navigator.share({files})`，iOS 15+）弹系统分享面板。三个配套坑：① `AbortSignal.timeout` 需 Safari 16+，iOS 15 同步抛 TypeError → 手动 AbortController + setTimeout；② fetch 失败后兜底 `window.open` 会因 transient activation 过期被弹窗拦截（返回 null）→ 级联 `location.href` 当前页导航；③ 微信/企微内置浏览器（群推送链接第一跳）无 Web Share → 检测 MicroMessenger UA 弹「在 Safari 中打开」引导遮罩，深链 hash 保留回原位。跨域 fetch 需目标桶配 CORS（公有读只放行标签加载，不放行 XHR）
 - **Evidence**：画廊下载功能 48 条验收谓词全过；Playwright 用 addInitScript stub share/canShare + UA 注入覆盖微信分支与取消分享路径（核对锚点：2026-08-30 apps/gallery/app.js）
+
+## 滚动吸附流的横竖屏翻转重锚与 Chromium 观测等价边界
+
+[2026-08-31] <!-- tags: gallery, scroll-snap, orientation, 移动端, 测试边界 -->
+
+- **Scenario**：全屏滚动吸附流（scroll-snap + 视口高单元）在手机旋转后当前屏跳变；或在桌面引擎里验证「旋转保持位置」类修复时
+- **Lesson**：旋转跳变机理是 scrollTop 绝对像素保留 + re-snap 吸错单元，但**只有真机 WebKit 可复现**——Chromium 默认开 scroll anchoring 且保留 snap target，翻转时滚动位置被自动补偿到新吸附位，「修复生效 ≡ 无修复 ≡ 浏览器自然保持」三者观测等价，桌面 e2e 无法区分。此类修复桌面测试只能做回归保护+契约固化，真实载荷必须真机验证；红队断言若以「位置会漂移」为前提，先探针验证前提在测试引擎中成立，不成立则反转为用户可感契约。修复模式：跟踪当前阅读单元 + 仅朝向翻转触发（同朝向 resize 零副作用）+ 瞬时回滚（样式覆盖 scroll-behavior: smooth 后直赋 scrollTop）+ 复用既有 programmatic 滚动闸门防 URL 被过渡态固化。
+- **Evidence**：探针（吞 resize 监听使修复死亡后翻转）scrollTop 仍被精确补偿（1688→780=2×390；8580→18568=22×844，均恰为新朝向吸附位）；orientation re-anchor 套件 64/64 绿但真机验证仍必要（核对锚点：2026-08-31 apps/gallery orientation re-anchor 区段）
