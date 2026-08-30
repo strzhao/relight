@@ -66,6 +66,9 @@
 
 ### 模式 (patterns.md)
 
+- [2026-08-31] Chromium scroll anchoring 使「旋转保持」修复桌面观测等价（漂移只在真机 WebKit）→ [gallery](domains/gallery.md)
+- [2026-08-31] Playwright 全屏态窗口操作 CDP 拒绝 → 契约 seam stub 绕过模式 → [testing](domains/testing.md)
+
 - [2026-08-30] 深链 URL id 段跨端契约（推送主键错配=querySelector 静默 null；无线索深链须全量挂载回退；unmatchedMounted 不可作循环条件）→ [gallery](domains/gallery.md)
 - [2026-08-30] cos-nodejs-sdk-v5 getBucketCors 回读复数键，幂等判存与单测须双键兼容 → [gallery](domains/gallery.md)
 - [2026-08-30] manifest 按约定 key 拼 URL 会给从未生成的对象造死链（确定性重合成补救）→ [gallery](domains/gallery.md)
