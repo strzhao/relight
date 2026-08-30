@@ -12,10 +12,16 @@
  *     data-load-state = loading | loaded | error
  *   photo 单元额外：data-day-date / data-day-index / data-photo-rank / data-photo-id / data-takenat-absent
  *   video 单元额外：data-media-type="video" / data-video-id
- *   wallpaper 单元：data-role="wallpaper-card" + 底部 download-bar
+ *   wallpaper 单元：data-role="wallpaper-card" + 右下 action-rail
  *     （旧 [data-role="save-hint"] 已按契约演进删除，被下载按钮取代——state.md 实现计划 3）
  *   下载：[data-role="photo-download" | "video-download" | "wallpaper-download-portrait"
  *     | "wallpaper-download-landscape"]，均带 aria-label + data-download-state 状态机
+ *
+ * 动作栏（契约演进 [2026-08-30]，state.md 契约演进节）：
+ *   三卡操作按钮统一收进右下竖排 [data-role="action-rail"]（下载恒在栏最下方）；
+ *   图标全部内联 SVG（历史 emoji/字符图标 🔇/⛶/⬇ 已移除，声音按钮机读态
+ *   改由 data-sound-state="muted|unmuted" 承载）；下载文案「下载」→「保存」；
+ *   进全屏不再强制出声，全屏内启用原生 controls（可拖进度/自行开声）。
  *
  * 深链路由（state.md §深链路由契约）：
  *   #/                    → stream scrollTop = 0
@@ -151,11 +157,43 @@
   }
 
   // ============================================================================
+  // SVG 图标系统（契约演进 [2026-08-30]：替换历史 emoji/字符图标 🔇/🔊/⛶/⬇——
+  // 彩色 emoji 与暖黑玻璃拟态设计体系冲突，且各平台渲染不一致。
+  // 统一 stroke 风格：currentColor 继承按钮色，1.75 线宽，24 viewBox）
+  // ============================================================================
+
+  const ICONS = {
+    download:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
+    soundOff:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>',
+    soundOn:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+    fullscreen:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
+  };
+
+  /** 图标 span 工厂：extraClass 用于声音按钮双图标按 data-sound-state 切换显隐 */
+  function svgIcon(name, extraClass) {
+    const span = el("span", {
+      class: `btn-icon${extraClass ? ` ${extraClass}` : ""}`,
+      "aria-hidden": "true",
+    });
+    span.innerHTML = ICONS[name];
+    return span;
+  }
+
+  /** 三卡统一右下竖排动作栏容器（契约演进 [2026-08-30]） */
+  function createActionRail(children) {
+    return el("div", { class: "action-rail", dataset: { role: "action-rail" } }, children);
+  }
+
+  // ============================================================================
   // 下载基础设施（state.md §方案架构 1/2/4/5）
   //
   //   shareOrDownload(url, filename, opts) — fetch → Web Share（iOS 15+ 存相册/文件）
   //     → 降级 a.download blob（桌面/旧 iOS）→ fetch 失败兜底 window.open 直链
-  //   createDownloadButton — 圆形玻璃按钮 + data-download-state 状态机
+  //   createDownloadButton — 胶囊玻璃按钮 + data-download-state 状态机
   //   isWeChat / showWeChatGuide — 微信内置浏览器「在 Safari 中打开」引导遮罩
   //   showToast — 底部浮出提示，2.5s 自动消失
   // ============================================================================
@@ -164,8 +202,10 @@
   const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
   const VIDEO_DOWNLOAD_TIMEOUT_MS = 300000;
 
-  /** 微信引导遮罩文案（纯文字 + CSS 箭头，不引图片资源） */
-  const WECHAT_GUIDE_MESSAGE = "点击右下角「···」→ 在 Safari 中打开，即可下载保存";
+  /** 微信引导遮罩文案（纯文字 + CSS 箭头，不引图片资源）。
+   *  契约勘误 [2026-08-30]：「···」入口在微信内置浏览器右上角，旧文案「右下角」
+   *  与 ↗ 箭头自相矛盾，已修正 */
+  const WECHAT_GUIDE_MESSAGE = "点击右上角「···」，选择「在 Safari 中打开」，即可下载保存";
 
   /** 手动 AbortController + setTimeout 实现超时信号——
    *  AbortSignal.timeout 需 Safari 16+，iOS 15 无此 API 会同步抛 TypeError，必须手动实现 */
@@ -306,20 +346,25 @@
    * 下载按钮工厂（state.md §方案架构 2）。
    * data-download-state ∈ {idle, loading, error}；loading 时 disabled + CSS spinner，
    * 传入百分比文本时同步 aria-valuenow（0-100）供自动化断言。
+   *
+   * 契约演进 [2026-08-30]：文案「下载」→「保存」（iOS 分享面板的实际动作即存储，
+   * 「下载」对手机用户无落点感知）；icon 换内联 SVG；新增 config.label / config.variant
+   * （"primary" 实心品牌色 | "ghost" 描边次级）支撑壁纸卡语义化双按钮。
    */
   function createDownloadButton(config) {
+    const label = config.label || "保存";
     const btn = el(
       "button",
       {
         type: "button",
-        class: "download-btn",
+        class: `download-btn${config.variant ? ` download-btn--${config.variant}` : ""}`,
         "data-role": config.role,
         "aria-label": config.ariaLabel,
       },
       [
         el("span", { class: "download-btn-spinner", "aria-hidden": "true" }),
-        el("span", { class: "download-btn-icon", "aria-hidden": "true" }, ["⬇"]),
-        el("span", { class: "download-btn-text" }, ["下载"]),
+        svgIcon("download"),
+        el("span", { class: "download-btn-text" }, [label]),
       ],
     );
     btn.dataset.downloadState = "idle";
@@ -335,7 +380,7 @@
         }
       } else {
         // 离开 loading → 复位文案与 aria-valuenow
-        btn.querySelector(".download-btn-text").textContent = "下载";
+        btn.querySelector(".download-btn-text").textContent = label;
         btn.removeAttribute("aria-valuenow");
       }
     }
@@ -430,10 +475,16 @@
       if (btnCtl.btn.dataset.downloadState === "loading") return; // STATE_INVARIANT 防重
       btnCtl.setState("loading");
       try {
-        await shareOrDownload(url, filename, {
+        const result = await shareOrDownload(url, filename, {
           timeoutMs,
           onProgress: withProgress ? (pct) => btnCtl.setState("loading", `${pct}%`) : undefined,
         });
+        // a.download 降级落盘路径补成功反馈（契约演进 [2026-08-30]：原静默回 idle，
+        // 用户不确定发生了什么）。shared 路径保持静默——Web Share resolve 无法区分
+        // 取消/成功，且系统分享面板已有反馈；opened 路径 shareOrDownload 内已 toast
+        if (result === "downloaded") {
+          showToast("已开始下载，可在浏览器下载列表查看");
+        }
       } catch (err) {
         // shareOrDownload 已兜底全部失败路径；此处防御未预期异常，不静默卡 loading
         console.warn("[gallery] 下载未预期失败:", err);
@@ -581,9 +632,10 @@
     }
   }
 
-  /** 退出全屏恢复：回静音 + 刷新声音按钮 + 解横屏锁 */
+  /** 退出全屏恢复：回静音 + 移除原生控制条 + 刷新声音按钮 + 解横屏锁 */
   function restoreAfterVideoFullscreenExit() {
     if (!lastFullscreenVideo) return;
+    lastFullscreenVideo.controls = false; // 契约演进 [2026-08-30]：全屏内原生控制条随退出移除
     lastFullscreenVideo.muted = true;
     if (fullscreenSoundRestore) fullscreenSoundRestore();
     lastFullscreenVideo = null;
@@ -616,22 +668,26 @@
    *   2. iOS 原生 webkitEnterFullscreen（iPhone WKWebView 无 Element.requestFullscreen）
    *      → 调用（try/catch），随后 try 锁横屏；退出走 webkitendfullscreen / 前缀事件
    *   3. 两者均无 / 调用同步 throw → hint 降级
-   * 进全屏前先出声：muted=false + 刷新按钮 + 未播则手势内起播（catch 忽略）。
+   *
+   * 契约演进 [2026-08-30]：
+   *   - 不再强制出声（旧行为：进全屏 muted=false 自动开声，安静场合惊吓）——
+   *     保持用户当前声音态，想听声在全屏内用原生控制条自行开启
+   *   - 进全屏启用原生 controls（可拖进度/调声；iOS 原生全屏自带控制条，无影响），
+   *     退出全屏时 restore 移除；任何降级路径（reject/throw/不支持）都必须还原 controls=false
+   *   - 未播则手势内起播保留（catch 忽略）
    *
    * 顺序说明：标准优先可让 Chromium 系全程走 fullscreenchange（Chromium 的
    * webkitEnterFullscreen 是 legacy 路径，退出只派发前缀事件）；iOS 无标准
    * API 自然落入 webkit 兜底，行为不变。
    *
    * @param videoEl 目标视频元素
-   * @param onSoundChange 静音态变化后的按钮刷新回调（卡内 updateSoundBtn）
    * @param hintEl 降级 toast 节点（仅降级路径显示）
    */
-  function enterVideoFullscreen(videoEl, onSoundChange, hintEl) {
+  function enterVideoFullscreen(videoEl, hintEl) {
     ensureDocumentFullscreenListener();
 
-    // 进全屏自动出声 + 未播则起播
-    videoEl.muted = false;
-    onSoundChange();
+    // 全屏内原生控制条（拖进度/调声）+ 未播则起播；声音态保持用户当前选择
+    videoEl.controls = true;
     if (videoEl.paused === true) {
       const p = videoEl.play();
       if (p && typeof p.then === "function") p.catch(() => {});
@@ -650,7 +706,8 @@
         req
           .then(() => tryLockLandscape())
           .catch(() => {
-            // FULLSCREEN_REJECTED → hint 降级
+            // FULLSCREEN_REJECTED → 还原控制条 + hint 降级
+            videoEl.controls = false;
             showVideoHint(hintEl);
           });
       } else {
@@ -666,7 +723,8 @@
   /** legacy webkitEnterFullscreen 路径（iOS 原生播放器；不可用则 hint 降级） */
   function enterVideoFullscreenViaWebkit(videoEl, hintEl) {
     if (typeof videoEl.webkitEnterFullscreen !== "function") {
-      // 路径 3：FULLSCREEN_UNSUPPORTED → hint 降级
+      // 路径 3：FULLSCREEN_UNSUPPORTED → 还原控制条 + hint 降级
+      videoEl.controls = false;
       showVideoHint(hintEl);
       return;
     }
@@ -674,7 +732,8 @@
       videoEl.webkitEnterFullscreen();
       tryLockLandscape();
     } catch (e) {
-      // 同步 throw → hint 降级
+      // 同步 throw → 还原控制条 + hint 降级
+      videoEl.controls = false;
       showVideoHint(hintEl);
     }
   }
@@ -807,17 +866,21 @@
     // 渐变遮罩
     photoUnit.appendChild(el("div", { class: "photo-mask" }));
 
-    // 右上序号
-    photoUnit.appendChild(el("div", { class: "photo-rank" }, [`${photo.rank} / ${totalPhotos}`]));
+    // 右上序号（数据 rank 0-based，展示 1-based——"1 / N"；data-photo-rank 属性与
+    // 深链 #/?rank= 保持原始 rank 不变，已分享链接不受影响）
+    photoUnit.appendChild(
+      el("div", { class: "photo-rank" }, [`${photo.rank + 1} / ${totalPhotos}`]),
+    );
 
-    // 下载按钮（photo-rank 下方）。original 空串 → 不渲染死链下载控件（场景 11.P4）
+    // 下载按钮入右下动作栏（契约演进 [2026-08-30]：原挂右上 photo-rank 下方）。
+    // original 空串 → 不渲染死链下载控件（场景 11.P4）
     if (photo.original) {
       const dl = createDownloadButton({
         role: "photo-download",
-        ariaLabel: `下载这张照片：${photo.title || "拾光"}`,
+        ariaLabel: `保存这张照片：${photo.title || "拾光"}`,
       });
       bindDownloadClick(dl, photo.original, `拾光-${day.pickDate}-${photo.rank}.jpg`);
-      photoUnit.appendChild(dl.btn);
+      photoUnit.appendChild(createActionRail([dl.btn]));
     }
 
     // 底部文字（title + narrative + dateline）
@@ -894,8 +957,10 @@
       // 视频 404 → 单元 error 态（S13.PM1），回退 cover 静图（poster 仍显示）
       unit.dataset.loadState = "error";
     });
-    // 单击切换 muted（S4.PM3）
+    // 单击切换 muted（S4.PM3）。全屏内原生控制条接管（controls=true 时点控制条
+    // 也会触发本监听，误把视频静音）→ 全屏态跳过，声音由原生音量键控制
     videoEl.addEventListener("click", () => {
+      if (videoEl.controls) return;
       videoEl.muted = !videoEl.muted;
       updateSoundBtn();
     });
@@ -906,26 +971,27 @@
     // 顶部 tag
     unit.appendChild(el("div", { class: "video-tag" }, [themeLabel]));
 
-    // 声音按钮
+    // 声音按钮（契约演进 [2026-08-30]：emoji textContent 🔇/🔊 → 双 SVG 图标按
+    // data-sound-state 切换显隐；机读态改由 data-sound-state 承载，同步 FS.PM3）
     const soundBtn = el(
       "button",
       {
         type: "button",
-        class: "video-sound",
+        class: "rail-btn video-sound",
         "data-role": "video-sound",
         "aria-label": "切换声音",
       },
-      ["🔇"],
+      [svgIcon("soundOff", "btn-icon--muted"), svgIcon("soundOn", "btn-icon--unmuted")],
     );
+    soundBtn.dataset.soundState = "muted";
     function updateSoundBtn() {
-      soundBtn.textContent = videoEl.muted ? "🔇" : "🔊";
+      soundBtn.dataset.soundState = videoEl.muted ? "muted" : "unmuted";
     }
     soundBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       videoEl.muted = !videoEl.muted;
       updateSoundBtn();
     });
-    unit.appendChild(soundBtn);
 
     // 降级 toast（当前环境不支持全屏 → 提示横屏观看，默认不可见）
     const videoHint = el(
@@ -938,45 +1004,48 @@
       ["当前环境不支持全屏，建议横屏观看"],
     );
 
-    // 全屏按钮（声音按钮正下方同列；click stopPropagation 不触发视频静音切换）
+    // 全屏按钮（click stopPropagation 不触发视频静音切换）
     const fullscreenBtn = el(
       "button",
       {
         type: "button",
-        class: "video-fullscreen",
+        class: "rail-btn video-fullscreen",
         "data-role": "video-fullscreen",
         "aria-label": "全屏观看",
       },
-      ["⛶"],
+      [svgIcon("fullscreen")],
     );
     fullscreenBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       // 模块级追踪当前全屏视频 + 注册本卡静音恢复回调（避免多视频串扰）
       lastFullscreenVideo = videoEl;
       fullscreenSoundRestore = updateSoundBtn;
-      enterVideoFullscreen(videoEl, updateSoundBtn, videoHint);
+      enterVideoFullscreen(videoEl, videoHint);
     });
     // iOS 原生播放器退出（webkitEnterFullscreen 不走 document fullscreenchange）
     videoEl.addEventListener("webkitendfullscreen", (e) => {
       if (e.target !== lastFullscreenVideo) return;
       restoreAfterVideoFullscreenExit();
     });
-    unit.appendChild(fullscreenBtn);
-    unit.appendChild(videoHint);
-    // 下载按钮（声音按钮下方同列）。mp4 空串 → 不渲染死链下载控件（场景 11.P1）；
+
+    // 动作栏（上→下：声音 → 全屏 → 保存，下载恒在栏最下方离拇指最近——契约演进
+    // [2026-08-30]：原右上同列堆叠）。mp4 空串 → 不渲染死链下载控件（场景 11.P1）；
     // 300s 超时 + onProgress 回报 loading 百分比（aria-valuenow 同步，场景 3.P4）
+    const railChildren = [soundBtn, fullscreenBtn];
     if (video.mp4) {
       const dl = createDownloadButton({
         role: "video-download",
-        ariaLabel: `下载这个视频：${video.title || "未命名视频"}`,
+        ariaLabel: `保存这个视频：${video.title || "未命名视频"}`,
       });
       const baseName = video.title ? sanitizeFilename(video.title) : `拾光视频-${video.themeKey}`;
       bindDownloadClick(dl, video.mp4, `${baseName}.mp4`, {
         timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS,
         withProgress: true,
       });
-      unit.appendChild(dl.btn);
+      railChildren.push(dl.btn);
     }
+    unit.appendChild(createActionRail(railChildren));
+    unit.appendChild(videoHint);
 
     // 底部文字 + 进度条
     const metaParts = [];
@@ -1043,29 +1112,36 @@
     });
     unit.appendChild(img);
 
-    // 底部下载按钮排（取代旧 save-hint「长按图片保存到相册」——契约演进见 state.md 实现计划 3：
+    // 右下动作栏（取代旧 save-hint「长按图片保存到相册」——契约演进见 state.md 实现计划 3：
     // 长按语义被下载按钮覆盖且优于长按，S6.PM2 已按契约演进协议同步反转）。
-    // 竖版主按钮常驻（本卡仅在 wallpaperPortrait 非空时渲染）；横版次按钮仅直链非空时渲染（场景 11.P2）。
-    const bar = el("div", { class: "download-bar" });
-    const portraitDl = createDownloadButton({
-      role: "wallpaper-download-portrait",
-      ariaLabel: "下载手机竖版壁纸",
-    });
-    bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
-    bar.appendChild(portraitDl.btn);
+    // 契约演进 [2026-08-30]：原底部 download-bar 两个一模一样的「下载」按钮（仅 aria-label
+    // 不同，且压住壁纸自身 footer 文字）→ 语义化双按钮移入右下动作栏：
+    // 主按钮「保存壁纸」（竖版=本机使用主场景，primary 实心）常驻（本卡仅在
+    // wallpaperPortrait 非空时渲染）；次按钮「电脑版」（ghost）仅直链非空时渲染（场景 11.P2）。
+    const railChildren = [];
     if (day.wallpaperLandscape) {
       const landscapeDl = createDownloadButton({
         role: "wallpaper-download-landscape",
-        ariaLabel: "下载桌面横版壁纸",
+        label: "电脑版",
+        variant: "ghost",
+        ariaLabel: "保存桌面横版壁纸",
       });
       bindDownloadClick(
         landscapeDl,
         day.wallpaperLandscape,
         `拾光壁纸-${day.pickDate}-桌面横版.jpg`,
       );
-      bar.appendChild(landscapeDl.btn);
+      railChildren.push(landscapeDl.btn);
     }
-    unit.appendChild(bar);
+    const portraitDl = createDownloadButton({
+      role: "wallpaper-download-portrait",
+      label: "保存壁纸",
+      variant: "primary",
+      ariaLabel: "保存手机竖版壁纸",
+    });
+    bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
+    railChildren.push(portraitDl.btn);
+    unit.appendChild(createActionRail(railChildren));
 
     return unit;
   }

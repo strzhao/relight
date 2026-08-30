@@ -10,24 +10,30 @@
  *     - .unit-video[data-load-state="error"] 内 [data-role="video-fullscreen"]
  *       computed display === "none"
  *     - 既有契约（回归背景）：[data-role="video-sound"] 声音按钮
- *       （textContent "🔇"/"🔊"）；video 单元 dataset:
+ *       （机读态 data-sound-state="muted|unmuted"——契约演进 [2026-08-30]：
+ *       原 textContent "🔇"/"🔊" emoji 契约随图标 SVG 化演进为 data-sound-state，
+ *       见 state.md《给视频和图片增加下载》契约演进节）；video 单元 dataset:
  *       streamUnit/unitType="video"/mediaType="video"/videoId/loadState
  *
  *   行为契约：
  *     - 能力探测顺序：video.webkitEnterFullscreen 优先，否则 requestFullscreen
  *       （成功后尝试 screen.orientation.lock("landscape")，失败静默）；
  *       两者均不可用或调用失败 → 页内降级提示
- *     - 点击全屏按钮（loaded 态）→ videoEl.muted=false、确保播放（paused===false）、
- *       进入全屏（document.fullscreenElement 非空且包含该 video）
- *     - 退出全屏（Escape / document.exitFullscreen()）→ muted=true 且声音按钮回 "🔇"
+ *     - 点击全屏按钮（loaded 态）→ 保持进入前声音态（契约演进 [2026-08-30]：
+ *       不再强制 muted=false，安静场合友好）、确保播放（paused===false）、
+ *       全屏内启用原生 controls（可拖进度/自行开声）、进入全屏
+ *       （document.fullscreenElement 非空且包含该 video）
+ *     - 退出全屏（Escape / document.exitFullscreen()）→ muted=true、
+ *       声音按钮 data-sound-state="muted"、原生 controls 移除
  *     - 降级提示 ≤3000ms 自动隐藏
  *     - 视频源 404 → data-load-state="error" → 全屏按钮 display:none
  *
  * 谓词覆盖：
  *   - FS.PM1 [det-machine] 每个 video 单元含全屏按钮（aria-label/type 字面量）
  *   - FS.PM2 [real-process] loaded 态点击全屏按钮 → ≤1000ms 内 fullscreenElement
- *     包含 video 且 muted===false 且 paused===false
- *   - FS.PM3 [real-process] 退出全屏 → muted===true 且声音按钮文本回 "🔇"
+ *     包含 video 且 muted===true（保持进入前态）且 paused===false 且 controls===true
+ *   - FS.PM3 [real-process] 退出全屏 → muted===true 且声音按钮
+ *     data-sound-state="muted" 且 controls===false
  *   - FS.PM4 [det-machine] mp4 404 → error 单元内全屏按钮 computed display==="none"
  *   - FS.PM5 [real-process] 双 API 删除 → hint 含「横屏」出现且 ≤3000ms 不可见
  *
@@ -228,10 +234,10 @@ describe("[FS.PM1][det-machine] 每个 video 单元含全屏按钮 + hint 默认
 });
 
 // ============================================================================
-// FS.PM2 [real-process] loaded 态点击全屏按钮 → 真全屏 + 出声播放
+// FS.PM2 [real-process] loaded 态点击全屏按钮 → 真全屏 + 保持静音 + 原生控制条
 // ============================================================================
-describe("[FS.PM2][real-process] 点击全屏按钮进入真全屏并出声播放", () => {
-  it("点击后 ≤1000ms 内 fullscreenElement 包含 video 且 muted===false 且 paused===false", async ({
+describe("[FS.PM2][real-process] 点击全屏按钮进入真全屏（保持声音态 + 启用 controls）", () => {
+  it("点击后 ≤1000ms 内 fullscreenElement 包含 video 且 muted===true(保持进入前态) 且 paused===false 且 controls===true", async ({
     page,
   }) => {
     await gotoStreamAndWaitVideoLoaded(page);
@@ -247,7 +253,9 @@ describe("[FS.PM2][real-process] 点击全屏按钮进入真全屏并出声播�
         if (!v) return false;
         const fsEl = document.fullscreenElement;
         const fsOk = !!fsEl && (fsEl === v || fsEl.contains(v));
-        return fsOk && v.muted === false && v.paused === false;
+        // 契约演进 [2026-08-30]：进全屏不再强制出声——muted 保持进入前态
+        // （流内 autoplay 恒 muted=true）；controls=true 为全屏内原生控制条
+        return fsOk && v.muted === true && v.paused === false && v.controls === true;
       },
       undefined,
       { timeout: budgetMs, polling: 50 },
@@ -262,6 +270,7 @@ describe("[FS.PM2][real-process] 点击全屏按钮进入真全屏并出声播�
         fsContainsVideo: !!fsEl && !!v && (fsEl === v || fsEl.contains(v)),
         muted: v ? v.muted : null,
         paused: v ? v.paused : null,
+        controls: v ? v.controls : null,
       };
     });
 
@@ -271,33 +280,64 @@ describe("[FS.PM2][real-process] 点击全屏按钮进入真全屏并出声播�
     );
     expect(state.fsNonNull).toBe(true);
     expect(state.fsContainsVideo).toBe(true);
-    expect(state.muted).toBe(false);
+    expect(state.muted).toBe(true);
     expect(state.paused).toBe(false);
+    expect(state.controls).toBe(true);
   });
 });
 
 // ============================================================================
-// FS.PM3 [real-process] 退出全屏 → 恢复静音 + 声音按钮回 🔇
+// FS.PM3 [real-process] 退出全屏 → 恢复静音 + 声音按钮 data-sound-state 回 muted
 // ============================================================================
 describe("[FS.PM3][real-process] 退出全屏恢复静音", () => {
-  it("全屏中出声（🔊），document.exitFullscreen() 后 muted===true 且声音按钮文本回 🔇", async ({
+  it("全屏中保持静音（data-sound-state=muted），document.exitFullscreen() 后 muted===true 且按钮态回 muted 且 controls 移除", async ({
     page,
   }) => {
     await gotoStreamAndWaitVideoLoaded(page);
+
+    // 前置探针：声音按钮切换语义——机读态 data-sound-state 随点击翻转
+    // （契约演进 [2026-08-30]：替代原 textContent "🔇"/"🔊" emoji 断言，
+    // 等效覆盖「按钮态忠实反映 muted」这一被证性质，非弱化）
+    const soundBtn = page
+      .locator('.unit-video[data-load-state="loaded"] [data-role="video-sound"]')
+      .first();
+    await soundBtn.click();
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector(".unit-video video") as HTMLVideoElement | null;
+        const s = document.querySelector('.unit-video [data-role="video-sound"]');
+        return !!v && v.muted === false && s?.getAttribute("data-sound-state") === "unmuted";
+      },
+      undefined,
+      { timeout: 1000, polling: 50 },
+    );
+    await soundBtn.click();
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector(".unit-video video") as HTMLVideoElement | null;
+        const s = document.querySelector('.unit-video [data-role="video-sound"]');
+        return !!v && v.muted === true && s?.getAttribute("data-sound-state") === "muted";
+      },
+      undefined,
+      { timeout: 1000, polling: 50 },
+    );
 
     // 前置：经全屏按钮进入全屏（FS.PM2 已覆盖进入本身，这里作为前置硬断言）
     await clickFullscreenButton(page);
     await waitFullscreenEntered(page, 3000);
 
-    // 全屏中应处于出声播放态（既有契约：声音按钮 textContent "🔇"/"🔊"）
-    // CONTRACT_AMBIGUOUS: 🔇/🔊 与 muted 的映射方向设计未逐字给出，
-    // 按「muted→🔇 / unmuted→🔊」惯例推断；终态断言（回 🔇）取自谓词原文
+    // 全屏中保持进入前声音态（muted）+ 原生 controls 启用
+    // （契约演进 [2026-08-30]：旧契约「全屏中出声（🔊）」已随不再强制出声反转）
     await page.waitForFunction(
       () => {
         const v = document.querySelector(".unit-video video") as HTMLVideoElement | null;
         const s = document.querySelector('.unit-video [data-role="video-sound"]');
         return (
-          !!v && v.muted === false && v.paused === false && (s?.textContent ?? "").trim() === "🔊"
+          !!v &&
+          v.muted === true &&
+          v.paused === false &&
+          v.controls === true &&
+          s?.getAttribute("data-sound-state") === "muted"
         );
       },
       undefined,
@@ -326,7 +366,8 @@ describe("[FS.PM3][real-process] 退出全屏恢复静音", () => {
           document.fullscreenElement === null &&
           !!v &&
           v.muted === true &&
-          (s?.textContent ?? "").trim() === "🔇"
+          v.controls === false &&
+          s?.getAttribute("data-sound-state") === "muted"
         );
       },
       undefined,
@@ -339,14 +380,16 @@ describe("[FS.PM3][real-process] 退出全屏恢复静音", () => {
       return {
         fsNull: document.fullscreenElement === null,
         muted: v ? v.muted : null,
-        soundText: (s?.textContent ?? "").trim(),
+        controls: v ? v.controls : null,
+        soundState: s?.getAttribute("data-sound-state") ?? null,
       };
     });
 
     await writeArtifact("FS.PM3", JSON.stringify(after));
     expect(after.fsNull).toBe(true);
     expect(after.muted).toBe(true);
-    expect(after.soundText).toBe("🔇");
+    expect(after.controls).toBe(false);
+    expect(after.soundState).toBe("muted");
   });
 });
 
