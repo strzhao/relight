@@ -11,7 +11,8 @@
  *     data-unit-type = photo | video | wallpaper | date-separator
  *     data-load-state = loading | loaded | error
  *   photo 单元额外：data-day-date / data-day-index / data-photo-rank / data-photo-id / data-takenat-absent
- *   video 单元额外：data-media-type="video" / data-video-id
+ *   video 单元额外：data-media-type="video" / data-video-id（=themeKey，深链主键）
+ *     / data-video-uuid（=manifest.videos[].id，UUID，仅为复活历史聊天里的旧推送链接）
  *   wallpaper 单元：data-role="wallpaper-card" + 右下 action-rail
  *     （旧 [data-role="save-hint"] 已按契约演进删除，被下载按钮取代——state.md 实现计划 3）
  *   下载：[data-role="photo-download" | "video-download" | "wallpaper-download-portrait"
@@ -926,6 +927,7 @@
           unitType: "video",
           mediaType: "video",
           videoId: video.themeKey,
+          videoUuid: video.id,
           dayIndex: String(dayIndex),
           loadState: "loading",
           role: "video-card",
@@ -1388,16 +1390,30 @@
   function handleDeeplink() {
     const hash = getHash();
 
-    // #/video/<id>
+    // #/video/<id>（<id> = themeKey，新推送一律此形态；兼容 videos.id UUID——复活历史聊天旧链接）
     const videoMatch = /^\/video\/([\w-]+)/.exec(hash);
     if (videoMatch) {
       const id = videoMatch[1];
-      const unit = document.querySelector(`[data-video-id="${id}"]`);
-      if (unit) {
-        programmaticScrollUntil = Date.now() + 800; // 闸门①：防 scrollIntoView 触发 IO 改 URL 死循环
+      const selector = `[data-video-id="${id}"], [data-video-uuid="${id}"]`;
+      // 定位 + 自动播（闸门①：防 scrollIntoView 触发 IO 改 URL 死循环）
+      const locate = (unit) => {
+        programmaticScrollUntil = Date.now() + 800;
         unit.scrollIntoView({ behavior: "smooth", block: "start" });
         // 自动播（IO 也会触发，但显式 play 确保深链直达立即播）
         setTimeout(() => playVideoUnit(unit), 400);
+      };
+      const unit = document.querySelector(selector);
+      if (unit) {
+        locate(unit);
+      } else {
+        // 视频单元只在所属日（历史日）或全部日挂载后（unmatched 区）才存在，而深链 URL
+        // 不含归属日信息，无法像 date 路径那样增量挂载 → 唯一正确回退是全量挂载后重查
+        // （mountAllUnits 循环以日数为界，不会死循环）
+        mountAllUnits();
+        requestAnimationFrame(() => {
+          const loaded = document.querySelector(selector);
+          if (loaded) locate(loaded);
+        });
       }
       return;
     }
@@ -1457,8 +1473,37 @@
         // rank 不存在（如分享链接的 rank 已变）→ fallback 该日 date-separator
         unit = document.querySelector(`[data-unit-type="date-separator"][data-day-date="${date}"]`);
       }
+      if (!unit) {
+        // 流顶日（dayIndex=0）不渲染 date-separator（buildDayUnits isStreamTop 跳过）
+        // → fallback 该日首张 photo 单元
+        unit = document.querySelector(`[data-unit-type="photo"][data-day-date="${date}"]`);
+      }
+      if (!unit && sortedDays[0]?.pickDate === date) {
+        // 仍查不到且该日是流顶日（如该日无 photo 单元）→ 防御性回顶（流顶即该日）
+        streamEl.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
       if (unit) unit.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  }
+
+  /**
+   * 全量挂载（video 深链回退专用）：挂完所有剩余日 + unmatched 区，并停掉 sentinel IO。
+   *
+   * 防死循环：while 以 mountedDayCount < sortedDays.length 为界（日数有界）；
+   * unmatched 区只在非空且未挂载时再补一次 appendNextDay（unmatched 为空时
+   * state.unmatchedMounted 永远是 false，绝不可拿它当循环条件）。
+   */
+  function mountAllUnits() {
+    while (mountedDayCount < sortedDays.length) {
+      appendNextDay();
+    }
+    if (unmatchedVideosCache && unmatchedVideosCache.length > 0 && !state.unmatchedMounted) {
+      appendNextDay(); // 流末尾分支自动补挂 unmatched 区
+    }
+    if (state.dayIO) state.dayIO.disconnect();
+    // sentinel 重插保持 DOM 结构一致（IO 已断开，不会再触发挂载）
+    if (state.sentinel) streamEl.appendChild(state.sentinel);
   }
 
   // ============================================================================

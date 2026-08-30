@@ -138,7 +138,13 @@ export async function dailyVideoWorker(job: Job): Promise<void> {
 
     // 5. 推送（除非 skipPush）
     if (!skipPush) {
-      pushed = await pushVideoNotification(videoId, candidate.titleHint, coverPath, job);
+      pushed = await pushVideoNotification(
+        videoId,
+        candidate.themeKey,
+        candidate.titleHint,
+        coverPath,
+        job,
+      );
     }
   } else {
     // 失败：写 failed 行（不降级、不重试渲染）
@@ -346,6 +352,7 @@ async function ensureCoverFromVideo(videoPath: string, coverPath: string, job: J
 /** 推送企业微信：标题 + 视频链接（封面不再推群，保留生成给画廊）*/
 async function pushVideoNotification(
   videoId: string,
+  themeKey: string,
   titleHint: string,
   coverPath: string,
   job: Job,
@@ -364,8 +371,11 @@ async function pushVideoNotification(
   void coverPath;
 
   // 画廊公网 URL（修 localhost bug，state.md §契约规约 公网 URL 契约）：
-  //   `config.galleryPublicUrl + /#/video/<id>`（hash 路由，静态站渲染）
-  const videoUrl = `${config.galleryPublicUrl}/#/video/${videoId}`;
+  //   `config.galleryPublicUrl + /#/video/<themeKey>`（hash 路由，静态站渲染）
+  //   <id> 段必须用 themeKey（前端 data-video-id = manifest.videos[].themeKey，
+  //   用 videos.id（UUID）拼链接前端 querySelector 永远 miss → 深链 100% 失效）；
+  //   videoId 仅用于日志排查。
+  const videoUrl = `${config.galleryPublicUrl}/#/video/${themeKey}`;
   const textMsg = `🎬 新视频：${titleHint}\n观看：${videoUrl}`;
 
   // 发文字消息

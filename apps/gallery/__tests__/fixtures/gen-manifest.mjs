@@ -22,6 +22,14 @@
  *      manifest 注入缺直链条目（视频 mp4 空串 / 壁纸横版空串 / 照片 original 空串），
  *      满足下载验收场景 11（缺直链不渲染死链下载控件）。默认（无参）行为与产物完全不变。
  *
+ * 深链验收扩展（2026-08-30 红队，需求《当前的 url 点击进去后…》DL.V2/V3/V5，只增不改既有语义）：
+ *   C. 新增大前天（day-index=3，初始「最新 2 天」挂载之外）4 张 photo + 无壁纸天；
+ *      归属该日的深链视频 `trip-deep-history-2021`（id 为合法 UUID → data-video-uuid /
+ *      `#/video/<UUID>` 历史聊天链接复活 DL.V3；themeKey 为主推送形态 DL.V2）。
+ *   D. 新增未归属日视频 `trip-unmatched-island-2026`（createdAt 日期在 manifest.days 无对应
+ *      day → unmatched 区，全部日挂载后才渲染）——DL.V5 深链定位目标。
+ *   两者均追加在既有 videos[0]（trip-2024-summer）之后，既有测试对 videos[0] 的依赖不变。
+ *
  * 纯 Node，零运行时依赖（JPEG 占位手写最小字节；可播放 mp4 用预生成的二进制样本，
  * 避免 base64 在源码粘贴时损坏，且确保 Chromium 能解码 autoplay 满足 S4 契约）。
  */
@@ -206,6 +214,28 @@ export function generateFixture(opts = {}) {
     });
   }
 
+  // 大前天再多一天（day-index=3，初始「最新 2 天」挂载之外）——深链验收 DL.V2/V3 的目标日。
+  // 只增不改：追加在 days 末尾，不影响既有 day-index 0/1/2 的语义与选择器。
+  const threeDaysAgo = new Date(today.getTime() - 3 * 24 * 3600 * 1000);
+  const threeDaysAgoStr = iso(threeDaysAgo);
+  const photosThreeDaysAgo = [];
+  for (let rank = 1; rank <= 4; rank++) {
+    const photoId = `photo-3days-${String(rank).padStart(2, "0")}-${"d4e5f6a7-b8c9-4012-9def-456789012345"}`;
+    writeTinyJpeg(path.join(dir, "photos", `${photoId}-thumb.jpg`));
+    writeTinyJpeg(path.join(dir, "photos", `${photoId}-mid.jpg`));
+    photosThreeDaysAgo.push({
+      photoId,
+      rank,
+      title: `大前天第 ${rank} 张`,
+      narrative: `大前天第 ${rank} 张的叙事文案，长度足够通过非空断言。`,
+      thumbnail: `photos/${photoId}-thumb.jpg`,
+      original: `photos/${photoId}-mid.jpg`,
+      takenAt: "2023-10-01T09:00:00.000Z",
+      width: 4032,
+      height: 3024,
+    });
+  }
+
   // 壁纸（今日 + 昨日有，前天无）。非方形占位：横版 8×4 / 竖版 4×8（场景5.P3 方向断言）
   const wpTodayLandscape = `wallpapers/${todayStr}_v2-contain-default.jpg`;
   const wpTodayPortrait = `wallpapers/${todayStr}_v2-contain-1290x2796.jpg`;
@@ -224,10 +254,51 @@ export function generateFixture(opts = {}) {
   const videoCover = `videos/${videoThemeKey}-cover.jpg`;
   writeTinyJpeg(path.join(dir, videoCover));
 
+  // ---------------------------------------------------------------------------
+  // 深链验收扩展（2026-08-30 红队，需求《当前的 url 点击进去后…》DL.V2/V3/V5，只增不改）
+  //   - deepLinkHistoryVideo：归属大前天（day-index=3，初始 2 天挂载之外）。
+  //     id 为合法 UUID（DOM 契约 data-video-uuid / #/video/<UUID> 历史链接复活 DL.V3），
+  //     themeKey 为新推送契约形态（#/video/<themeKey> 主路径 DL.V2）。
+  //   - deepLinkOrphanVideo：createdAt 归属日（10 天前）在 manifest.days 无对应 day →
+  //     unmatched 区（全部日挂载后才渲染）——DL.V5 深链定位目标。
+  //   两者均排在既有 videos[0] 之后（既有测试依赖 videos[0] = trip-2024-summer）。
+  // ---------------------------------------------------------------------------
+  const deepLinkHistoryVideo = {
+    id: "3f2b1c4d-5e6f-4a70-8b90-1c2d3e4f5a6b",
+    themeKey: "trip-deep-history-2021",
+    themeKind: "trip",
+    title: "深链历史日视频",
+    narrative: "挂在初始未挂载历史日的深链目标视频。",
+    mp4: "videos/trip-deep-history-2021.mp4",
+    cover: "videos/trip-deep-history-2021-cover.jpg",
+    durationSec: 45,
+    photoCount: 4,
+    createdAt: `${threeDaysAgoStr}T02:00:00.000Z`,
+  };
+  writeTinyMp4(path.join(dir, deepLinkHistoryVideo.mp4));
+  writeTinyJpeg(path.join(dir, deepLinkHistoryVideo.cover));
+
+  const orphanDayStr = iso(new Date(today.getTime() - 10 * 24 * 3600 * 1000));
+  const deepLinkOrphanVideo = {
+    id: "9a8b7c6d-5e4f-4a30-8b21-0f9e8d7c6b5a",
+    themeKey: "trip-unmatched-island-2026",
+    themeKind: "trip",
+    title: "未归属日深链视频",
+    narrative: "归属日无对应 day 的 unmatched 区视频。",
+    mp4: "videos/trip-unmatched-island-2026.mp4",
+    cover: "videos/trip-unmatched-island-2026-cover.jpg",
+    durationSec: 38,
+    photoCount: 6,
+    createdAt: `${orphanDayStr}T03:00:00.000Z`,
+  };
+  writeTinyMp4(path.join(dir, deepLinkOrphanVideo.mp4));
+  writeTinyJpeg(path.join(dir, deepLinkOrphanVideo.cover));
+
   // 缺直链变体的第二视频（场景11.P1）：mp4 空串 → 该卡不渲染下载控件。
   // createdAt 晚于正常视频（同日序列后位），保证既有测试 querySelector 命中的首个
   // video 单元仍是正常视频，向后兼容。
   const missingVideo = {
+    id: "c0ffee00-1234-4abc-9def-0123456789ab",
     themeKey: "trip-missing-mp4",
     title: "缺直链视频",
     narrative: "缺直链变体视频。",
@@ -269,6 +340,15 @@ export function generateFixture(opts = {}) {
         wallpaperPortrait: null,
         photos: photosDayBefore,
       },
+      {
+        // 深链目标日（day-index=3，初始「最新 2 天」挂载之外；无壁纸与 fixture 既有无壁纸天同型）
+        pickDate: threeDaysAgoStr,
+        title: "大前天精选",
+        narrative: "大前天的整体叙事。",
+        wallpaperLandscape: null,
+        wallpaperPortrait: null,
+        photos: photosThreeDaysAgo,
+      },
     ],
     videos: [
       {
@@ -288,6 +368,8 @@ export function generateFixture(opts = {}) {
         createdAt: `${yesterdayStr}T03:00:00.000Z`,
       },
       ...(missingLinks ? [missingVideo] : []),
+      deepLinkHistoryVideo,
+      deepLinkOrphanVideo,
     ],
   };
 

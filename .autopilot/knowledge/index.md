@@ -66,6 +66,7 @@
 
 ### 模式 (patterns.md)
 
+- [2026-08-30] 深链 URL id 段跨端契约（推送主键错配=querySelector 静默 null；无线索深链须全量挂载回退；unmatchedMounted 不可作循环条件）→ [gallery](domains/gallery.md)
 - [2026-08-30] cos-nodejs-sdk-v5 getBucketCors 回读复数键，幂等判存与单测须双键兼容 → [gallery](domains/gallery.md)
 - [2026-08-30] manifest 按约定 key 拼 URL 会给从未生成的对象造死链（确定性重合成补救）→ [gallery](domains/gallery.md)
 - [2026-08-30] iOS 网页下载三件套：Web Share files / 跨域 a.download 无效 / 微信 Safari 引导 → [gallery](domains/gallery.md)

@@ -60,6 +60,13 @@
 - **Lesson**：iOS Safari 对跨域 URL 忽略 `<a download>`；唯一可靠路径是 Web Share API level 2（`navigator.share({files})`，iOS 15+）弹系统分享面板。三个配套坑：① `AbortSignal.timeout` 需 Safari 16+，iOS 15 同步抛 TypeError → 手动 AbortController + setTimeout；② fetch 失败后兜底 `window.open` 会因 transient activation 过期被弹窗拦截（返回 null）→ 级联 `location.href` 当前页导航；③ 微信/企微内置浏览器（群推送链接第一跳）无 Web Share → 检测 MicroMessenger UA 弹「在 Safari 中打开」引导遮罩，深链 hash 保留回原位。跨域 fetch 需目标桶配 CORS（公有读只放行标签加载，不放行 XHR）
 - **Evidence**：画廊下载功能 48 条验收谓词全过；Playwright 用 addInitScript stub share/canShare + UA 注入覆盖微信分支与取消分享路径（核对锚点：2026-08-30 apps/gallery/app.js）
 
+## 深链 URL id 段是跨端契约：推送主键错配 = querySelector 静默 null，非报错
+
+[2026-08-30] <!-- tags: gallery, deeplink, 增量挂载, 跨端契约, url -->
+
+- **Scenario**：静态站沉浸流做 URL 深链（`#/video/<id>`），且拼 URL 的推送方在另一进程（后端 worker）时
+- **Lesson**：深链 id 段是**跨端契约**——后端拼 URL 的主键必须与前端 DOM 匹配键（`data-video-id`=manifest.videos[].themeKey）同源。错配不报错：querySelector 静默 null → `if (unit)` 静默留顶，深链 100% 失效且无任何日志。修复必须**双 id 兼容**（DOM 加 `data-video-uuid`=manifest id）：旧 UUID 链接已散播在企微聊天记录里，只改新推送救不回历史链接。增量挂载流中深链目标未挂载时的回退分两类：URL 自带定位线索（date 深链）→ 增量挂载到目标日；URL 无线索（video 深链只知 id，视频可能挂任何历史日或 unmatched 区）→ **全量挂载后重查是唯一正确回退**。防死循环陷阱：`state.unmatchedMounted` 仅在 unmatched 非空时置 true，绝不可作 while 循环条件（循环必须以 `mountedDayCount < sortedDays.length` 日数为界）
+- **Evidence**：线上七探针实证（UUID 形态 found:false / themeKey 形态 found:true / themeKey 挂历史日 found:false——两个独立 bug）；修复后 8 条 det-machine 谓词 e2e 全绿（核对锚点：2026-08-30 apps/gallery/app.js handleDeeplink + apps/backend/src/jobs/daily-video.ts pushVideoNotification）
 ## 滚动吸附流的横竖屏翻转重锚与 Chromium 观测等价边界
 
 [2026-08-31] <!-- tags: gallery, scroll-snap, orientation, 移动端, 测试边界 -->
