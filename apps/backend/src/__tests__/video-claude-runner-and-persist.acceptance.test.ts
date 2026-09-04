@@ -608,12 +608,13 @@ describe("claude runner + DB 持久化 — 验收测试（谓词 5/6/9）", () =
       // 预置 8 天前的 failed 行（7 天冷却已过期，discovery 会重选同 themeKey）——
       // 复现 20260829 vietnam-2026：渲染成功却因 UNIQUE(theme_kind, theme_key)
       // 落库崩，BullMQ 重试整段重渲染，日级死循环。
+      // themeKey 用新格式 slug-YYYYMM（素材 2024-09 起 → chongqing-202409）
       const staleIso = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
       env.sqlite
         .prepare(
           `INSERT INTO videos (id, theme_kind, theme_key, title, output_path, cover_path,
                                 status, error_msg, created_at)
-           VALUES ('stale-failed-1', 'trip', 'chongqing-2024', '旧失败', 'x.mp4', 'x.jpg',
+           VALUES ('stale-failed-1', 'trip', 'chongqing-202409', '旧失败', 'x.mp4', 'x.jpg',
                    'failed', 'claude -p 超时（旧）', ?)`,
         )
         .run(staleIso);
@@ -622,7 +623,7 @@ describe("claude runner + DB 持久化 — 验收测试（谓词 5/6/9）", () =
       await dailyVideoWorker(makeJob("job-stale-001") as never);
 
       const rows = env.sqlite
-        .prepare(`SELECT status, error_msg, title FROM videos WHERE theme_key='chongqing-2024'`)
+        .prepare(`SELECT status, error_msg, title FROM videos WHERE theme_key='chongqing-202409'`)
         .all() as Array<{ status: string; error_msg: string | null; title: string }>;
       expect(rows.length, "同 themeKey 仅 1 行（接管不新增）").toBe(1);
       expect(rows[0]!.status, "failed 行被接管为 completed").toBe("completed");

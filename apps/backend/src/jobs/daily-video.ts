@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 /**
- * daily-video Worker：每天北京时间 03:00 自动生成「照片→叙事短片」视频。
+ * daily-video Worker：每天北京时间 10:00 自动生成「照片→叙事短片」视频。
  *
  * 流程（设计文档架构）：
  * 1. discoverVideoCandidates() 主题发现（旅行 + 人物成长线）
@@ -136,12 +136,13 @@ export async function dailyVideoWorker(job: Job): Promise<void> {
       );
     }
 
-    // 5. 推送（除非 skipPush）
+    // 5. 推送（除非 skipPush）。标题优先 skill 写出的真实标题（meta.title）——
+    // vietnam-2026 事故：titleHint 按 GPS 围栏误标「越南 · 2026」，推送让家人完全没认出是海南行
     if (!skipPush) {
       pushed = await pushVideoNotification(
         videoId,
         candidate.themeKey,
-        candidate.titleHint,
+        result.meta?.title ?? candidate.titleHint,
         coverPath,
         job,
       );

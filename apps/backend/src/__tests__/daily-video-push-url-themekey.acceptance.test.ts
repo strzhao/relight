@@ -435,4 +435,21 @@ describe("DL.V1：daily-video 推送观看 URL 用 themeKey（非 DB UUID id）"
       expect(url).not.toMatch(UUID_RE);
     }
   });
+
+  it("DL.V2 推送标题优先 skill 写出的 meta.title（vietnam-2026 教训：titleHint 仅兜底）", async () => {
+    const { contents } = await runWorkerAndCapture();
+
+    const withTitle = contents.filter((c) => c.includes("新视频"));
+    expect(withTitle.length, "应有一条「新视频」推送").toBeGreaterThanOrEqual(1);
+    const titleLine = withTitle[0]!.split("\n")[0]!;
+
+    // fake claude 的 meta.json title = "深链推送测试视频"——推送必须用它
+    expect(titleLine, `推送标题行应是 meta.title（实测 ${JSON.stringify(titleLine)}）`).toContain(
+      "深链推送测试视频",
+    );
+    expect(
+      titleLine,
+      "推送标题行不得再用 GPS 围栏推断的 titleHint（trip titleHint 含 region 中文名「重庆·川南」）",
+    ).not.toContain("重庆");
+  });
 });

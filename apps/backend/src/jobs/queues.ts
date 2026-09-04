@@ -40,7 +40,7 @@ export const dailyPushQueue = new Queue("daily-push", {
   prefix: config.bullmqPrefix,
 });
 
-/** 每日视频生成 Queue（每天北京时间 03:00：有主题才做，无候选空完成） */
+/** 每日视频生成 Queue（每天北京时间 10:00：有主题才做，无候选空完成） */
 export const dailyVideoQueue = new Queue("daily-video", {
   connection,
   defaultJobOptions,

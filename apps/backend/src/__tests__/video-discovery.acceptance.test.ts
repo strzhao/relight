@@ -25,6 +25,14 @@
  *   3. IDEMPOTENT-DEDUPE-TRIP：预置 video_usages(trip, kyoto-2024) → 同 themeKey 不重复
  *   4. IDEMPOTENT-DEDUPE-PERSON：预置 person-42-2023 consumed → 该 person 无新年份时不候选
  *
+ * 旅行命中链路可靠性（2026-09-04，vietnam-2026 误标三亚事故后续）：
+ *   5. TRIP-SETTLE-WINDOW：旅行结束 <3 天不出片（防进行中锁死不完整版），≥3 天候选
+ *   6. TRIP-YYYYMM-KEY：themeKey 用 YYYYMM——同年两段独立旅行均可候选
+ *   7. TRIP-LEGACY-KEY-COMPAT：历史 slug-year 格式 completed 行仍拦住新格式候选（防历史重拍）
+ *   8. TRIP-FAR-FALLBACK：GPS 围栏未覆盖目的地 → far-YYYYMM 候选（titleHint「远方 · 年」）
+ *   9. PERSON-FRESHNESS-DIMENSION：person freshness = 素材最新 takenAt 毫秒，与 trip 同量纲可比
+ *  10. REGION-ORDER-HAINAN-BEFORE-VIETNAM：海南围栏必须先于越南判定（vietnam-2026 误标回归）
+ *
  * 红队铁律：
  *   - 不读蓝队新写的 video-discovery.ts / daily-video.ts 实现代码
  *   - 仅依契约（DB schema 字段名 + 主题指纹语义 + 算法源描述）写断言
@@ -781,6 +789,227 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
       }
       // 若蓝队 person 候选不返回 photoIds（只返回 personId），此断言降级为「候选存在」已满足，
       // photoId 排除的实际验证由 job 层（video-persist 测试）覆盖。
+    });
+  });
+
+  // ==========================================================================
+  // 谓词 5：TRIP-SETTLE-WINDOW —— 旅行结束沉淀期
+  // 出片即 completed 永久去重；旅行进行中/照片未同步完就出片会锁死不完整版。
+  // ==========================================================================
+
+  describe("TRIP-SETTLE-WINDOW：结束 <3 天不出片，≥3 天候选", () => {
+    /** 植入一段重庆旅行：21 张连续每天一张，最后一张距 now = daysAgoEnd 天 */
+    function plantChongqingTrip(prefix: string, daysAgoEnd: number): void {
+      const baseDate = Date.now() - (daysAgoEnd + 20) * 86_400_000;
+      for (let i = 0; i < 21; i++) {
+        insertPhoto(fixture, {
+          photoId: `${prefix}-${i}`,
+          takenAt: new Date(baseDate + i * 86_400_000).toISOString(),
+          lat: 29.5,
+          lng: 106.5,
+        });
+      }
+    }
+
+    it("endTs 距今 1 天（旅行刚结束/进行中）→ 不候选", async () => {
+      plantChongqingTrip("settle-fresh", 1);
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const trips = candidates.filter((c) => c.themeKind === "trip");
+      expect(trips.length, "旅行结束 <3 天不应候选（防锁死不完整版）").toBe(0);
+    });
+
+    it("endTs 距今 5 天 → 正常候选（海南 08-23 结束 08-29 出片的节奏不受影响）", async () => {
+      plantChongqingTrip("settle-mature", 5);
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const trip = candidates.find((c) => c.themeKind === "trip");
+      expect(trip, "旅行结束 ≥3 天应候选").toBeDefined();
+    });
+  });
+
+  // ==========================================================================
+  // 谓词 6+7：TRIP-YYYYMM-KEY + TRIP-LEGACY-KEY-COMPAT
+  // themeKey 换 YYYYMM 让同年二次旅行可出片；同时兼容拦住历史 slug-year 已出片旅行。
+  // ==========================================================================
+
+  describe("TRIP-YYYYMM-KEY / TRIP-LEGACY-KEY-COMPAT：themeKey 格式与历史兼容", () => {
+    /** 植入某年某月的一段重庆旅行（21 张连续每天一张，从 year-month-01 起） */
+    function plantTripAtMonth(prefix: string, year: number, month: number): string[] {
+      const photoIds: string[] = [];
+      const baseDate = Date.parse(`${year}-${String(month).padStart(2, "0")}-01T10:00:00Z`);
+      for (let i = 0; i < 21; i++) {
+        const pid = `${prefix}-${i}`;
+        photoIds.push(pid);
+        insertPhoto(fixture, {
+          photoId: pid,
+          takenAt: new Date(baseDate + i * 86_400_000).toISOString(),
+          lat: 29.5,
+          lng: 106.5,
+        });
+      }
+      return photoIds;
+    }
+
+    it("同年同 region 两段旅行（2024-03 与 2024-09）→ 两个不同 themeKey 均可候选", async () => {
+      plantTripAtMonth("mar", 2024, 3);
+      plantTripAtMonth("sep", 2024, 9);
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const trips = candidates.filter((c) => c.themeKind === "trip");
+
+      expect(trips.length, "同年两段独立旅行都应候选（旧 slug-year 会塌缩成 1 个）").toBe(2);
+      const keys = new Set(trips.map((c) => c.themeKey));
+      expect(keys.size, "两段旅行 themeKey 应不同").toBe(2);
+      for (const key of keys) {
+        expect(key, "新格式 themeKey 应为 slug-YYYYMM（含月份）").toMatch(/-\d{6}$/);
+      }
+    });
+
+    it("历史 slug-year 格式已出片（chongqing-2024）→ 新格式候选被拦（防历史重拍）", async () => {
+      const photoIds = plantTripAtMonth("legacy", 2024, 9);
+      insertCompletedVideo(fixture, {
+        themeKind: "trip",
+        themeKey: "chongqing-2024", // 旧格式历史行（vietnam-2026 等同理）
+        photoIds,
+      });
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const trips = candidates.filter((c) => c.themeKind === "trip");
+      expect(trips.length, "换 key 格式不得让历史已出片旅行重新候选").toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // 谓词 8：TRIP-FAR-FALLBACK —— 围栏未覆盖目的地兜底
+  // region(lat,lng) 返回 null 的旅行（如新疆/欧洲等未覆盖地）不再被丢弃。
+  // ==========================================================================
+
+  describe("TRIP-FAR-FALLBACK：围栏外目的地 → far 候选", () => {
+    it("≥20 张 GPS 落在所有围栏之外（乌鲁木齐）且不在本地排除区 → far-YYYYMM 候选", async () => {
+      // 乌鲁木齐 43.8N/87.6E：不在任何 region 围栏（东北/日本/韩国/越南/海南/…/华中），
+      // 也不在本地排除区（27.5-31.5N/118-122.5E）
+      const baseDate = Date.parse("2026-07-05T10:00:00Z"); // 结束距今 >3 天
+      for (let i = 0; i < 21; i++) {
+        insertPhoto(fixture, {
+          photoId: `far-${i}`,
+          takenAt: new Date(baseDate + i * 86_400_000).toISOString(),
+          lat: 43.8,
+          lng: 87.6,
+        });
+      }
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const far = candidates.find((c) => c.themeKind === "trip" && c.themeKey.startsWith("far-"));
+
+      expect(far, "围栏外旅行应产出 far 兜底候选").toBeDefined();
+      expect(far!.themeKey, "far themeKey 应为 far-YYYYMM").toMatch(/^far-\d{6}$/);
+      expect(far!.themeKey, "YYYYMM 应取旅行首月 202607").toContain("202607");
+      expect(far!.titleHint, "far titleHint 应中性（远方 · 年）").toContain("远方");
+      expect(far!.titleHint, "far titleHint 应含年份").toContain("2026");
+    });
+  });
+
+  // ==========================================================================
+  // 谓词 10：REGION-ORDER-HAINAN-BEFORE-VIETNAM —— 围栏顺序回归
+  // 海南岛体大部落于越南粗围栏（lng≤110）内，判定顺序反了会把三亚误标越南
+  // （vietnam-2026 事故；0829 修复曾把顺序写反，真实 DB 冒烟才暴露）。
+  // ==========================================================================
+
+  describe("REGION-ORDER-HAINAN-BEFORE-VIETNAM：海南先于越南判定", () => {
+    /** 植入一段给定 GPS 的旅行（21 张连续每天一张，2026-07-05 起，结束距今 >3 天） */
+    function plantTripAt(prefix: string, lat: number, lng: number): void {
+      const baseDate = Date.parse("2026-07-05T10:00:00Z");
+      for (let i = 0; i < 21; i++) {
+        insertPhoto(fixture, {
+          photoId: `${prefix}-${i}`,
+          takenAt: new Date(baseDate + i * 86_400_000).toISOString(),
+          lat,
+          lng,
+        });
+      }
+    }
+
+    it("三亚海棠湾 GPS（18.3N, 109.7E，落在越南粗围栏内）→ 必须判海南（hainan-YYYYMM）", async () => {
+      plantTripAt("sanya", 18.3, 109.7);
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const trip = candidates.find((c) => c.themeKind === "trip");
+
+      expect(trip, "海棠湾旅行应产出 trip 候选").toBeDefined();
+      expect(trip!.themeKey, `海棠湾必须判海南而非越南（实际 ${trip?.themeKey}）`).toMatch(
+        /^hainan-\d{6}$/,
+      );
+      expect(trip!.titleHint, "titleHint 应为「海南 · 年」").toContain("海南");
+    });
+
+    it("越南芽庄 GPS（12.2N, 109.2E，海南围栏外）→ 仍判越南（vietnam-YYYYMM）", async () => {
+      plantTripAt("nhatrang", 12.2, 109.2);
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      const trip = candidates.find((c) => c.themeKind === "trip");
+
+      expect(trip, "芽庄旅行应产出 trip 候选").toBeDefined();
+      expect(trip!.themeKey, "芽庄应判越南").toMatch(/^vietnam-\d{6}$/);
+    });
+  });
+
+  // ==========================================================================
+  // 谓词 9：PERSON-FRESHNESS-DIMENSION —— freshness 量纲统一
+  // person 旧公式 toYear*1000（~2e6）对 trip 毫秒时间戳（~1.7e12）差 6 个数量级。
+  // ==========================================================================
+
+  describe("PERSON-FRESHNESS-DIMENSION：person freshness = 素材最新 takenAt 毫秒", () => {
+    it("person freshness 应等于其素材最新照片时刻（毫秒），且新鲜 trip 排在老素材 person 前", async () => {
+      // 旧素材 person（2022-06-01）
+      const personCentroid = unitVector512();
+      const photoIds2022 = ["pf-2022-a", "pf-2022-b"];
+      for (const pid of photoIds2022) {
+        insertPhoto(fixture, { photoId: pid, takenAt: "2022-06-01T10:00:00Z" });
+      }
+      insertPersonWithFaces(fixture, {
+        personId: "person-fresh",
+        centroid: personCentroid,
+        faces: photoIds2022.map((pid, i) => ({
+          faceId: `ff-22-${i}`,
+          photoId: pid,
+          embedding: personCentroid,
+        })),
+      });
+
+      // 新鲜 trip（最后一张距 now 5 天，毫秒级 freshness 远大于 2022）
+      const baseDate = Date.now() - 25 * 86_400_000;
+      for (let i = 0; i < 21; i++) {
+        insertPhoto(fixture, {
+          photoId: `fresh-trip-${i}`,
+          takenAt: new Date(baseDate + i * 86_400_000).toISOString(),
+          lat: 29.5,
+          lng: 106.5,
+        });
+      }
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+
+      const trip = candidates.find((c) => c.themeKind === "trip");
+      const person = candidates.find((c) => c.themeKind === "person");
+      expect(trip).toBeDefined();
+      expect(person).toBeDefined();
+
+      // 量纲断言：两者同为毫秒级（>1e12），person 的 freshness 精确等于素材最新时刻
+      const expected = Date.parse("2022-06-01T10:00:00Z");
+      expect(person!.freshness, "person freshness = 素材最新 takenAt 毫秒").toBe(expected);
+      expect(person!.freshness, "person freshness 应为毫秒级量纲").toBeGreaterThan(1e12);
+      expect(
+        trip!.freshness,
+        "同量纲下新鲜 trip 应排在 2022 素材的 person 前（发现器按 freshness desc 排序）",
+      ).toBeGreaterThan(person!.freshness);
+      expect(candidates[0]!.themeKind, "排序首位应为新鲜 trip").toBe("trip");
     });
   });
 });

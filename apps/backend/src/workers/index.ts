@@ -74,7 +74,7 @@ const dailyPushWorkerInstance = new Worker("daily-push", dailyPushWorker, {
   prefix: config.bullmqPrefix,
 });
 
-// 每日视频生成 Worker — 每天 03:00 触发（有主题才做，spawn claude -p 渲染）
+// 每日视频生成 Worker — 每天 10:00 触发（有主题才做，spawn claude -p 渲染）
 const dailyVideoWorkerInstance = new Worker("daily-video", dailyVideoWorker, {
   connection,
   prefix: config.bullmqPrefix,

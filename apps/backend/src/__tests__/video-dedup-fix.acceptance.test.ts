@@ -615,13 +615,13 @@ describe("每日视频死循环修复 — 红队验收（AC1-AC10）", () => {
 
   describe("F3 failed 行幂等更新", () => {
     it("[AC6] FAILED-ROW-IDEMPOTENT-REFRESH：再次失败同 themeKey → UPDATE errorMsg+createdAt（旧行不吞新诊断，行数仍 1）", async () => {
-      seedTripPhotos(env, "idemtrip"); // trip chongqing-2024 候选素材
+      seedTripPhotos(env, "idemtrip"); // trip chongqing-202409 候选素材（新格式 slug-YYYYMM）
 
       const OLD_MSG = "旧失败诊断-SWALLOWED-BY-ONCONFLICT-DO-NOTHING";
       const OLD_ISO = daysAgoIso(10);
       seedVideoRow(env, {
         themeKind: "trip",
-        themeKey: "chongqing-2024",
+        themeKey: "chongqing-202409",
         status: "failed",
         errorMsg: OLD_MSG,
         createdAtIso: OLD_ISO,
@@ -640,7 +640,7 @@ describe("每日视频死循环修复 — 红队验收（AC1-AC10）", () => {
       const rows = env.sqlite
         .prepare(
           `SELECT status, error_msg, created_at FROM videos
-           WHERE theme_kind='trip' AND theme_key='chongqing-2024'`,
+           WHERE theme_kind='trip' AND theme_key='chongqing-202409'`,
         )
         .all() as Array<{ status: string; error_msg: string | null; created_at: string }>;
 
@@ -674,7 +674,7 @@ describe("每日视频死循环修复 — 红队验收（AC1-AC10）", () => {
       const OLD_ISO = daysAgoIso(10);
       seedVideoRow(env, {
         themeKind: "trip",
-        themeKey: "chongqing-2024",
+        themeKey: "chongqing-202409",
         status: "failed",
         errorMsg: "初次失败诊断",
         createdAtIso: OLD_ISO,
@@ -691,7 +691,7 @@ describe("每日视频死循环修复 — 红队验收（AC1-AC10）", () => {
 
       const afterFirst = env.sqlite
         .prepare(
-          `SELECT status, error_msg, created_at FROM videos WHERE theme_kind='trip' AND theme_key='chongqing-2024'`,
+          `SELECT status, error_msg, created_at FROM videos WHERE theme_kind='trip' AND theme_key='chongqing-202409'`,
         )
         .get() as { status: string; error_msg: string | null; created_at: string };
       const callsAfterFirst = fs.readFileSync(callLog, "utf8").split("\n").filter(Boolean).length;
@@ -703,7 +703,7 @@ describe("每日视频死循环修复 — 红队验收（AC1-AC10）", () => {
 
       const afterSecond = env.sqlite
         .prepare(
-          `SELECT status, error_msg, created_at FROM videos WHERE theme_kind='trip' AND theme_key='chongqing-2024'`,
+          `SELECT status, error_msg, created_at FROM videos WHERE theme_kind='trip' AND theme_key='chongqing-202409'`,
         )
         .get() as { status: string; error_msg: string | null; created_at: string };
 

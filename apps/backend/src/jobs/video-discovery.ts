@@ -78,11 +78,11 @@ function region(lat: number, lng: number): string | null {
   if (lat >= 41 && lat <= 47 && lng >= 118 && lng <= 135) return "东北"; // 先于日本
   if (lat >= 31 && lat <= 46 && lng >= 130 && lng <= 146) return "日本";
   if (lat >= 33 && lat <= 38.5 && lng >= 125.5 && lng <= 130) return "韩国";
-  if (lat >= 10 && lat <= 23 && lng >= 102 && lng <= 110) return "越南";
-  // 海南岛先于越南收回：岛体（18-20.5N, 108.5-111.3E）整个落在越南围栏内——
-  // 20260829 vietnam-2026 实为三亚海棠湾/蜈支洲岛之行被误标越南。
-  // 围栏只含海南岛+北部湾海面，不含越南陆地（越南 18N+ 的国土在 108.5E 以西）。
+  // 海南必须先于越南判定：岛体（18-20.5N, 108.5-111.3E）大部落于越南粗围栏（lng≤110）内，
+  // 顺序反了三亚海棠湾（lng≈109.3-109.8）会被误标越南——20260829 修复时顺序写反，
+  // vietnam-2026 误标持续至今（真实 DB 冒烟暴露：海南段仍产 vietnam-202608 被 legacy 拦截）。
   if (lat >= 18 && lat <= 20.5 && lng >= 108.5 && lng <= 111.3) return "海南";
+  if (lat >= 10 && lat <= 23 && lng >= 102 && lng <= 110) return "越南";
   if (lat >= 22 && lat <= 27.5 && lng >= 115 && lng <= 121) return "福建·粤东";
   if (lat >= 28.5 && lat <= 31 && lng >= 105 && lng <= 108.5) return "重庆·川南"; // 先于贵州
   if (lat >= 24 && lat <= 28.5 && lng >= 102 && lng <= 108.5) return "贵州·云贵";
@@ -96,13 +96,21 @@ function region(lat: number, lng: number): string | null {
 const TRIP_MIN_PHOTOS = 20; // 旅行照片 <20 不候选（不够做完整 vlog，没意义）
 /** 同 region 时间窗口（间隔≤5天归为同一次旅行，recall-trips.cjs:41） */
 const TRIP_GAP_DAYS = 5;
+/**
+ * 旅行结束沉淀期：最后一张照片距今 ≥N 天才候选。
+ * 出片即 completed 永久去重——旅行进行中/照片未同步完就出片，会把不完整版锁死
+ * （后半程照片永远进不了完整 vlog）。vietnam-2026（=三亚）结束时滞的教训前置化。
+ */
+const TRIP_SETTLE_DAYS = 3;
+/** region 围栏未覆盖（GPS 围栏外目的地）时的哨兵分组名——照常聚类，slug 固定 far */
+const FAR_REGION = "远方";
 /** 人物成长线 cos 阈值（recall-growth.cjs:41 筛 >=0.5） */
 const PERSON_COS_THRESHOLD = 0.5;
 
 /** 候选主题统一形状 */
 export interface VideoCandidate {
   themeKind: "trip" | "person";
-  /** trip: `<regionSlug>-<year>` / person: `<personId>-<toYear>` */
+  /** trip: `<regionSlug>-<YYYYMM>` / person: `<personId>-<toYear>` */
   themeKey: string;
   /** 旅行：选片 photoId 列表（按美学降序 top）；人物：personId（素材由 skill 内部选） */
   photoIds: string[];
@@ -126,7 +134,7 @@ function decodeEmbedding(raw: string): Float32Array {
  * 发现视频候选主题（旅行 + 人物成长线），新鲜度降序。
  *
  * 去重语义：
- * - 旅行：仅按 themeKey（已生成过的 region+年 跳过）；不按 photoId。
+ * - 旅行：仅按 themeKey（已生成过的 region+年月 跳过）；不按 photoId。
  * - 人物：personId 的最大 consumed toYear；该 person 最新照片年 > max toYear 才候选；
  *        选片时按 photoId 排除已 consumed（防亲子照跨主题陷阱）。
  *
@@ -174,13 +182,12 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
     [];
   for (const r of rows) {
     if (r.lat == null || r.lng == null || !r.takenAt) continue;
-    const reg = region(r.lat, r.lng);
-    if (!reg) continue;
     const ts = Date.parse(r.takenAt);
     if (!Number.isFinite(ts)) continue;
     tagged.push({
       id: r.id,
-      region: reg,
+      // 围栏未覆盖不丢弃——标「远方」照常聚类，否则新目的地（围栏漏维护）的旅行永远不命中
+      region: region(r.lat, r.lng) ?? FAR_REGION,
       ts,
       takenAt: r.takenAt,
       year: Number.parseInt(r.takenAt.slice(0, 4), 10),
@@ -199,6 +206,8 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
   interface Trip {
     region: string;
     photos: typeof tagged;
+    /** 首张照片的 YYYYMM（themeKey 用，同年二次旅行不再撞 key） */
+    ym: string;
     year: number;
     startTs: number;
     endTs: number;
@@ -226,6 +235,7 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
         trips.push({
           region: reg,
           photos: cur,
+          ym: first.takenAt.slice(0, 7).replace("-", ""),
           year: first.year,
           startTs: first.ts,
           endTs: last.ts,
@@ -240,6 +250,7 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
         trips.push({
           region: reg,
           photos: cur,
+          ym: first.takenAt.slice(0, 7).replace("-", ""),
           year: first.year,
           startTs: first.ts,
           endTs: last.ts,
@@ -255,11 +266,17 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
   const candidates: VideoCandidate[] = [];
   for (const t of trips) {
     if (t.photos.length < TRIP_MIN_PHOTOS) continue;
-    const slug = REGION_SLUG[t.region];
-    if (!slug) continue; // 未知 region 不出片
-    const themeKey = `${slug}-${t.year}`;
-    if (completedKeys.has(themeKey)) continue; // 已生成过跳过
-    if (coolingKeys.has(themeKey)) continue; // failed 冷却期内跳过
+    // 结束沉淀期：旅行刚结束/进行中不出片（照片可能没同步完，出片即永久锁死不完整版）
+    if (Date.now() - t.endTs < TRIP_SETTLE_DAYS * 86_400_000) continue;
+    const isFar = t.region === FAR_REGION;
+    const slug = isFar ? "far" : REGION_SLUG[t.region];
+    if (!slug) continue; // 未知 region 不出片（理论上仅剩 REGION_SLUG 漏配）
+    // YYYYMM 而非年份：同年两段独立旅行不再互相永久去重。
+    // 兼容查旧 slug-year 格式：历史已出片（vietnam-2026 等）的旅行不得因换 key 格式被重新候选重拍
+    const themeKey = `${slug}-${t.ym}`;
+    const legacyKey = `${slug}-${t.year}`;
+    if (completedKeys.has(themeKey) || completedKeys.has(legacyKey)) continue; // 已生成过跳过
+    if (coolingKeys.has(themeKey) || coolingKeys.has(legacyKey)) continue; // failed 冷却期内跳过
 
     // 选片：给该旅行全部可用照片（按美学降序，不限上限）——让 AI(claude-p) 按旅行丰富度自主决定最终片数（≥20，素材多就做完整 vlog，不限制发挥）
     const photoIds = t.photos.map((p) => p.id);
@@ -271,6 +288,8 @@ async function discoverTrips(): Promise<VideoCandidate[]> {
       toYear: t.year,
       // 新鲜度：距今越近越优先（天数的负数 → 越大越新）
       freshness: t.endTs,
+      // 围栏外目的地 titleHint 中性化；真实地名由 skill 端 AI 视觉识别起（vietnam-2026 事故中
+      // titleHint 误标「越南」而 meta.title 正确写出「三亚」，AI 命名比 GPS 围栏可靠）
       titleHint: `${t.region} · ${t.year}`,
     });
   }
@@ -416,6 +435,7 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
 
     // 选片：每年取 top（早期少取近期多取，仿 recall-growth.cjs:51-57），排除已 consumed photoId
     const picks: string[] = [];
+    let latestTs = 0;
     const years = [...byYear.keys()].sort((a, b) => a - b);
     for (const y of years) {
       const arr = byYear.get(y);
@@ -425,6 +445,8 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
       for (const x of arr.slice(0, n)) {
         if (!consumedPhotoIds.has(x.photoId)) {
           picks.push(x.photoId);
+          const ts = Date.parse(byPhoto.get(x.photoId)?.takenAt ?? "");
+          if (Number.isFinite(ts) && ts > latestTs) latestTs = ts;
         }
       }
     }
@@ -437,8 +459,9 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
       photoIds: picks,
       personId: person.id,
       toYear,
-      // 新鲜度：toYear 越大越优先 + 样本量加权
-      freshness: toYear * 1000 + picks.length,
+      // 新鲜度：素材最新照片时刻（毫秒），与 trip 的 endTs 同量纲——
+      // 原来用 toYear*1000（~2e6）对 trip 毫秒时间戳（~1.7e12）差 6 个数量级，排序语义失真
+      freshness: latestTs,
       titleHint: `${displayName} · 成长线`,
     });
   }
