@@ -22,8 +22,12 @@ dist/
 *.swp
 *.swo
 
-# Claude Code
-.claude/
+# Claude Code（.claude 下默认全忽略，memory-video skill 定向放行——
+# git 无法 re-include 已被忽略目录内的路径，须逐级放行）
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/memory-video/
 
 # OS
 .DS_Store

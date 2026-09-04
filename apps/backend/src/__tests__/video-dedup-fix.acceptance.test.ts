@@ -34,7 +34,8 @@
  *     （照既有 video-discovery / video-claude-runner-and-persist 测试的 DDL，helper 变更时幂等兜底）
  *   - vi.hoisted holder + vi.mock("../db") 工厂 → beforeAll 注入 fixture DB 路径
  *   - vi.mock("../lib/config") getter 返回 holder 路径 + videoSpawnTimeoutMs 大默认值（防实现侧
- *     setTimeout(undefined) 立即触发超时造成 flaky）；vi.mock("node:os") HOME 重定向命中临时 SKILL.md
+ *     setTimeout(undefined) 立即触发超时造成 flaky）；config.memoryVideoSkillPath / HOME 重定向
+ *     均命中临时 SKILL.md
  *   - worker 调用 makeJob() 手造 { data, id, name, log, updateProgress }；wechat 推送全 mock
  */
 
@@ -75,6 +76,9 @@ vi.mock("../lib/config", () => ({
     get claudeCliPath() {
       return holder.fakeClaudePath;
     },
+    get memoryVideoSkillPath() {
+      return path.join(holder.tmpRoot, ".claude/skills/memory-video/SKILL.md");
+    },
     // F4 契约字段：worker/runner 若实现侧真读此值，给它一个不会干扰测试的大超时。
     // （AC8 对「真实 config」的断言走 importActual，不用这个 mock 值）
     videoSpawnTimeoutMs: 2_700_000,
@@ -92,8 +96,8 @@ vi.mock("../lib/config", () => ({
   },
 }));
 
-// HOME 重定向：SKILL.md 前置校验（~/.claude/skills/memory-video/SKILL.md）命中临时目录；
-// spawn env 里的 HOME 同步走 homedir()
+// HOME 重定向：SKILL.md 前置校验由 config.memoryVideoSkillPath getter 指向临时目录
+// （2026-09-04 skill 迁入仓库 .claude/skills/）；spawn env 里的 HOME 同步走 homedir()
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
   return {

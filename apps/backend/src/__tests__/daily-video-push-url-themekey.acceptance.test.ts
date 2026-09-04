@@ -23,7 +23,7 @@
  *   - 真实 SQLite（临时文件）+ 真实 schema（setupTestSchema）+ 真实 spawn fake claude 脚本
  *   - mock ../lib/config（galleryPublicUrl 指到测试域，避免断言依赖真实生产域名）
  *   - mock ../lib/push/wechat + ../lib/push/wechat-text 捕获推送内容（防真实 HTTP）
- *   - mock node:os.homedir 让 SKILL.md 前置校验命中临时目录
+ *   - mock node:os.homedir + config.memoryVideoSkillPath 让 SKILL.md 前置校验命中临时目录
  *
  * 红队铁律：不读 jobs/daily-video.ts 实现源码（仅按 export 契约 dailyVideoWorker(job) 驱动）；
  *   每个 it 含 expect.* 硬断言，失败必挂；无 skip / warn-soft-pass。
@@ -69,6 +69,9 @@ vi.mock("../lib/config", () => ({
     get claudeCliPath() {
       return holder.fakeClaudePath;
     },
+    get memoryVideoSkillPath() {
+      return path.join(holder.tmpRoot, ".claude/skills/memory-video/SKILL.md");
+    },
     galleryPublicUrl: holder.galleryPublicUrl,
     redisUrl: "redis://localhost:6379",
     bullmqPrefix: "bull-video-deeplink-test",
@@ -83,7 +86,8 @@ vi.mock("../lib/config", () => ({
   },
 }));
 
-// mock HOME：SKILL.md 前置校验（~/.claude/skills/memory-video/SKILL.md）命中临时目录
+// mock HOME：SKILL.md 前置校验由 config.memoryVideoSkillPath getter 指向临时目录
+// （2026-09-04 skill 迁入仓库 .claude/skills/）；spawn env 的 HOME 同步走 homedir()
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
   return {

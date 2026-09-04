@@ -99,6 +99,16 @@ export const config = {
       process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
       ".autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun",
     ),
+  /** memory-video skill 的 SKILL.md 绝对路径（spawn 前置校验用）。
+   *  2026-09-04 从 ~/.claude/skills/ 迁入仓库 .claude/skills/（项目级 skill——spawn cwd
+   *  videoWorkspacePath 在仓库内，claude -p 向上找到项目 .claude/skills 即可发现）；
+   *  env MEMORY_VIDEO_SKILL_PATH 覆盖。 */
+  memoryVideoSkillPath:
+    process.env.MEMORY_VIDEO_SKILL_PATH ??
+    path.join(
+      process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
+      ".claude/skills/memory-video/SKILL.md",
+    ),
   /** spawn claude -p 视频生成超时（ms）。默认 45 分钟（实测 137 张素材渲染 29 分钟撞原
    *  30 分钟硬编码线被 SIGTERM，finalize 未执行）；cron 每天 10:00，45 分钟完成可接受。
    *  env VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */

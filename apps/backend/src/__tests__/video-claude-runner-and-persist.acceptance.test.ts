@@ -37,7 +37,7 @@
  *   - ffmpeg 生成 1920x1080 H264 test mp4 作 stub 产物模板
  *   - 写 fake claude shell 脚本，chmod +x，holder 暂存路径供 config getter 返回
  *   - mock ../lib/push/wechat（dailyVideoWorker 会触发推送，本文件不验推送，仅防真实 HTTP）
- *   - mock ../lib/config + node:os（HOME 重定向让 SKILL.md 前置校验命中临时目录）
+ *   - mock ../lib/config + node:os（config.memoryVideoSkillPath / HOME 重定向均命中临时目录）
  */
 
 import { spawnSync } from "node:child_process";
@@ -90,6 +90,9 @@ vi.mock("../lib/config", () => ({
     get claudeCliPath() {
       return holder.fakeClaudePath;
     },
+    get memoryVideoSkillPath() {
+      return path.join(holder.tmpRoot, ".claude/skills/memory-video/SKILL.md");
+    },
     redisUrl: "redis://localhost:6379",
     bullmqPrefix: "bull-video-test",
     ai: { baseUrl: "", apiKey: "", visionModel: "", model: "", promptVersion: "v2" },
@@ -103,7 +106,8 @@ vi.mock("../lib/config", () => ({
   },
 }));
 
-// mock HOME 让 SKILL.md 前置校验（~/.claude/skills/memory-video/SKILL.md）命中临时目录
+// mock HOME：spawn env 的 HOME 同步走 homedir()；SKILL.md 前置校验由
+// config.memoryVideoSkillPath getter 指向临时目录（2026-09-04 skill 迁入仓库 .claude/skills/）
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
   return {
@@ -178,7 +182,7 @@ function createRunnerEnv(): RunnerEnv {
   // spawn 前置三存在校验所需文件
   fs.mkdirSync(path.join(workspacePath, "node_modules"), { recursive: true });
   fs.writeFileSync(path.join(workspacePath, "render-immersive.mjs"), "// test stub");
-  // SKILL.md 在 HOME/.claude/skills/memory-video/（HOME 已被 mock 到 tmpRoot）
+  // SKILL.md 在 tmpRoot/.claude/skills/memory-video/（config.memoryVideoSkillPath getter 指向此处）
   const skillDir = path.join(tmpRoot, ".claude/skills/memory-video");
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# memory-video test stub");

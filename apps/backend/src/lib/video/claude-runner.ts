@@ -6,7 +6,8 @@
  * 契约（设计文档「claude -p 调用契约」）：
  * - spawn 用绝对路径 `config.claudeCliPath`（不依赖 PATH——PM2 resurrect 时 nvm 不在 PATH）
  * - cwd = `config.videoWorkspacePath`（Remotion 项目根）
- * - spawn 前三存在校验：node_modules + render-immersive.mjs + ~/.claude/skills/memory-video/SKILL.md
+ * - spawn 前三存在校验：node_modules + render-immersive.mjs + memory-video SKILL.md
+ *   （config.memoryVideoSkillPath，2026-09-04 起指向仓库 .claude/skills/）
  * - AbortController + config.videoSpawnTimeoutMs 超时（env 可调，默认 45min）+ SIGTERM + 清理 .tmp mp4
  * - 失败不降级、不重试渲染（返回 err 让 job 写 failed 行）
  */
@@ -63,7 +64,7 @@ export async function assertSpawnPrerequisites(): Promise<void> {
     { label: "render-immersive.mjs", p: path.join(ws, "render-immersive.mjs") },
     {
       label: "memory-video SKILL.md",
-      p: path.join(homedir(), ".claude/skills/memory-video/SKILL.md"),
+      p: config.memoryVideoSkillPath,
     },
   ];
   for (const c of checks) {
