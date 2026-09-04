@@ -1,3 +1,4 @@
+import type { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -27,8 +28,30 @@ import { runtimeConfigRouter } from "./routes/runtime-config";
 import { workersControlRouter } from "./routes/workers-control";
 import { workersLogsRouter } from "./routes/workers-logs";
 
+/**
+ * 清理同队列中同名但 pattern/tz 不一致的残留 repeat 调度器。
+ *
+ * BullMQ 按 (name, repeat opts) 计算 scheduler hash，调整 cron 时间后旧注册会常驻 Redis，
+ * 与新注册并存造成每天双触发（2026-09 事故：精选 00:00 + 06:00 双跑，两轮竞态写库导致
+ * dailyPicks 主行与 entries[0] 分裂）。注册前调用本函数使调度自愈。
+ */
+async function pruneStaleRepeatables(
+  queue: Queue,
+  name: string,
+  pattern: string,
+  tz: string,
+): Promise<void> {
+  const jobs = await queue.getRepeatableJobs();
+  for (const j of jobs) {
+    if (j.name === name && (j.pattern !== pattern || (j.tz ?? "") !== tz)) {
+      await queue.removeRepeatableByKey(j.key);
+    }
+  }
+}
+
 /** 注册每日精选重复任务（每天北京时间凌晨 0:00） */
 export async function registerDailyRepeatableJob(): Promise<void> {
+  await pruneStaleRepeatables(dailyQueue, "daily-selection-cron", "0 0 * * *", "Asia/Shanghai");
   await dailyQueue.add(
     "daily-selection-cron",
     {},
@@ -41,6 +64,7 @@ export async function registerDailyRepeatableJob(): Promise<void> {
 
 /** 注册每日壁纸推送重复任务（每天北京时间 10:00，与每日精选 0:00 解耦） */
 export async function registerDailyPushRepeatableJob(): Promise<void> {
+  await pruneStaleRepeatables(dailyPushQueue, "daily-push-cron", "0 10 * * *", "Asia/Shanghai");
   await dailyPushQueue.add(
     "daily-push-cron",
     {},
@@ -53,6 +77,7 @@ export async function registerDailyPushRepeatableJob(): Promise<void> {
 
 /** 注册每日视频生成重复任务（每天北京时间 10:00：和壁纸推送同期，早上人性化；生成完 ~10:15 推送企业微信） */
 export async function registerDailyVideoRepeatableJob(): Promise<void> {
+  await pruneStaleRepeatables(dailyVideoQueue, "daily-video-cron", "0 10 * * *", "Asia/Shanghai");
   await dailyVideoQueue.add(
     "daily-video-cron",
     {},
@@ -69,6 +94,14 @@ export async function registerScanRepeatableJob(): Promise<void> {
     .select({ id: schema.storageSources.id })
     .from(schema.storageSources)
     .where(eq(schema.storageSources.enabled, true));
+
+  // 清理已禁用/已删除存储源的残留 scan-cron 调度器（BullMQ 不随 source 移除自动清理）
+  const keepScanNames = new Set(sources.map((s) => `scan-cron:${s.id}`));
+  for (const j of await scanQueue.getRepeatableJobs()) {
+    if (j.name.startsWith("scan-cron:") && !keepScanNames.has(j.name)) {
+      await scanQueue.removeRepeatableByKey(j.key);
+    }
+  }
 
   for (const source of sources) {
     await scanQueue.add(
