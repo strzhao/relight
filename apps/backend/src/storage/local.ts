@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -42,7 +43,19 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
   }
 
   private async walk(rootPath: string, currentPath: string, files: FileInfo[]): Promise<void> {
-    const entries = await fs.readdir(currentPath, { withFileTypes: true });
+    // 单个子目录不可读（SMB 抖动 EACCES / 系统相册 EPERM）只跳过该目录，
+    // 不放弃整棵树——否则失败点之后的照片当晚全部漏扫（扫描夜间任务的实际事故模式）。
+    // 根目录本身不可读仍会抛出：由调用方（scan-storage）标记存储源不可达。
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch (err) {
+      if (currentPath === rootPath) throw err;
+      console.warn(
+        `[storage/local] 跳过不可读目录 ${currentPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
@@ -50,7 +63,15 @@ export class LocalFilesystemAdapter implements IStorageAdapter {
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
         if (SCAN_EXTENSIONS.has(ext)) {
-          const stat = await fs.stat(fullPath);
+          let stat: Stats;
+          try {
+            stat = await fs.stat(fullPath);
+          } catch (err) {
+            console.warn(
+              `[storage/local] 跳过不可读文件 ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            continue;
+          }
           files.push({
             path: fullPath,
             name: entry.name,

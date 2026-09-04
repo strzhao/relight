@@ -10,11 +10,11 @@
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { LocalFilesystemAdapter } from "../storage/local";
 
 // ---- 辅助函数 ----
@@ -409,6 +409,42 @@ describe("LocalFilesystemAdapter — 验收测试（设计文档修复 1+2）", 
     it("应处理文件名中的路径分隔符", () => {
       expect(adapter.getMimeType("/path/to/photo.png")).toBe("image/png");
       expect(adapter.getMimeType("C:\\Users\\test\\image.jpeg")).toBe("image/jpeg");
+    });
+  });
+
+  // =========================================================================
+  // 目录遍历容错：单目录不可读只跳过，不放弃整棵树
+  // （事故背景：NAS SMB 抖动夜 EACCES 导致当晚全部漏扫）
+  // =========================================================================
+
+  describe("walk 容错 — 单目录 EACCES 不中断扫描", () => {
+    it("不可读子目录被跳过，其余文件正常收集；根目录不可读仍抛出", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        // 可读目录放 1 张 jpg；不可读目录放 1 张 jpg（应被跳过）
+        const okDir = join(TEST_DIR, "walk-ok");
+        const badDir = join(TEST_DIR, "walk-bad");
+        await mkdir(okDir, { recursive: true });
+        await mkdir(badDir, { recursive: true });
+        await writeFile(join(okDir, "ok.jpg"), "ok");
+        await writeFile(join(badDir, "hidden.jpg"), "hidden");
+        await chmod(badDir, 0o000);
+
+        const files = await adapter.listFiles(TEST_DIR);
+        const names = files.map((f) => f.name);
+        expect(names).toContain("ok.jpg");
+        expect(names).not.toContain("hidden.jpg");
+        expect(warnSpy).toHaveBeenCalled();
+
+        // 根目录不可读：仍向调用方抛出（scan-storage 依赖它标记源不可达）
+        await chmod(TEST_DIR, 0o000);
+        await expect(adapter.listFiles(TEST_DIR)).rejects.toThrow();
+        await chmod(TEST_DIR, 0o755);
+      } finally {
+        warnSpy.mockRestore();
+        // 恢复权限让 afterAll 清理成功
+        await chmod(join(TEST_DIR, "walk-bad"), 0o755).catch(() => {});
+      }
     });
   });
 });
