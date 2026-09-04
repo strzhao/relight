@@ -123,7 +123,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo；扫描结束后调用 `detectBursts` 识别连拍组（时间窗口 ≤3s + dHash 汉明距离 ≤10），写入 `bursts` 表并标记每组代表
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）；分析完成后调用 `calibrateBurstRepresentative` 在组内竞争代表位（选评分最高者）
-- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — `buildCandidatePool`（4 源混采 + 跨表去重 + 主力源美学下限 `minAestheticScorePrimary` 默认 ≥7.0、fillUp ≥7.5）→ **select AI 评选阶段**（`runSelectStage`：文本模型从候选摘要重排 hero，`weightedScore` 降序为兜底；5 路 fallback 保序：`dailySelectEnabled===false`/候选<2 零 AI/抛错/解析失败/越界）→ pLimit 并发为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`，并追加合成手机竖版壁纸（1290×2796，B 方案全屏照片+底部渐变压白字，cacheKey `1290x2796` 与路由/推送三方闭合，独立 try/catch 不阻塞主流程）；**候选池排序**：`weightedScore = aestheticScore + ageBonus(yearsAgo)`，年代权重从乘法(最高 1.6×)改为加法(封顶 +0.3)，避免分数趋同时退化为纯年代排序；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
+- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — `buildCandidatePool`（4 源混采 + 跨表去重 + 主力源美学下限 `minAestheticScorePrimary` 默认 ≥7.0、fillUp ≥7.5）→ **select AI 评选阶段**（`runSelectStage`：文本模型从候选摘要重排 hero，`weightedScore` 降序为兜底；5 路 fallback 保序：`dailySelectEnabled===false`/候选<2 零 AI/抛错/解析失败/越界）→ pLimit 并发为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`，并追加合成手机竖版壁纸（1290×2796，B 方案全屏照片+底部渐变压白字，cacheKey `1290x2796` 与路由/推送三方闭合，独立 try/catch 不阻塞主流程）；**候选池排序**：`weightedScore = aestheticScore`（2026-09-04 起年代完全平权，无年份限制、无 ageBonus——此前乘法 1.6× → 加法封顶 +0.3 → 完全移除；新照片与老照片同台，只比美学质量）；**家人主角**：候选摘要与 narrate 均注入 `peopleNicknames`（画面家人称呼），select prompt 置最高优先级规则「家人出镜优先于纯宠物/风景」；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段
@@ -181,7 +181,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - Next.js 15 App Router，Tailwind CSS v4，组件使用 `@/components/ui/` 下的 Radix UI 封装
 - **客户端 API**: `lib/api.ts` — 浏览器端 fetch 包装，`NEXT_PUBLIC_API_URL` 指向后端
 - **服务端 API**: `lib/admin-data.ts` — RSC 中 `serverFetch<T>()`，`cache: "no-store"` 保证数据实时
-- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日 20 张精选 entries，左大图+右叙事+底部缩略图栅格，支持 ?entry=N URL 同步/键盘 ←/→ 切换/aria-selected；`CaptureDateline`（拍摄时刻「拍摄于 {日期} · {时刻} · {N} 年前」，与壁纸同源 `formatPhotoCaptureTime`，`takenAt` 缺失不渲染）渲染在右下角 `FolioFooter`（masthead 不再含 dateline；FolioFooter 仅 dateline 单行，原 `Vol. {year}` / `Relight Chronicle` 品牌印记已删精简）；entries=[] 时回退 HeroContentLegacy 旧版布局), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
+- **页面**: 首页 `/` (`DailyHero` 组件 — 展示今日 12 张精选 entries，左大图+右叙事+底部缩略图栅格，支持 ?entry=N URL 同步/键盘 ←/→ 切换/aria-selected；`CaptureDateline`（拍摄时刻「拍摄于 {日期} · {时刻} · {N} 年前」，与壁纸同源 `formatPhotoCaptureTime`，`takenAt` 缺失不渲染）渲染在右下角 `FolioFooter`（masthead 不再含 dateline；FolioFooter 仅 dateline 单行，原 `Vol. {year}` / `Relight Chronicle` 品牌印记已删精简）；entries=[] 时回退 HeroContentLegacy 旧版布局), `/photos`, `/photos/[id]`, `/history`, `/settings`, `/admin` (仪表盘)
 - **管理后台**: `/admin` 仪表盘 + `/admin/photos` + `/admin/queues` + `/admin/health` 子页面
 
 ### 数据流
@@ -200,11 +200,14 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                    候选池: 4 源混采 + 跨表去重 (daily_picks ∪ daily_pick_entries.members)
                           主力源美学下限 ≥7.0 / fillUp ≥7.5
-                          weightedScore = aestheticScore + ageBonus (加法封顶 +0.3)
+                          4 源均无年份限制（今年照片可入选），weightedScore = aestheticScore
+                          （2026-09-04 起年代完全平权，ageBonus 已移除）
                                     ↓
                    select 评选阶段: 文本模型重排 hero (runSelectStage, 5 路 fallback 保序)
+                          候选摘要含「画面人物」(peopleNicknames)，prompt 规则「家人主角优先」
                                     ↓
-                   pLimit 并发: 20 张 entries 各自 narrate(vision) + select members(text)
+                   pLimit 并发: 12 张 entries 各自 narrate(vision) + select members(text)
+                          narrate 注入画面人物称呼（第一位=画面主角宜作「你」）
                                     ↓
                    db.transaction: DELETE + bulk INSERT dailyPickEntries (幂等)
                           entries[0] 同步写 dailyPicks 主记录
@@ -214,7 +217,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                                     ↓
                    API: GET /api/daily/today → DailyPick { entries: DailyPickEntry[] }
                                     ↓
-                   前端首页 DailyHero: 20 缩略图栅格 + 左大图/右叙事 + series strip
+                   前端首页 DailyHero: 12 缩略图栅格 + 左大图/右叙事 + series strip
                                     ↓
               mac App: GET /api/daily/:pickDate/wallpaper?width=&height=
                        (按屏幕尺寸实时合成/缓存命中直接返回，设为系统壁纸)

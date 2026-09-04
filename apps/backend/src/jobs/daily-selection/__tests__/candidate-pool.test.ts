@@ -1,6 +1,6 @@
 /**
  * T12: candidate-pool 单元测试
- * 测试 ageBonus 数值断言 + dedupAndQuotaMerge 去重/quota 正确性
+ * 测试年代平权契约（weightedScore = aestheticScore）+ dedupAndQuotaMerge 去重/quota 正确性
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -10,58 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 // 本测试是纯函数验证，stub 掉 db 模块即可。
 vi.mock("../../../db", () => ({ db: {}, schema: {} }));
 
-import { type EnrichedCandidate, ageBonus, dedupAndQuotaMerge } from "../candidate-pool";
-
-// ===== ageBonus 数值断言 =====
-// 契约：y < 1 → 0；否则 min(0.3, √y × 0.05)；y ≥ 1 单调递增。
-
-describe("ageBonus", () => {
-  it("0 年返回 0", () => {
-    expect(ageBonus(0)).toBe(0);
-  });
-
-  it("0.5 年（< 1）返回 0", () => {
-    expect(ageBonus(0.5)).toBe(0);
-  });
-
-  it("1 年约等于 0.05", () => {
-    const result = ageBonus(1);
-    expect(result).toBeCloseTo(Math.sqrt(1) * 0.05, 4);
-  });
-
-  it("5 年约等于 0.1118", () => {
-    const result = ageBonus(5);
-    expect(result).toBeCloseTo(Math.sqrt(5) * 0.05, 4);
-  });
-
-  it("10 年约等于 0.158", () => {
-    const result = ageBonus(10);
-    expect(result).toBeCloseTo(Math.sqrt(10) * 0.05, 4);
-  });
-
-  it("20 年约等于 0.224", () => {
-    const result = ageBonus(20);
-    expect(result).toBeCloseTo(Math.sqrt(20) * 0.05, 4);
-  });
-
-  it("36 年封顶 0.30", () => {
-    // sqrt(36) * 0.05 = 0.30，恰好触及 cap
-    const result = ageBonus(36);
-    expect(result).toBeCloseTo(0.3, 4);
-  });
-
-  it("100 年封顶 0.30", () => {
-    const result = ageBonus(100);
-    expect(result).toBe(0.3);
-  });
-
-  it("单调递增（1-36 年）", () => {
-    const values = [1, 5, 10, 15, 20, 25, 30, 36].map((y) => ageBonus(y));
-    for (let i = 1; i < values.length; i++) {
-      expect(values[i]).toBeGreaterThanOrEqual(values[i - 1]!);
-    }
-  });
-});
+import { type EnrichedCandidate, dedupAndQuotaMerge } from "../candidate-pool";
 
 // ===== dedupAndQuotaMerge =====
 
@@ -104,7 +53,7 @@ describe("dedupAndQuotaMerge", () => {
         makeCandidate("p3", "sameMonth", 6.0),
       ],
       sameSeason: [],
-      agedRandom: [],
+      randomSample: [],
     };
 
     const result = dedupAndQuotaMerge(bySource, 20);
@@ -125,14 +74,14 @@ describe("dedupAndQuotaMerge", () => {
       makeCandidate(`s${i}`, "sameSeason", 4 - i * 0.1),
     );
     const agedItems = Array.from({ length: 4 }, (_, i) =>
-      makeCandidate(`a${i}`, "agedRandom", 3 - i * 0.1),
+      makeCandidate(`a${i}`, "randomSample", 3 - i * 0.1),
     );
 
     const bySource = {
       historyToday: historyHigh,
       sameMonth: monthItems,
       sameSeason: seasonItems,
-      agedRandom: agedItems,
+      randomSample: agedItems,
     };
 
     const result = dedupAndQuotaMerge(bySource, 20);
@@ -145,7 +94,7 @@ describe("dedupAndQuotaMerge", () => {
     expect(countBySource("historyToday")).toBeGreaterThanOrEqual(3);
     expect(countBySource("sameMonth")).toBeGreaterThanOrEqual(3);
     expect(countBySource("sameSeason")).toBeGreaterThanOrEqual(3);
-    expect(countBySource("agedRandom")).toBeGreaterThanOrEqual(3);
+    expect(countBySource("randomSample")).toBeGreaterThanOrEqual(3);
   });
 
   it("总数不超过 maxN", () => {
@@ -156,7 +105,7 @@ describe("dedupAndQuotaMerge", () => {
       historyToday: manyItems,
       sameMonth: [],
       sameSeason: [],
-      agedRandom: [],
+      randomSample: [],
     };
 
     const result = dedupAndQuotaMerge(bySource, 5);
@@ -168,7 +117,7 @@ describe("dedupAndQuotaMerge", () => {
       historyToday: [],
       sameMonth: [],
       sameSeason: [],
-      agedRandom: [],
+      randomSample: [],
     };
 
     const result = dedupAndQuotaMerge(bySource, 20);
@@ -180,7 +129,7 @@ describe("dedupAndQuotaMerge", () => {
       historyToday: [makeCandidate("h1", "historyToday", 8.0)],
       sameMonth: [makeCandidate("m1", "sameMonth", 9.0)],
       sameSeason: [makeCandidate("s1", "sameSeason", 7.0)],
-      agedRandom: [makeCandidate("a1", "agedRandom", 6.0)],
+      randomSample: [makeCandidate("a1", "randomSample", 6.0)],
     };
 
     const result = dedupAndQuotaMerge(bySource, 20);

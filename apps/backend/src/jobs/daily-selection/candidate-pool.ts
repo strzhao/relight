@@ -1,17 +1,20 @@
 /**
- * 候选池构造：4 源平等加权混采 + 久远度加权 + 30 天去重
+ * 候选池构造：4 源平等混采 + 年代完全平权 + 30 天去重
  *
  * 架构：
- * - 4 个独立子查询（historyToday / sameMonth / sameSeason / agedRandom），每源取 K=maxN 张
- * - per-source quota：每源保底 3 张 + 剩余 8 槽按 weightedScore 抢占
- * - 合并去重后截前 20 张
+ * - 4 个独立子查询（historyToday / sameMonth / sameSeason / randomSample），每源取 K=maxN 张
+ * - per-source quota：每源保底 3 张 + 剩余槽按 weightedScore 抢占
+ * - 合并去重后截前 maxN 张
+ *
+ * 年代平权（2026-09-04）：所有源不做年份限制（今年照片可入选），weightedScore = aestheticScore，
+ * 不做任何年代加成——新照片与老照片完全平权。
  *
  * 注：K_PER_SOURCE 设为 maxN（而非固定 8），确保当候选只集中在 1-2 个源时
  * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
  */
 
 import path from "node:path";
-import { and, desc, eq, gte, lt, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, ne, sql } from "drizzle-orm";
 import { db, schema } from "../../db";
 import { config } from "../../lib/config";
 import { haversineMeters } from "../../lib/geo";
@@ -26,12 +29,12 @@ const QUOTA_PER_SOURCE = 3;
 const EVENT_KEY_OVERFETCH_RATIO = 1.5;
 
 /** 4 个主路径候选源标识（不含 fillUp） */
-export type PrimaryCandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "agedRandom";
+export type PrimaryCandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "randomSample";
 
 /** 全部候选源标识（含第 5 源 fillUp） */
 export type CandidateSource = PrimaryCandidateSource | "fillUp";
 
-/** 候选照片（带加权分和元数据） */
+/** 候选照片（带评分与元数据） */
 export interface EnrichedCandidate {
   photoId: string;
   filePath: string;
@@ -63,22 +66,13 @@ export interface EnrichedCandidate {
 }
 
 /**
- * 久远度加成函数：开根号曲线，封顶 0.3（加法而非乘法，避免候选分数趋同时退化为年代排序）。
+ * 年代平权（2026-09-04）：weightedScore = aestheticScore，不做任何年代加成。
  *
- * weightedScore 新公式 = aestheticScore + ageBonus(yearsAgo)。
- *
- * - y < 1: 0（保持旧"不足 1 年不加成"语义）
- * - 1 年: ~0.05
- * - 5 年: ~0.11
- * - 10 年: ~0.16
- * - 20 年: ~0.22
- * - 36 年: 0.30 (cap)
- *
- * y ≥ 1 区间单调递增（sqrt 单调）。
+ * 历史：曾用开根号加成（封顶 +0.3），2026-09-04 起完全平权——新照片与老照片同台，
+ * 只比美学质量。yearsAgo 仍保留在候选元数据中（select prompt / narrate 展示用）。
  */
-export function ageBonus(yearsAgo: number): number {
-  if (yearsAgo < 1) return 0;
-  return Math.min(0.3, Math.sqrt(yearsAgo) * 0.05);
+function computeWeightedScore(aestheticScore: number | null): number {
+  return aestheticScore ?? 5.0;
 }
 
 /**
@@ -262,10 +256,10 @@ function calcYearsAgo(takenAt: string | null, currentYear: number): number {
  * 构造候选池（4 源平等混采 + per-source quota + 主题去重聚类）
  *
  * 流程：
- *   1. 4 源各取 K=maxN 张
+ *   1. 4 源各取 K=maxN 张（均无年份限制，今年照片可入选）
  *   2. dedupAndQuotaMerge 做去重 + per-source quota（不截断 maxN）
  *   3. clusterByDirnameAndTime 做主题去重，每簇只保留代表
- *   4. 截前 maxN（聚类后簇数 < maxN 时直接接受 N<20，不做 K 回退）
+ *   4. 截前 maxN（聚类后簇数 < maxN 时直接接受 N<maxN，不做 K 回退）
  */
 export async function buildCandidatePool(
   options: BuildCandidatePoolOptions = {},
@@ -280,7 +274,6 @@ export async function buildCandidatePool(
   const K_PER_SOURCE = Math.ceil(maxN * EVENT_KEY_OVERFETCH_RATIO);
   const { year, month, day, monthDay, seasonMonths } = getBeijingDateInfo(now);
   const currentYear = year;
-  const twoYearsAgo = new Date(now.getTime() - 2 * 365.25 * 86400_000).toISOString();
 
   // 连拍去重：同一组连拍只让代表进入候选池，避免 K=8 被一组连拍占满。
   // 与 routes/photos.ts:39 的列表过滤保持一致。
@@ -288,7 +281,7 @@ export async function buildCandidatePool(
 
   // ---- 4 个独立子查询 ----
 
-  // 源1: 历史上的今天（月日匹配，年份 < 当前年）
+  // 源1: 历史上的今天（月日匹配，不限年份——今年今日的照片也可入选）
   const historyTodayRows = await db
     .select({
       photoId: schema.photos.id,
@@ -315,7 +308,6 @@ export async function buildCandidatePool(
     .where(
       and(
         sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}`,
-        sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
         gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
       ),
@@ -323,7 +315,7 @@ export async function buildCandidatePool(
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
     .limit(K_PER_SOURCE);
 
-  // 源2: 同月份不同日（月份匹配，日 != 今日）
+  // 源2: 同月份不同日（月份匹配，日 != 今日，不限年份）
   const sameMonthRows = await db
     .select({
       photoId: schema.photos.id,
@@ -351,7 +343,6 @@ export async function buildCandidatePool(
       and(
         sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${month}`,
         sql`strftime('%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) != ${day}`,
-        sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
         gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
       ),
@@ -359,7 +350,7 @@ export async function buildCandidatePool(
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
     .limit(K_PER_SOURCE);
 
-  // 源3: 同季节不同月（月份在季节内，但 != 今月）
+  // 源3: 同季节不同月（月份在季节内，但 != 今月，不限年份）
   const otherSeasonMonths = seasonMonths.filter((m) => m !== month);
   let sameSeasonRows: typeof historyTodayRows = [];
   if (otherSeasonMonths.length > 0) {
@@ -391,7 +382,6 @@ export async function buildCandidatePool(
       .where(
         and(
           sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) IN (${sql.raw(monthsInClause)})`,
-          sql`strftime('%Y', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) < ${String(currentYear)}`,
           gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
           burstRepOnly,
         ),
@@ -400,8 +390,8 @@ export async function buildCandidatePool(
       .limit(K_PER_SOURCE);
   }
 
-  // 源4: 久远随机老照片（2 年前，按加权分+随机抖动）
-  const agedRandomRows = await db
+  // 源4: 随机抽样（全库无时间谓词，按美学分+随机抖动，与新照片完全平权）
+  const randomSampleRows = await db
     .select({
       photoId: schema.photos.id,
       filePath: schema.photos.filePath,
@@ -425,14 +415,7 @@ export async function buildCandidatePool(
       sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
     )
     .where(
-      and(
-        lt(
-          sql`COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})`,
-          sql`${twoYearsAgo}`,
-        ),
-        gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
-        burstRepOnly,
-      ),
+      and(gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary), burstRepOnly),
     )
     .orderBy(
       desc(sql`(COALESCE(${schema.photoAnalyses.aestheticScore}, 5.0) + ABS(RANDOM() % 3)) / 1.0`),
@@ -445,7 +428,6 @@ export async function buildCandidatePool(
       .filter((r) => !excludeIds.has(r.photoId))
       .map((r) => {
         const yearsAgo = calcYearsAgo(r.takenAt, currentYear);
-        const score = r.aestheticScore ?? 5.0;
         return {
           photoId: r.photoId,
           filePath: r.filePath,
@@ -454,7 +436,7 @@ export async function buildCandidatePool(
           durationSec: r.durationSec,
           aestheticScore: r.aestheticScore,
           yearsAgo,
-          weightedScore: score + ageBonus(yearsAgo),
+          weightedScore: computeWeightedScore(r.aestheticScore),
           source,
           narrative: r.narrative,
           emotionalAnalysis: r.emotionalAnalysis,
@@ -481,7 +463,7 @@ export async function buildCandidatePool(
   const historyToday = filterByEventKey(toEnriched(historyTodayRows, "historyToday"));
   const sameMonth = filterByEventKey(toEnriched(sameMonthRows, "sameMonth"));
   const sameSeason = filterByEventKey(toEnriched(sameSeasonRows, "sameSeason"));
-  const agedRandom = filterByEventKey(toEnriched(agedRandomRows, "agedRandom"));
+  const randomSample = filterByEventKey(toEnriched(randomSampleRows, "randomSample"));
 
   // ---- per-source quota 合并（不截断）----
   // 按设计文档要求："merged.slice(0, maxN) 这一截断需要在聚类之后做，
@@ -494,7 +476,7 @@ export async function buildCandidatePool(
   // 顺序锚点存在。这是文档"接受 N<20、不做 K 回退"的直接推论。
   const expandedMax = maxN * 4;
   const merged = dedupAndQuotaMerge(
-    { historyToday, sameMonth, sameSeason, agedRandom },
+    { historyToday, sameMonth, sameSeason, randomSample },
     expandedMax,
   );
 
@@ -755,7 +737,7 @@ export function dedupAndQuotaMerge(
     "historyToday",
     "sameMonth",
     "sameSeason",
-    "agedRandom",
+    "randomSample",
   ];
 
   // 各源按 weightedScore 降序

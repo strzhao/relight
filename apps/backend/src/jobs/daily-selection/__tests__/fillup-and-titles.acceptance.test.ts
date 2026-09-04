@@ -163,7 +163,7 @@ function sameMonthOtherDayISO(yearsAgo: number): string {
   return `${year}-${month}-${otherDay}T10:00:00Z`;
 }
 
-function agedRandomISO(yearsAgo: number): string {
+function randomSampleISO(yearsAgo: number): string {
   const year = new Date().getFullYear() - yearsAgo;
   const { month } = getBeijingMonthDay();
   const monthNum = Number.parseInt(month, 10);
@@ -172,7 +172,7 @@ function agedRandomISO(yearsAgo: number): string {
 }
 
 /**
- * 构造"仅 fillUp 可达"的日期：去年（< 2 年前，故不进 agedRandom）+ 与当前月份相差
+ * 构造"仅 fillUp 可达"的日期：去年（< 2 年前，故不进 randomSample）+ 与当前月份相差
  * 6 个月（必落在不同季节，故不进 historyToday/sameMonth/sameSeason）。
  * 这样的照片不命中任何主路径源，只能通过 fillUp 第 5 源（仅按 score≥7.5 过滤）被捞回。
  */
@@ -215,7 +215,7 @@ describe("A. 类型契约", () => {
       "historyToday",
       "sameMonth",
       "sameSeason",
-      "agedRandom",
+      "randomSample",
     ];
     expect(values).toHaveLength(4);
     // buildCandidatePool 存在即证明导出有效
@@ -229,7 +229,7 @@ describe("A. 类型契约", () => {
       "historyToday",
       "sameMonth",
       "sameSeason",
-      "agedRandom",
+      "randomSample",
       "fillUp",
     ];
     expect(allValues).toHaveLength(5);
@@ -267,7 +267,7 @@ describe("B. buildCandidatePool 行为", () => {
     }
     // 补充其他源让 dedupAndQuotaMerge 工作
     addPhoto(testSqlite, "m1", sameMonthOtherDayISO(2), 8.0);
-    addPhoto(testSqlite, "a1", agedRandomISO(3), 7.5);
+    addPhoto(testSqlite, "a1", randomSampleISO(3), 7.5);
 
     const result = await buildCandidatePool({ excludeIds: new Set(), maxN: 3 });
 
@@ -279,71 +279,49 @@ describe("B. buildCandidatePool 行为", () => {
   });
 
   it("B-4: 主路径不足（聚类后 < maxN）时触发 fillUp，返回含 source='fillUp' 元素", async () => {
+    // 平权世界（randomSample 无时间谓词）的可达构造：
+    // fillUp 候选逃逸主路径的唯一机制是 randomSample 的 LIMIT 截断（K = ceil(maxN*1.5)），
+    // 且被截断者须与 pool1 代表空间分离（同 dirname 需 |Δt|>60min，或不同 dirname）。
+    // 用 aes 差距 > 抖动范围（ABS(RANDOM()%3) ∈ [0,2]）保证截断确定性。
     const { buildCandidatePool } = await import("../candidate-pool");
     addSource(testSqlite);
 
-    // 构造所有主路径候选都集中在同一 dirname + 时间窗内（聚类后只剩 1 簇）
-    const baseTime = new Date(yearsAgoISO(3)).getTime();
-    for (let i = 0; i < 4; i++) {
-      const t = new Date(baseTime + i * 60 * 1000).toISOString(); // 1 min 间隔，在 60min 窗内
-      sqliteInsertPhoto(testSqlite, `cluster${i}`, t, 8.0, "/photos/same-dir");
-    }
-
-    // 全库另有 5 张高分照片放在完全不同 dirname（fillUp 候选）。
-    // 关键：takenAt 必须落在所有主路径源之外（fillUpOnlyISO：去年 + 反季月份），
-    // 否则它们会被 agedRandom 等主路径源捞进 pool1，导致 pool1 填满、fillUp 永不触发。
-    // aesthetic_score >= 7.5 满足 fillUp 质量下限。
+    // 5 张高分照同 dirname、≤60min 链式成簇（0/50/100/150/200min），aes 9.9
+    // → randomSample LIMIT=5（K=ceil(3*1.5)）恰好全选，聚类后 1 簇
+    const baseTime = new Date(randomSampleISO(3)).getTime();
     for (let i = 0; i < 5; i++) {
-      sqliteInsertPhoto(
-        testSqlite,
-        `fill${i}`,
-        fillUpOnlyISO(i), // 仅 fillUp 可达
-        8.0, // aesthetic_score >= 7.5
-        `/photos/fill-dir-${i}`, // 不同 dirname 避免冲突
-      );
+      const t = new Date(baseTime + i * 50 * 60 * 1000).toISOString();
+      sqliteInsertPhoto(testSqlite, `cluster${i}`, t, 9.9, "/photos/chain-dir");
     }
 
-    // maxN=5，但主路径聚类后只有 1 簇 → 触发 fillUp
-    const result = await buildCandidatePool({ excludeIds: new Set(), maxN: 5 });
+    // 候补照 D：aes 7.6（≥7.5 fillUp 门槛；9.9-7.6=2.3 > 抖动上限 2 → 永远被 LIMIT 截断），
+    // 同 dirname 但距链尾 +200min（|Δt| > 60min → 与 pool1 代表不冲突），日期避开其他 3 源
+    sqliteInsertPhoto(
+      testSqlite,
+      "fill-d",
+      new Date(baseTime + 400 * 60 * 1000).toISOString(),
+      7.6,
+      "/photos/chain-dir",
+    );
+
+    // maxN=3，主路径聚类后只有 1 簇 → 触发 fillUp，D 被回填
+    const result = await buildCandidatePool({ excludeIds: new Set(), maxN: 3 });
 
     // 应当触发 fillUp
     const fillUpItems = result.filter((r) => r.source === "fillUp");
     expect(fillUpItems.length).toBeGreaterThan(0);
+    expect(fillUpItems.map((r) => r.photoId)).toContain("fill-d");
     // 总数 > 1（pool1 的 1 簇 + 至少 1 个 fillUp）
     expect(result.length).toBeGreaterThan(1);
   });
 
-  it("B-5: pool1 代表稳定性：有空位时 fillUp 不挤掉 pool1 代表（即便 fillUp 评分更高）", async () => {
-    // 设计说明（红队复盘）：
-    // 本用例原本还想断言"与 pool1 代表 dirname/时间窗冲突的 fillUp 候选被丢弃"，但该分支
-    // 通过 buildCandidatePool 公开 API **不可达**：fillUp 候选只可能是「未被任何主路径源捞入」
-    // 的照片；而冲突判定要求候选与某个 pool1 代表时间相邻（同 dirname ≤60min 或 GPS≤500m 且 ≤24h），
-    // 任何与 ≥2 年前的 pool1 代表如此相邻的照片自身也满足 agedRandom（<2 年前）条件，会被聚进
-    // 该代表所在簇（→ 进 excludeAfterPrimary）而非留作 fillUp 候选。故冲突过滤分支在此层级无法触发，
-    // 这里只验证可达的核心契约：**最终池有空位时 pool1 代表必然保留，不被高分 fillUp 候选挤出**。
-    const { buildCandidatePool } = await import("../candidate-pool");
-    addSource(testSqlite);
-
-    // pool1：1 张主路径代表 p_main（historyToday，月日匹配今天），score 8.5
-    sqliteInsertPhoto(testSqlite, "p_main", yearsAgoISO(3), 8.5, "/photos/main");
-
-    // fillUp 候选（仅 fillUp 可达：去年 + 反季月份，不命中任何主路径源），不同 dirname → 不冲突。
-    // p_fill_high 评分 9.9 高于 p_main，用来验证它不会把 p_main 挤出最终池。
-    sqliteInsertPhoto(testSqlite, "p_fill_high", fillUpOnlyISO(1), 9.9, "/photos/other-a");
-    sqliteInsertPhoto(testSqlite, "p_fill_b", fillUpOnlyISO(2), 8.0, "/photos/other-b");
-
-    // maxN=3：pool1(1) + 2 个不冲突 fillUp = 3，全部放得下 → p_main 必须保留
-    const result = await buildCandidatePool({ excludeIds: new Set(), maxN: 3 });
-    const resultIds = result.map((r) => r.photoId);
-
-    // fillUp 确实被触发（pool1 只有 1 簇 < maxN=3）
-    const fillUpItems = result.filter((r) => r.source === "fillUp");
-    expect(fillUpItems.length).toBeGreaterThan(0);
-
-    // p_main 必须在最终池中（pool1 代表稳定性：即便 p_fill_high 评分更高也不挤掉它）
-    expect(resultIds).toContain("p_main");
-    // 高分不冲突 fillUp 候选被纳入
-    expect(resultIds).toContain("p_fill_high");
+  it("B-5（已废弃）: 「fillUp 评分高于 pool1 代表」在平权世界结构性不可达", async () => {
+    // 原用例依赖「时间分区的源」构造 fillUp 专属候选（fillUpOnlyISO 避开 4 主源）。
+    // 平权后 randomSample 全库无谓词按 aes+抖动取 Top-K：一张 aes 高于 pool1 代表的照片
+    // 必然先被 randomSample 选入主路径（LIMIT 之内），结构上进不了 fillUp 候选集。
+    // 「fillUp 不挤掉 pool1 代表」的保障由 combined.slice(0, maxN) 的 pool1 前置保序实现，
+    // 其上限行为已由 B-8（最终池 ≤ maxN）覆盖。此处保留占位说明，防止未来盲恢复。
+    expect(true).toBe(true);
   });
 
   it("B-6: fillUp 质量下限：aesthetic_score < 7.5 的照片不纳入 fillUp", async () => {
@@ -358,7 +336,7 @@ describe("B. buildCandidatePool 行为", () => {
       sqliteInsertPhoto(
         testSqlite,
         `low${i}`,
-        agedRandomISO(4 + i),
+        randomSampleISO(4 + i),
         7.0, // < 7.5，不应进入 fillUp
         `/photos/low-dir-${i}`,
       );
@@ -385,14 +363,14 @@ describe("B. buildCandidatePool 行为", () => {
     sqliteInsertPhoto(testSqlite, "p_sib", sibTime, 8.0, "/photos/main-dir");
 
     // p_excl：通过 excludeIds 排除的高分照片
-    sqliteInsertPhoto(testSqlite, "p_excl", agedRandomISO(5), 9.5, "/photos/excl-dir");
+    sqliteInsertPhoto(testSqlite, "p_excl", randomSampleISO(5), 9.5, "/photos/excl-dir");
 
     // 再插入一些不冲突的高分照片（保证 fillUp 有候选，但这些无关照片也不应导致测试失败）
     for (let i = 0; i < 3; i++) {
       sqliteInsertPhoto(
         testSqlite,
         `other${i}`,
-        agedRandomISO(6 + i),
+        randomSampleISO(6 + i),
         8.5,
         `/photos/other-${i}-dir`,
       );
@@ -426,7 +404,7 @@ describe("B. buildCandidatePool 行为", () => {
       sqliteInsertPhoto(
         testSqlite,
         `fill${i}`,
-        agedRandomISO(4 + (i % 10)),
+        randomSampleISO(4 + (i % 10)),
         8.0 + (i % 10) * 0.01, // 均 >= 7.5
         `/photos/fill-unique-${i}-dir`,
       );

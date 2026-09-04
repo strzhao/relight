@@ -53,7 +53,7 @@ const SOURCE_LABEL: Record<ClusteredCandidate["source"], string> = {
   historyToday: "历史上的今天",
   sameMonth: "同月份",
   sameSeason: "同季节",
-  agedRandom: "久远抽样",
+  randomSample: "随机抽样",
   fillUp: "随机回填",
 };
 
@@ -78,12 +78,14 @@ export function buildSelectUserPrompt(
     const tagsStr = Array.isArray(c.tags)
       ? (c.tags as { name: string }[]).map((t) => t.name).join("、") || "无"
       : "无";
+    const peopleStr = c.peopleNicknames?.length ? c.peopleNicknames.join("、") : "无";
     const desc = (c.narrative ?? "无描述").slice(0, 80);
     const mediaTypeLabel = (c.mediaType ?? "image") === "video" ? "[视频]" : "[图片]";
     return [
       `[${i}] ${mediaTypeLabel} 来源: ${sourceLabel}`,
       `  年份: ${year}（约 ${c.yearsAgo} 年前）| 美学评分: ${score}`,
       `  情感: ${emotions} | 标签: ${tagsStr}`,
+      `  画面人物: ${peopleStr}`,
       `  描述: ${desc}`,
     ].join("\n");
   });
@@ -255,12 +257,21 @@ async function processSingleEntry(
         : "未知";
     const tzStr = candidate.offsetTime ?? "+08:00";
 
+    // 年代平权后候选可能是今年照片，年份提示语按年龄切换，避免"0 年前"式尴尬
+    const yearsHint =
+      (candidate.yearsAgo ?? 0) >= 1 ? `${candidate.yearsAgo} 年前的今天` : "今年内拍摄";
+    // 画面人物（家人称呼，按 bbox 面积降序——第一位通常是画面主角）
+    const peopleStr = candidate.peopleNicknames?.length
+      ? candidate.peopleNicknames.join("、")
+      : "无";
+
     let userText = narratePrompts.user
       .replace("{date}", heroDate)
-      .replace("{years_ago}", String(candidate.yearsAgo ?? 0))
+      .replace("{years_hint}", yearsHint)
       .replace("{tags}", heroTagsForNarrate)
       .replace("{emotions}", heroEmotions)
       .replace("{narrative}", candidate.narrative ?? "无描述")
+      .replace("{people}", peopleStr)
       .replace("{latitude}", latStr)
       .replace("{longitude}", lonStr)
       .replace("{timezone}", tzStr);
@@ -446,14 +457,14 @@ async function processSingleEntry(
 /**
  * daily-selection Worker
  *
- * 新版多入选流水线（20 张）：
- * 0. 构造 4 源候选池（最多 20 张）
+ * 新版多入选流水线（12 张）：
+ * 0. 构造 4 源候选池（最多 12 张）
  * 1. pLimit(CONCURRENCY) 并行处理每张候选：narrate + members
  * 2. 事务写库：upsert dailyPicks（同步 entries[0] 主字段）+ DELETE/bulk INSERT entries
  * 3. 仅为 entries[0] 合成 5K 壁纸
  */
 export async function dailySelectionWorker(job: Job): Promise<void> {
-  job.log("开始每日精选（新版 20 张多入选流水线）");
+  job.log("开始每日精选（新版 12 张多入选流水线）");
 
   // 定时任务（daily-selection-cron）先自愈最近 N 天缺失，再跑今天。
   // 仅 cron job 匹配——手动 run-daily-selection（StubJob name=undefined）、

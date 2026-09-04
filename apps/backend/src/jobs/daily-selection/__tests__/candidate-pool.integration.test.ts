@@ -170,7 +170,7 @@ function getOtherSeasonMonthISO(yearsAgo: number): string {
 }
 
 // 构造 2 年前的随机日期（不同月份）
-function agedRandomISO(yearsAgo: number): string {
+function randomSampleISO(yearsAgo: number): string {
   const year = new Date().getFullYear() - yearsAgo;
   const { month } = getBeijingMonthDay();
   const monthNum = Number.parseInt(month, 10);
@@ -198,7 +198,7 @@ describe("buildCandidatePool 集成测试", () => {
     // 各源至少 1 张
     addPhoto(testSqlite, "h1", yearsAgoISO(3), 8.0);
     addPhoto(testSqlite, "m1", sameMonthOtherDayISO(2), 7.0);
-    addPhoto(testSqlite, "a1", agedRandomISO(3), 6.0);
+    addPhoto(testSqlite, "a1", randomSampleISO(3), 6.0);
 
     const seasonOther = getOtherSeasonMonthISO(2);
     if (seasonOther) {
@@ -310,7 +310,7 @@ describe("buildCandidatePool 集成测试", () => {
       addPhoto(testSqlite, `s${i}`, seasonDate, 4.0 - i * 0.1);
     }
     for (let i = 0; i < 5; i++) {
-      addPhoto(testSqlite, `a${i}`, agedRandomISO(3 + i), 3.0 - i * 0.1);
+      addPhoto(testSqlite, `a${i}`, randomSampleISO(3 + i), 3.0 - i * 0.1);
     }
 
     const result = await buildCandidatePool({ excludeIds: new Set(), maxN: 20 });
@@ -397,15 +397,15 @@ describe("buildCandidatePool 集成测试", () => {
       expect(ids).not.toContain("non-rep-3");
     });
 
-    it("agedRandom: 非代表连拍成员被过滤", async () => {
+    it("randomSample: 非代表连拍成员被过滤", async () => {
       const { buildCandidatePool } = await import("../candidate-pool");
       addSource(testSqlite);
       addBurst(testSqlite, "burst-3", "rep-3", 2);
-      addPhoto(testSqlite, "rep-3", agedRandomISO(5), 7.0, "src1", {
+      addPhoto(testSqlite, "rep-3", randomSampleISO(5), 7.0, "src1", {
         burstId: "burst-3",
         isRep: true,
       });
-      addPhoto(testSqlite, "non-rep-4", agedRandomISO(5), 9.0, "src1", {
+      addPhoto(testSqlite, "non-rep-4", randomSampleISO(5), 9.0, "src1", {
         burstId: "burst-3",
         isRep: false,
       });

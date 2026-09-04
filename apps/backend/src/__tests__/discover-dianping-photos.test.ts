@@ -208,6 +208,9 @@ describe("验收测试 1：扫描定时任务注册 (registerScanRepeatableJob)"
   vi.mock("../jobs/queues", () => ({
     scanQueue: {
       add: mockScanQueueAdd,
+      // 注册前清理残留调度器（app.ts pruneStaleRepeatables）所需
+      getRepeatableJobs: vi.fn().mockResolvedValue([]),
+      removeRepeatableByKey: vi.fn().mockResolvedValue(undefined),
     },
     dailyQueue: { add: vi.fn().mockResolvedValue({ id: "mock-daily" }) },
     analyzeQueue: { add: vi.fn().mockResolvedValue({ id: "mock-analyze" }) },
