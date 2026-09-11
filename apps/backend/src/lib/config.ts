@@ -59,6 +59,12 @@ export const config = {
    *  fillUp 第 5 源保持更严的 ≥7.5 不变（见 candidate-pool.ts 硬编码）。 */
   minAestheticScorePrimary:
     Number.parseFloat(process.env.DAILY_SELECT_MIN_AESTHETIC_SCORE ?? "7.0") || 7.0,
+  /** 近期拍摄第 5 主源开关（2026-09 平权改版后新照片在源内美学竞争中近乎出局，
+   *  dry run 验证 recent 源可让近 30 天照片从 0.6 席/天恢复到 ~6 席/天）。
+   *  默认关闭——关闭时候选池与 2026-09-11 之前完全一致。 */
+  dailyRecentSourceEnabled: (process.env.DAILY_RECENT_SOURCE ?? "false") === "true",
+  /** recent 源的时间窗口（天）：拍摄时间（takenAt，缺省 createdAt）距今 ≤ N 天。 */
+  dailyRecentSourceDays: Number.parseInt(process.env.DAILY_RECENT_SOURCE_DAYS ?? "30", 10) || 30,
   /** 腾讯云 COS + VPS 画廊配置（每日精选/视频产物推送公网画廊，见 state.md VPS 画廊设计）。
    *  凭据命名兼容（plan-reviewer 补强）：优先读 vps-ops 真源 `TENCENTCLOUD_SECRET_ID/SECRET_KEY/APPID/REGION`
    *  （bucket = `little-bee-assets-${APPID}`），fallback `COS_SECRET_ID/SECRET_KEY/BUCKET/REGION`。

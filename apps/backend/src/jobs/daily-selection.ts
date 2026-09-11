@@ -54,6 +54,7 @@ const SOURCE_LABEL: Record<ClusteredCandidate["source"], string> = {
   sameMonth: "同月份",
   sameSeason: "同季节",
   randomSample: "随机抽样",
+  recent: "近期拍摄",
   fillUp: "随机回填",
 };
 

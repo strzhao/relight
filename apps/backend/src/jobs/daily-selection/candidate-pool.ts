@@ -1,13 +1,20 @@
 /**
- * 候选池构造：4 源平等混采 + 年代完全平权 + 30 天去重
+ * 候选池构造：4 源平等混采（可选第 5 源 recent）+ 年代完全平权 + 30 天去重
  *
  * 架构：
- * - 4 个独立子查询（historyToday / sameMonth / sameSeason / randomSample），每源取 K=maxN 张
- * - per-source quota：每源保底 3 张 + 剩余槽按 weightedScore 抢占
- * - 合并去重后截前 maxN 张
+ * - 独立子查询（historyToday / sameMonth / sameSeason / randomSample [+ recent]），
+ *   每源取 K=maxN 张
+ * - per-source quota：每源保底 3 张（recent 保底 1）+ 剩余槽按 weightedScore 抢占
+ * - 合并去重后截前 maxN
  *
  * 年代平权（2026-09-04）：所有源不做年份限制（今年照片可入选），weightedScore = aestheticScore，
  * 不做任何年代加成——新照片与老照片完全平权。
+ *
+ * recent 第 5 源（2026-09-12，config.dailyRecentSourceEnabled，默认关）：
+ * 平权改版后 dry run 发现近期照片在源 1-3 的 aes desc 竞争中被历史同月高分照挤出
+ * LIMIT、randomSample 全库抽样命中概率过低，近 30 天照片日均 <1 席。recent 源
+ * （近 N 天拍摄、同美学门槛）让近期照片在自己的集合内竞争，供给不足时其余源
+ * 自然回填——自平衡，不开天窗。
  *
  * 注：K_PER_SOURCE 设为 maxN（而非固定 8），确保当候选只集中在 1-2 个源时
  * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
@@ -23,15 +30,22 @@ import { type ClusteredCandidate, clusterByDirnameAndTime, parseTakenAtMs } from
 
 /** 全局最大候选数（质量优化：从 20 降到 12，避免低分照片摊薄整体质感 + 减 40% AI narrate 调用）*/
 const MAX_N = 12;
-/** 每源保底席位 */
+/** 每源保底席位（recent 源例外，见 RECENT_QUOTA_SEATS） */
 const QUOTA_PER_SOURCE = 3;
+/** recent 源保底席位：近期照片靠抢占机制自然入池，保底 1 席仅作兜底锚点（dry run 显示 1/2/3 席效果一致） */
+const RECENT_QUOTA_SEATS = 1;
 /** 事件键过滤的 overfetch 倍率：各源 SQL LIMIT 放大 1.5 倍，补偿事件键冲突丢弃的候选 */
 const EVENT_KEY_OVERFETCH_RATIO = 1.5;
 
-/** 4 个主路径候选源标识（不含 fillUp） */
-export type PrimaryCandidateSource = "historyToday" | "sameMonth" | "sameSeason" | "randomSample";
+/** 主路径候选源标识（recent 源由 config.dailyRecentSourceEnabled 启用后加入） */
+export type PrimaryCandidateSource =
+  | "historyToday"
+  | "sameMonth"
+  | "sameSeason"
+  | "randomSample"
+  | "recent";
 
-/** 全部候选源标识（含第 5 源 fillUp） */
+/** 全部候选源标识（含 fillUp） */
 export type CandidateSource = PrimaryCandidateSource | "fillUp";
 
 /** 候选照片（带评分与元数据） */
@@ -212,6 +226,9 @@ export interface BuildCandidatePoolOptions {
   /** 事件键集合：30 天内已选照片的事件键，候选照片若命中则跳过 */
   eventKeys?: Set<string>;
   maxN?: number;
+  /** 近期拍摄第 5 源开关。缺省读 config.dailyRecentSourceEnabled（默认关）；
+   *  显式传入可覆盖 config——dry run CLI 用同一份真实代码做开关 A/B 对比。 */
+  includeRecentSource?: boolean;
 }
 
 /**
@@ -269,7 +286,9 @@ export async function buildCandidatePool(
     excludeIds = new Set<string>(),
     eventKeys = new Set<string>(),
     maxN = MAX_N,
+    includeRecentSource,
   } = options;
+  const recentSourceEnabled = includeRecentSource ?? config.dailyRecentSourceEnabled;
   // 每源取回数 = maxN * overfetch 倍率，补偿事件键冲突丢弃的候选
   const K_PER_SOURCE = Math.ceil(maxN * EVENT_KEY_OVERFETCH_RATIO);
   const { year, month, day, monthDay, seasonMonths } = getBeijingDateInfo(now);
@@ -422,6 +441,55 @@ export async function buildCandidatePool(
     )
     .limit(K_PER_SOURCE);
 
+  // 源5: 近期拍摄（config.dailyRecentSourceEnabled 启用；近 N 天拍摄，与主源同美学门槛）。
+  // 动机（2026-09 dry run）：平权后近期照片在源1-3 的 aes desc 竞争中被历史同月高分照
+  // 挤出 LIMIT，randomSample 全库抽样命中概率 ≈ 近期照片占达标库比例（<5%），导致
+  // 近 30 天照片日均不足 1 席。独立成源让近期照片在自己的人群内竞争。
+  const recentRows: typeof historyTodayRows = [];
+  if (recentSourceEnabled) {
+    // 北京日历日 cutoff，与 getRecentPickedEventKeys 的 toBeijingDate 换算保持一致；
+    // substr(1,10) 日期字符串比较对 'YYYY-MM-DD HH:MM:SS' 与 ISO 两种 takenAt 存储格式都成立
+    const recentCutoff = new Date(
+      now.getTime() - config.dailyRecentSourceDays * 86400_000 + 8 * 3600_000,
+    )
+      .toISOString()
+      .slice(0, 10);
+    recentRows.push(
+      ...(await db
+        .select({
+          photoId: schema.photos.id,
+          filePath: schema.photos.filePath,
+          takenAt: schema.photos.takenAt,
+          mediaType: schema.photos.mediaType,
+          durationSec: schema.photos.durationSec,
+          aestheticScore: schema.photoAnalyses.aestheticScore,
+          narrative: schema.photoAnalyses.narrative,
+          emotionalAnalysis: schema.photoAnalyses.emotionalAnalysis,
+          tags: schema.photoAnalyses.tags,
+          thumbnailPath: schema.photos.thumbnailPath,
+          sourceType: schema.storageSources.type,
+          latitude: schema.photos.latitude,
+          longitude: schema.photos.longitude,
+          offsetTime: schema.photos.offsetTime,
+        })
+        .from(schema.photos)
+        .innerJoin(schema.photoAnalyses, sql`${schema.photoAnalyses.photoId} = ${schema.photos.id}`)
+        .innerJoin(
+          schema.storageSources,
+          sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
+        )
+        .where(
+          and(
+            sql`substr(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt}), 1, 10) >= ${recentCutoff}`,
+            gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
+            burstRepOnly,
+          ),
+        )
+        .orderBy(desc(schema.photoAnalyses.aestheticScore))
+        .limit(K_PER_SOURCE)),
+    );
+  }
+
   // ---- 转换为 EnrichedCandidate ----
   function toEnriched(rows: typeof historyTodayRows, source: CandidateSource): EnrichedCandidate[] {
     return rows
@@ -464,19 +532,22 @@ export async function buildCandidatePool(
   const sameMonth = filterByEventKey(toEnriched(sameMonthRows, "sameMonth"));
   const sameSeason = filterByEventKey(toEnriched(sameSeasonRows, "sameSeason"));
   const randomSample = filterByEventKey(toEnriched(randomSampleRows, "randomSample"));
+  const recent = filterByEventKey(toEnriched(recentRows, "recent"));
 
   // ---- per-source quota 合并（不截断）----
   // 按设计文档要求："merged.slice(0, maxN) 这一截断需要在聚类之后做，
   // 因为聚类前 80 张可能聚成 < 20 簇"。这里把 dedupAndQuotaMerge 的
-  // maxN 放大到 4*maxN（即 4 源池总上限），让 quota 合并保留全部
+  // maxN 放大到 源数*maxN（即主源池总上限），让 quota 合并保留全部
   // 去重后的候选；最终截断推迟到聚类后做。
   //
   // 副作用：聚类后按 weightedScore desc 全局取前 maxN，不再保证
   // "每源在最终结果里保底 3 张"——quota 仅作为聚类前中间池的相对
   // 顺序锚点存在。这是文档"接受 N<20、不做 K 回退"的直接推论。
-  const expandedMax = maxN * 4;
+  const expandedMax = maxN * (recentSourceEnabled ? 5 : 4);
   const merged = dedupAndQuotaMerge(
-    { historyToday, sameMonth, sameSeason, randomSample },
+    recentSourceEnabled
+      ? { historyToday, sameMonth, sameSeason, randomSample, recent }
+      : { historyToday, sameMonth, sameSeason, randomSample },
     expandedMax,
   );
 
@@ -722,34 +793,34 @@ async function enrichWithPeopleNicknames(candidates: ClusteredCandidate[]): Prom
 
 /**
  * per-source quota 合并：
- * - 每源保底 QUOTA_PER_SOURCE 张（按 weightedScore 取前 3）
+ * - 每源保底 QUOTA_PER_SOURCE 张（按 weightedScore 取前 3；recent 源保底 RECENT_QUOTA_SEATS=1）
  * - 剩余槽按 weightedScore 全局抢占（来自所有源的非保底候选），上限 = maxN
  * - 合并 → 同 photoId 去重（保留先出现者）→ 截前 maxN
+ *
+ * 源集合由 bySource 的 keys 推导（4 源或含 recent 的 5 源），keys 顺序
+ * 遵循调用方传入的字面量顺序（quota 保底的插入序）。
  *
  * 注：抢占池上限设为 maxN（而非固定 8），确保活跃源少时仍能填满 maxN 个唯一候选。
  * 注：fillUp 不参与 quota 合并，由 buildCandidatePool 单独处理。
  */
 export function dedupAndQuotaMerge(
-  bySource: Record<PrimaryCandidateSource, EnrichedCandidate[]>,
+  bySource: Partial<Record<PrimaryCandidateSource, EnrichedCandidate[]>>,
   maxN = MAX_N,
 ): EnrichedCandidate[] {
-  const sources: PrimaryCandidateSource[] = [
-    "historyToday",
-    "sameMonth",
-    "sameSeason",
-    "randomSample",
-  ];
+  const sources = Object.keys(bySource) as PrimaryCandidateSource[];
+  const seatsFor = (src: PrimaryCandidateSource) =>
+    src === "recent" ? RECENT_QUOTA_SEATS : QUOTA_PER_SOURCE;
 
   // 各源按 weightedScore 降序
   for (const src of sources) {
-    bySource[src].sort((a, b) => b.weightedScore - a.weightedScore);
+    bySource[src]?.sort((a, b) => b.weightedScore - a.weightedScore);
   }
 
-  // 保底席位：每源前 QUOTA_PER_SOURCE 张
+  // 保底席位：每源前 seatsFor(src) 张
   const quotaItems: EnrichedCandidate[] = [];
   const quotaIds = new Set<string>();
   for (const src of sources) {
-    for (const item of bySource[src].slice(0, QUOTA_PER_SOURCE)) {
+    for (const item of (bySource[src] ?? []).slice(0, seatsFor(src))) {
       if (!quotaIds.has(item.photoId)) {
         quotaIds.add(item.photoId);
         quotaItems.push(item);
@@ -762,7 +833,7 @@ export function dedupAndQuotaMerge(
   const contestSlots = Math.max(0, maxN - quotaItems.length);
   const contestPool: EnrichedCandidate[] = [];
   for (const src of sources) {
-    for (const item of bySource[src].slice(QUOTA_PER_SOURCE)) {
+    for (const item of (bySource[src] ?? []).slice(seatsFor(src))) {
       if (!quotaIds.has(item.photoId)) {
         contestPool.push(item);
       }
