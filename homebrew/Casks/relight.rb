@@ -1,6 +1,6 @@
 cask "relight" do
-  version "0.1.0"
-  sha256 "f9f66841eba92be97474ed3b6091b23282596c1027400157ec69de5d335ae52b"
+  version "0.3.0"
+  sha256 "c1ed344bef780b016d8592545077fd0881033fe77ad7ab76ef0e9d511c347d84"
 
   url "https://github.com/strzhao/relight/releases/download/v#{version}/Relight-v#{version}.zip"
   name "Relight"
