@@ -27,6 +27,9 @@ module.exports = {
           repoRoot,
           ".autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun",
         ),
+        // 动态视频壁纸（2026-09-13 开启）：每日精选后自动生成壁纸视频。
+        // 关闭方式：此行删掉 + pm2 reload relight-workers --update-env
+        DAILY_WALLPAPER_VIDEO: "true",
       },
     },
     {
