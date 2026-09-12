@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 /** 仓库根默认值：从本文件位置推导（<repo>/apps/backend/src/lib/config.ts → 上三级）。
  *  与进程 cwd 解耦——根 `pnpm test` 从仓库根跑 vitest 时 cwd='../..' 会把默认路径漂到
  *  HOME（2026-09-13 实证），import.meta.url 定位在任何执行上下文都稳定。 */
-const REPO_ROOT_DEFAULT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const REPO_ROOT_DEFAULT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 /** 运行时解析 `which claude` 绝对路径（PM2 resurrect 时 nvm 不在 PATH，必须绝对路径） */
 function resolveClaudeCliPath(): string {
