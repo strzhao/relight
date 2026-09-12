@@ -710,9 +710,13 @@ export async function renderTextOverlay(
     .then(() => true)
     .catch(() => false);
 
+  // 【v2.1 路径基准修复】videoPath/产物一律绝对化：remotion spawn 的 cwd 是 workspace，
+  // 相对路径会写到 workspace/ 下，而 job 的存在性检查以 backend cwd 为基准 → 永远 miss
+  //（2026-09-13 实证：两腿皆因此误判失败回退静态）。
+  const absVideoPath = path.resolve(videoPath);
   let probe: ProbeResult;
   try {
-    probe = await probeVideoFile(videoPath);
+    probe = await probeVideoFile(absVideoPath);
   } catch (e) {
     throw new OverlayRenderError(
       `renderTextOverlay ffprobe 探测失败: ${e instanceof Error ? e.message : String(e)} (${videoPath})`,
@@ -726,11 +730,11 @@ export async function renderTextOverlay(
   const publicDir = path.join(projectDir, "public");
   await mkdir(publicDir, { recursive: true });
   const publicVideoPath = path.join(publicDir, OVERLAY_PUBLIC_INPUT);
-  await copyFile(videoPath, publicVideoPath);
+  await copyFile(absVideoPath, publicVideoPath);
 
   const overlaidPath = path.join(
-    path.dirname(videoPath),
-    `${path.basename(videoPath).replace(/\.mp4$/i, "")}-overlay.mp4`,
+    path.dirname(absVideoPath),
+    `${path.basename(absVideoPath).replace(/\.mp4$/i, "")}-overlay.mp4`,
   );
   const props = {
     videoPath: OVERLAY_PUBLIC_INPUT,
