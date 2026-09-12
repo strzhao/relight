@@ -1,6 +1,12 @@
 import { execSync } from "node:child_process";
 import "dotenv/config";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** 仓库根默认值：从本文件位置推导（<repo>/apps/backend/src/lib/config.ts → 上三级）。
+ *  与进程 cwd 解耦——根 `pnpm test` 从仓库根跑 vitest 时 cwd='../..' 会把默认路径漂到
+ *  HOME（2026-09-13 实证），import.meta.url 定位在任何执行上下文都稳定。 */
+const REPO_ROOT_DEFAULT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** 运行时解析 `which claude` 绝对路径（PM2 resurrect 时 nvm 不在 PATH，必须绝对路径） */
 function resolveClaudeCliPath(): string {
@@ -28,7 +34,7 @@ export const config = {
   /** monorepo 根目录（child_process spawn cwd 用）。
    * ecosystem.config.cjs 启动 PM2 时显式注入 REPO_ROOT env；
    * dev `pnpm --filter @relight/backend dev` cwd=apps/backend，fallback ../.. 命中根 */
-  repoRoot: process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
+  repoRoot: process.env.REPO_ROOT ?? REPO_ROOT_DEFAULT,
   port: Number.parseInt(process.env.PORT ?? "3000", 10),
   /** 拾光 web app 常驻端口（默认 3601，worktree 通过 WEB_PORT env 覆盖） */
   webPort: Number.parseInt(process.env.WEB_PORT ?? "3601", 10),
@@ -113,7 +119,7 @@ export const config = {
   videoWorkspacePath:
     process.env.VIDEO_WORKSPACE_PATH ??
     path.join(
-      process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
+      process.env.REPO_ROOT ?? REPO_ROOT_DEFAULT,
       ".autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun",
     ),
   /** memory-video skill 的 SKILL.md 绝对路径（spawn 前置校验用）。
@@ -122,10 +128,7 @@ export const config = {
    *  env MEMORY_VIDEO_SKILL_PATH 覆盖。 */
   memoryVideoSkillPath:
     process.env.MEMORY_VIDEO_SKILL_PATH ??
-    path.join(
-      process.env.REPO_ROOT ?? path.resolve(process.cwd(), "../.."),
-      ".claude/skills/memory-video/SKILL.md",
-    ),
+    path.join(process.env.REPO_ROOT ?? REPO_ROOT_DEFAULT, ".claude/skills/memory-video/SKILL.md"),
   /** spawn claude -p 视频生成超时（ms）。默认 45 分钟（实测 137 张素材渲染 29 分钟撞原
    *  30 分钟硬编码线被 SIGTERM，finalize 未执行）；cron 每天 10:00，45 分钟完成可接受。
    *  env VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */
