@@ -112,18 +112,18 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 
 **路由** (`src/routes/`): 每个文件导出一个 `new Hono()` 子路由:
 - `photos.ts` — 照片列表 (分页/标签过滤/排序)、详情 (JOIN 标签+分析+存储源)、缩略图
-- `daily.ts` — 每日精选：查询最新精选照片（支持日期参数）、手动触发精选任务、新增 `GET /:pickDate/wallpaper` 按尺寸实时合成杂志版壁纸（支持 `width`/`height` query param，磁盘缓存命中时直接返回）
+- `daily.ts` — 每日精选：查询最新精选照片（支持日期参数）、手动触发精选任务、`GET /:pickDate/wallpaper` 按尺寸实时合成杂志版壁纸（支持 `width`/`height` query param，磁盘缓存命中时直接返回）、`GET /:pickDate/wallpaper-video` 壁纸视频下载地址（`wallpaper_video_landscape_url` 非空 → 302 跳转 COS；空/记录不存在 → 404 JSON error）
 - `scan.ts` — 触发扫描 (POST 入队)、扫描状态查询
 - `admin.ts` — 管理后台 API: 综合统计、队列状态、健康检查、分页分析列表
 - `bursts.ts` — 连拍组 API：`GET /api/bursts/:id/members`（组内成员列表）、`PUT /api/bursts/:id/representative`（手动切换代表）
 - `tags.ts`, `settings.ts`, `health.ts` — 辅助路由
 
 **异步任务系统** (`src/jobs/` + `src/workers/`):
-- 三个 BullMQ 队列：`scan-storage`、`analyze-photo`、`daily-selection`
+- BullMQ 队列：`scan-storage`、`analyze-photo`、`daily-selection`、`detect-faces`、`daily-push`、`daily-video`、`wallpaper-video`（动态视频壁纸：显式 `attempts: 1` 覆盖全局重试，失败当日回退静态）
 - Worker 进程 (`src/workers/index.ts`) 独立于 API 服务运行
 - 扫描流程 (`scan-storage.ts`): 增量扫描 — 用 mtime+size 快速跳过未变更文件，仅对新文件/修改文件做 SHA256 + 缩略图生成，最后入队 analyze-photo；扫描结束后调用 `detectBursts` 识别连拍组（时间窗口 ≤3s + dHash 汉明距离 ≤10），写入 `bursts` 表并标记每组代表
 - 分析流程 (`analyze-photo.ts`): 读文件 base64 → 调 AI 视觉模型 → 解析 JSON 响应 → 写入 tags/photoTags/photoAnalyses（幂等设计，重复分析会 UPDATE 而非 INSERT）；分析完成后调用 `calibrateBurstRepresentative` 在组内竞争代表位（选评分最高者）
-- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — `buildCandidatePool`（4 源混采 + 可选 recent 第 5 源 + 跨表去重 + 主力源美学下限 `minAestheticScorePrimary` 默认 ≥7.0、fillUp ≥7.5；recent 源 = 近 `DAILY_RECENT_SOURCE_DAYS`（默认 30）天拍摄、同美学门槛、源内按美学分竞争、quota 保底 1 席，`DAILY_RECENT_SOURCE` 默认关——平权改版后近期照片在源内 aes 竞争中被历史同月高分照挤出 LIMIT，dry run 验证 recent 源使近 30 天照片从 0.25 → 6.0 席/天，真实代码 A/B 见 `src/cli/dry-run-real-pool.ts`）→ **select AI 评选阶段**（`runSelectStage`：文本模型从候选摘要重排 hero，`weightedScore` 降序为兜底；5 路 fallback 保序：`dailySelectEnabled===false`/候选<2 零 AI/抛错/解析失败/越界）→ pLimit 并发为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`，并追加合成手机竖版壁纸（1290×2796，B 方案全屏照片+底部渐变压白字，cacheKey `1290x2796` 与路由/推送三方闭合，独立 try/catch 不阻塞主流程）；**候选池排序**：`weightedScore = aestheticScore`（2026-09-04 起年代完全平权，无年份限制、无 ageBonus——此前乘法 1.6× → 加法封顶 +0.3 → 完全移除；新照片与老照片同台，只比美学质量）；**家人主角**：候选摘要与 narrate 均注入 `peopleNicknames`（画面家人称呼），select prompt 置最高优先级规则「家人出镜优先于纯宠物/风景」；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
+- 精选流程 (`daily-selection.ts`): 多条目并行流水线 — `buildCandidatePool`（4 源混采 + 可选 recent 第 5 源 + 跨表去重 + 主力源美学下限 `minAestheticScorePrimary` 默认 ≥7.0、fillUp ≥7.5；recent 源 = 近 `DAILY_RECENT_SOURCE_DAYS`（默认 30）天拍摄、同美学门槛、源内按美学分竞争、quota 保底 1 席，`DAILY_RECENT_SOURCE` 默认关——平权改版后近期照片在源内 aes 竞争中被历史同月高分照挤出 LIMIT，dry run 验证 recent 源使近 30 天照片从 0.25 → 6.0 席/天，真实代码 A/B 见 `src/cli/dry-run-real-pool.ts`）→ **select AI 评选阶段**（`runSelectStage`：文本模型从候选摘要重排 hero，`weightedScore` 降序为兜底；5 路 fallback 保序：`dailySelectEnabled===false`/候选<2 零 AI/抛错/解析失败/越界）→ pLimit 并发为每张独立执行 narrate(vision)+select members(text)，生成各自 title/narrative/members；db.transaction 批量 DELETE+INSERT 写入 `dailyPickEntries`（幂等覆盖，UNIQUE(dailyPickId,rank)）；entries[0] 同步作为 dailyPicks 主记录；阶段3 调 Satori 合成杂志版 DailyHero 壁纸（5K 16:9，基于 entries[0]）落盘，路径写入 `dailyPicks.composedImagePath`，并追加合成手机竖版壁纸（1290×2796，B 方案全屏照片+底部渐变压白字，cacheKey `1290x2796` 与路由/推送三方闭合，独立 try/catch 不阻塞主流程）；**阶段4 动态视频壁纸**（`DAILY_WALLPAPER_VIDEO` 默认关）：开关开 ∧ hero 非视频 ∧ composedImagePath 非空 → 链式 one-off enqueue `wallpaper-video` job（独立 try/catch 旁路，失败不影响精选）→ 串行「横生成→横转码→竖生成→竖转码」（spawn honeydo 双锚定伪循环 `--first-frame`/`--last-frame` 同图，sharp 预裁剪对齐生成画布 1280×704 / 704×1216；横转 HEVC hvc1 .mov 1920×1080 无音轨 +faststart 供 Aerial 注入，竖流拷贝 remux H.264 mp4 704×1216 无音轨 +faststart 供画廊）→ COS 上传（回执非空串才写 `daily_picks.wallpaper_video_landscape_url/portrait_url` 两列）→ `syncDayToGallery` 重建 manifest（视频字段条件展开：DB 列空 → JSON 字段缺省）；手动重跑 `npm run wallpaper-video:rerun -- --pickDate=YYYY-MM-DD`；**候选池排序**：`weightedScore = aestheticScore`（2026-09-04 起年代完全平权，无年份限制、无 ageBonus——此前乘法 1.6× → 加法封顶 +0.3 → 完全移除；新照片与老照片同台，只比美学质量）；**家人主角**：候选摘要与 narrate 均注入 `peopleNicknames`（画面家人称呼），select prompt 置最高优先级规则「家人出镜优先于纯宠物/风景」；**定时任务自愈**：`daily-selection-cron` job 触发时先按升序补跑最近 `DAILY_AUTO_HEAL_DAYS`（默认 7）天缺失的 dailyPicks（内层 job name=`auto-heal`，单日失败不中断），再跑今天——宕机几天可自动恢复，超大历史缺口仍用手动 `backfill:daily-picks` CLI（`--enqueue` + worker 慢慢消化）
 
 **AI 层** (`src/ai/`):
 - `client.ts` — OpenAI 兼容的 AI 客户端，使用 `openai` npm 包，禁用 qwen3.6 的 thinking 模式确保 JSON 输出在 `content` 字段
@@ -154,7 +154,7 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 **MIME 嗅探** (`src/lib/mime.ts`): magic byte 优先的图片 content-type 探测，导出 `sniffImageContentType(buffer, fallback)`。解决 iPhone 同步把 JPEG 字节命名为 .HEIC 的错配 — original/raw 端点 content-type 改为「字节优先、扩展名兜底」，避免浏览器按错误的 image/heic 渲染导致裂图。纯函数、零依赖、bounds-check 短 buffer 安全降级。
 
 **壁纸合成器** (`src/lib/wallpaper/`):
-- `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/.wallpaper-cache/` 目录。竖版分支（`width < height`）走 sharp/HEIC 精确 cover 预裁（不带 ×1.2），横版保持 inside 余量不变。
+- `composer.ts` — 核心合成逻辑：读取精选照片 + 叙事文案，调 Satori 渲染 JSX 模板为 SVG，再经 resvg-js 光栅化为 PNG，最终 sharp 压缩为高质量 JPEG。默认输出 5K 16:9（5120×2880），支持按目标屏幕尺寸（`width`/`height`）动态缩放，结果落盘到 `STORAGE_ROOT/daily-composed/` 目录。竖版分支（`width < height`）走 sharp/HEIC 精确 cover 预裁（不带 ×1.2），横版保持 inside 余量不变。
 - `template.tsx` — Satori JSX 模板（`jsxImportSource = "satori/jsx"`）：横版 `dailyHeroJSX`（杂志版排版：大图铺底 + 渐变遮罩 + 标题 Fraunces + 叙事文案 Noto Serif SC + footer 拍摄时刻 dateline，`takenAt` 有效时显示「拍摄于 {日期} {时刻} · {N} 年前」，与 web 同源 `formatPhotoCaptureTime`；`takenAt` 缺失 footer 留白）；竖版 `portraitHeroJSX`（B 方案：全屏 `<img>` 撑满 + absolute 底部渐变压暗 + 暖纸白字层，`scale = min(W/1290, H/2796)` 双轴约束，横版 `scale = W/1800` 不动）。
 - `colors.ts` — 从照片主色调提取渐变色，增强视觉层次。
 - 字体资产放在 `apps/backend/assets/fonts/`（Fraunces `.ttf` + Noto Serif SC `.otf`），tsup 构建时通过 `copyPublicDir` 自动复制到 `dist/assets/`。
@@ -217,6 +217,13 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                    阶段3: Satori 合成杂志版壁纸 (5K 16:9 JPEG 落盘, 基于 entries[0])
                           composedImagePath 写入 dailyPicks
                                     ↓
+                   阶段4: 动态视频壁纸 (DAILY_WALLPAPER_VIDEO 默认关)
+                          链式 enqueue wallpaper-video job → honeydo 微动化 hero 照片
+                          （双锚定伪循环，横 1280×704 / 竖 704×1216 画布预裁剪）
+                          → 横转 HEVC hvc1 .mov 1920×1080 / 竖 remux H.264 mp4 704×1216
+                          （均无音轨 +faststart）→ COS 上传 → 写 daily_picks 两列 → 画廊同步
+                          失败当日回退静态（旁路容错，不影响精选主流程）
+                                    ↓
                    API: GET /api/daily/today → DailyPick { entries: DailyPickEntry[] }
                                     ↓
                    前端首页 DailyHero: 12 缩略图栅格 + 左大图/右叙事 + series strip
@@ -228,8 +235,11 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                        (缓存优先/现场合成兜底，独立 try/catch 不阻断横版)
                                     ↓
               VPS 画廊（gallery.stringzhao.life，Caddy 静态托管，推送式同步）:
-                  daily-selection 阶段 3.5 / daily-video 步骤 4.5 → syncDayToGallery /
-                  syncVideoToGallery（独立 try/catch 旁路）→ 产物上传腾讯云 COS（公有读）+
+                  daily-selection 阶段 3.5（阶段 4 壁纸视频完成后经 syncDayToGallery 幂等重建）/
+                  daily-video 步骤 4.5 → syncDayToGallery /
+                  syncVideoToGallery（独立 try/catch 旁路）→ 产物上传腾讯云 COS（公有读；壁纸视频
+                  key = `relight/wallpaper-videos/{pickDate}_landscape.mov` / `_portrait.mp4`，
+                  manifest 视频字段条件展开——DB 回执列空则字段缺省）+
                   buildManifest → scp+ssh mv 原子推 manifest.json 到 VPS → 静态站拉 manifest
                   渲染 #/ #/history #/video/<id>（OKLCH 品牌色单页站）。daily-video 推送 URL
                   改用 `config.galleryPublicUrl + /#/video/<id>`（修原 localhost bug）。

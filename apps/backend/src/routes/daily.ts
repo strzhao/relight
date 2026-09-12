@@ -246,6 +246,11 @@ async function buildPickResponse(pick: DailyPickRow) {
   return {
     ...pick,
     composedImageUrl: toComposedImageUrl(pick.pickDate, pick.composedImagePath),
+    // 契约字段：landscape .mov COS URL（Mac App 下载注入 Aerial 用）。
+    // 无值（null/空串）时置 undefined → JSON 序列化后字段缺省（响应不含该字段）。
+    wallpaperVideoUrl: pick.wallpaperVideoLandscapeUrl
+      ? pick.wallpaperVideoLandscapeUrl
+      : undefined,
     photo: heroPhoto,
     members,
     entries,
@@ -544,6 +549,38 @@ export const dailyRouter = new Hono()
       );
       return c.redirect(`/api/photos/${photo.id}/original`, 302);
     }
+  })
+
+  /**
+   * 当日壁纸视频下载地址（302 跳转 COS）
+   * GET /api/daily/:pickDate/wallpaper-video
+   *
+   * 契约（§契约规约 接口签名 API invariant）：
+   *   wallpaperVideoLandscapeUrl 非空 → 302（Header Location = landscape .mov COS URL）
+   *   列空/记录不存在/日期非法   → 404（body JSON 含 error 字段）
+   *
+   * 注意：此路由必须在 /:id 前注册，避免路由歧义
+   */
+  .get("/:pickDate/wallpaper-video", async (c) => {
+    const pickDate = c.req.param("pickDate");
+
+    if (!isValidYmd(pickDate)) {
+      return c.json({ success: false, error: "pickDate 格式错误，应为 YYYY-MM-DD" }, 404);
+    }
+
+    const rows = await db
+      .select()
+      .from(schema.dailyPicks)
+      .where(eq(schema.dailyPicks.pickDate, pickDate))
+      .limit(1);
+
+    const pick = rows[0];
+    const videoUrl = pick?.wallpaperVideoLandscapeUrl;
+    if (!videoUrl) {
+      return c.json({ success: false, error: "当日壁纸视频不存在" }, 404);
+    }
+
+    return c.redirect(videoUrl, 302);
   })
 
   /**

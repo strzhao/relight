@@ -1091,7 +1091,7 @@
     return unit;
   }
 
-  /** wallpaper 卡（contain + 保存提示，S6/S7） */
+  /** wallpaper 卡（contain + 保存提示，S6/S7；动态视频壁纸：wallpaperVideoPortrait 非空 → video 变体） */
   function renderWallpaperCard(day, dayIndex) {
     const unit = el(
       "section",
@@ -1109,29 +1109,27 @@
       [],
     );
 
-    const img = el("img", {
-      class: "wallpaper-img",
-      src: day.wallpaperPortrait,
-      alt: `${day.title || "拾光"} 手机壁纸`,
-      loading: "lazy",
-      decoding: "async",
-    });
-    img.addEventListener("load", () => {
-      unit.dataset.loadState = "loaded";
-    });
-    img.addEventListener("error", () => {
-      // 竖版壁纸 404（历史未生成）→ 单元 error 态（前端容错，不阻断后续单元）
-      unit.dataset.loadState = "error";
-    });
-    unit.appendChild(img);
+    // 视频变体门（truthiness 判空：undefined 与 "" 均走静态分支——回退不变式）
+    const videoUrl = day.wallpaperVideoPortrait;
+    if (videoUrl) {
+      renderWallpaperVideoInto(unit, day, videoUrl);
+    } else {
+      renderWallpaperStaticInto(unit, day);
+    }
 
+    return unit;
+  }
+
+  /** wallpaper 卡右下动作栏（两变体共用；竖版「保存壁纸」+ 横版「电脑版」，逻辑不变）。
+   *  extraChildren：视频变体前置按钮（声音，v2 点击开声——排在下载上方同 video 卡动作栏） */
+  function buildWallpaperActionRail(day, extraChildren = []) {
     // 右下动作栏（取代旧 save-hint「长按图片保存到相册」——契约演进见 state.md 实现计划 3：
     // 长按语义被下载按钮覆盖且优于长按，S6.PM2 已按契约演进协议同步反转）。
     // 契约演进 [2026-08-30]：原底部 download-bar 两个一模一样的「下载」按钮（仅 aria-label
     // 不同，且压住壁纸自身 footer 文字）→ 语义化双按钮移入右下动作栏：
     // 主按钮「保存壁纸」（竖版=本机使用主场景，primary 实心）常驻（本卡仅在
     // wallpaperPortrait 非空时渲染）；次按钮「电脑版」（ghost）仅直链非空时渲染（场景 11.P2）。
-    const railChildren = [];
+    const railChildren = [...extraChildren];
     if (day.wallpaperLandscape) {
       const landscapeDl = createDownloadButton({
         role: "wallpaper-download-landscape",
@@ -1154,9 +1152,108 @@
     });
     bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
     railChildren.push(portraitDl.btn);
-    unit.appendChild(createActionRail(railChildren));
+    return createActionRail(railChildren);
+  }
 
-    return unit;
+  /** 静态竖图变体（回退不变式：video error 后重渲，DOM 与现状逐字一致） */
+  function renderWallpaperStaticInto(unit, day) {
+    delete unit.dataset.hasVideo;
+    unit.dataset.loadState = "loading";
+
+    const img = el("img", {
+      class: "wallpaper-img",
+      src: day.wallpaperPortrait,
+      alt: `${day.title || "拾光"} 手机壁纸`,
+      loading: "lazy",
+      decoding: "async",
+    });
+    img.addEventListener("load", () => {
+      unit.dataset.loadState = "loaded";
+    });
+    img.addEventListener("error", () => {
+      // 竖版壁纸 404（历史未生成）→ 单元 error 态（前端容错，不阻断后续单元）
+      unit.dataset.loadState = "error";
+    });
+
+    unit.replaceChildren(img, buildWallpaperActionRail(day));
+  }
+
+  /** 视频变体（.wallpaper-stage 模糊垫底 = wallpaperPortrait；muted loop 自动播放，ensureVideoIO 驱动；
+   *  v2 点击开声：复用 renderVideoCard 的声音按钮交互——默认静音自动播放不变，单击开声/再击关闭） */
+  function renderWallpaperVideoInto(unit, day, videoUrl) {
+    unit.dataset.hasVideo = "1";
+
+    const stage = el("div", { class: "wallpaper-stage" });
+
+    // 模糊封面垫底（= wallpaperPortrait，复用 .video-stage 模糊垫底模式）
+    const blur = el("img", {
+      class: "wallpaper-blur",
+      src: day.wallpaperPortrait,
+      alt: "",
+      loading: "lazy",
+      decoding: "async",
+      "aria-hidden": "true",
+    });
+    blur.addEventListener("error", () => {
+      // 垫底 404 → 隐藏 blur（视频仍可播）
+      blur.style.display = "none";
+    });
+    stage.appendChild(blur);
+
+    const video = el("video", {
+      class: "wallpaper-video",
+      src: videoUrl,
+      poster: day.wallpaperPortrait,
+      loop: "",
+      playsinline: "",
+      "webkit-playsinline": "",
+      preload: "metadata",
+    });
+    video.muted = true;
+    const soundBtn = makeSoundButton(video);
+    // 单击切换 muted——统一走按钮单一真相源（切 muted + 同步 data-sound-state 机读态）
+    video.addEventListener("click", () => {
+      if (video.controls) return;
+      soundBtn.click();
+    });
+    video.addEventListener("loadeddata", () => {
+      unit.dataset.loadState = "loaded";
+    });
+    video.addEventListener("error", () => {
+      // 视频 404/解码失败 → 整单元重渲为静态 img 变体（吞错，零 console.error，回退语义）
+      renderWallpaperStaticInto(unit, day);
+    });
+    stage.appendChild(video);
+
+    unit.replaceChildren(stage, buildWallpaperActionRail(day, [soundBtn]));
+
+    // 注册到视频 IO（视口自动播放/暂停，与 video 卡同一套互斥逻辑）
+    ensureVideoIO().observe(unit);
+  }
+
+  /** 声音按钮（v2 增量任务 16：壁纸卡视频变体复用 renderVideoCard 的双 SVG 图标交互）。
+   *  返回按钮；机读态由 data-sound-state 承载（muted|unmuted），与 video 卡同一 CSS 门。 */
+  function makeSoundButton(videoEl) {
+    const soundBtn = el(
+      "button",
+      {
+        type: "button",
+        class: "rail-btn video-sound",
+        "data-role": "video-sound",
+        "aria-label": "切换声音",
+      },
+      [svgIcon("soundOff", "btn-icon--muted"), svgIcon("soundOn", "btn-icon--unmuted")],
+    );
+    soundBtn.dataset.soundState = "muted";
+    const updateSoundBtn = () => {
+      soundBtn.dataset.soundState = videoEl.muted ? "muted" : "unmuted";
+    };
+    soundBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      videoEl.muted = !videoEl.muted;
+      updateSoundBtn();
+    });
+    return soundBtn;
   }
 
   // ============================================================================

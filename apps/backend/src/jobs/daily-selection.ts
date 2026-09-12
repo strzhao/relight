@@ -753,6 +753,28 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
           }`,
         );
       }
+
+      // 阶段 4: 动态视频壁纸链式触发（开关开 ∧ hero 非视频 ∧ composedImagePath 非空）——
+      // one-off enqueue 给 wallpaper-video Worker（串行生成横竖两条无音轨壁纸视频）。
+      // 独立 try/catch 旁路不 throw：enqueue 失败不影响精选主流程（失败当日回退静态）。
+      if (config.wallpaperVideoEnabled) {
+        try {
+          const { wallpaperVideoQueue } = await import("./queues");
+          await wallpaperVideoQueue.add("daily-wallpaper-video", { pickDate });
+          job.log(`阶段 4: 壁纸视频任务已入队 pickDate=${pickDate}`);
+        } catch (enqueueErr) {
+          console.warn(
+            `[daily-selection] 壁纸视频入队失败（不影响精选）: ${
+              enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)
+            }`,
+          );
+          job.log(
+            `阶段 4: 壁纸视频入队失败（不影响精选）: ${
+              enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)
+            }`,
+          );
+        }
+      }
     } catch (err) {
       job.log(`阶段 3 失败（不影响精选）: ${err instanceof Error ? err.message : String(err)}`);
     }

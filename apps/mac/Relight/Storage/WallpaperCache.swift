@@ -25,6 +25,27 @@ final class WallpaperCache {
         ensureSubdir("composed")
     }
 
+    /// Aerial 壁纸视频缓存子目录（当日唯一路径 aerial-video/{pickDate}.mov，路径缓存教训）
+    var aerialVideoDir: URL {
+        ensureSubdir("aerial-video")
+    }
+
+    /// 当日壁纸视频缓存文件唯一路径（不检查存在性）
+    func aerialVideoURL(pickDate: String) -> URL {
+        aerialVideoDir.appendingPathComponent("\(pickDate).mov")
+    }
+
+    /// 写入当日壁纸视频缓存（原子写）
+    func writeAerialVideo(pickDate: String, data: Data) throws -> URL {
+        let url = aerialVideoURL(pickDate: pickDate)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            throw RelightError.cacheWriteFailed(path: url, underlying: error)
+        }
+        return url
+    }
+
     private func ensureSubdir(_ name: String) -> URL {
         let url = rootURL.appendingPathComponent(name)
         let fm = FileManager.default

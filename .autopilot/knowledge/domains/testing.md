@@ -165,3 +165,11 @@
 - **Evidence**：gallery OR-C4 两轮修复——原「真全屏中 setViewportSize」被 CDP 拒绝；探针证伪漂移前提后断言反转为「不被甩离视频单元」；`document.fullscreenElement` stub + 真实翻转通过（核对锚点：2026-08-31 apps/gallery/__tests__/gallery-orientation.e2e.acceptance.test.ts）
 
 <!-- SIZE WARNING (2026-08-31): 本文件已超 150 行，建议下次整理时拆分或裁剪旧条目 -->
+
+## 测试进程携带真实凭据污染生产 COS/VPS（setupFiles 全局守卫模式）
+
+[2026-09-12] <!-- tags: vitest, dotenv, cos, 凭据, 生产污染, setupfiles -->
+
+- **Scenario**：测试链路间接调用带上传/推送副作用的模块（syncDayToGallery 等），各测试文件都没直接引用 upload/push——没人觉得需要 mock
+- **Lesson**：dotenv 在模块导入时才灌 .env 且**不覆盖已存在的 process.env 键**——所以 setupFiles 里「delete env 键」无效，必须**预置空串占位**；但 `""` 对 `??` 不触发兜底，bucket/region 类「有硬编码默认」的键不能占位（否则 URL 拼成 `https://.cos..`），只占位凭据类（SECRET_ID/KEY/APPID）。只读冒烟例外（需真实凭据拼 URL）用**独立副作用模块**在 config 求值前 `dotenv.config({override:true})`——ESM import 顺序敏感，副作用模块必须排在 config import 之前
+- **Evidence**：dng-narrate 链路真实上传 COS（当日壁纸被 fixture 覆盖成 652B）+ 真推 VPS manifest；vitest.setup.ts 守卫后 3 连跑全绿 + COS LastModified/VPS generatedAt 双不变（核对锚点：2026-09-12 apps/backend/vitest.setup.ts）

@@ -13,6 +13,17 @@ function resolveClaudeCliPath(): string {
   }
 }
 
+/** 运行时解析 `which honeydo` 绝对路径（同 resolveClaudeCliPath 惯例） */
+function resolveHoneydoCliPath(): string {
+  if (process.env.HONEYDO_CLI_PATH) return process.env.HONEYDO_CLI_PATH;
+  try {
+    return execSync("which honeydo", { encoding: "utf8" }).trim();
+  } catch {
+    // honeydo 未安装时返回空串，spawn 前存在校验会兜底 fail
+    return "";
+  }
+}
+
 export const config = {
   /** monorepo 根目录（child_process spawn cwd 用）。
    * ecosystem.config.cjs 启动 PM2 时显式注入 REPO_ROOT env；
@@ -119,6 +130,33 @@ export const config = {
    *  30 分钟硬编码线被 SIGTERM，finalize 未执行）；cron 每天 10:00，45 分钟完成可接受。
    *  env VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */
   videoSpawnTimeoutMs: Number.parseInt(process.env.VIDEO_SPAWN_TIMEOUT_MS ?? "2700000", 10),
+  /** 动态视频壁纸总开关（每日精选后对 hero 照片做微动化，产出横竖两条无音轨壁纸视频）。
+   *  默认关——关闭时全链路维持既有静态链路（零 honeydo 调用、manifest 不含视频字段）。
+   *  env DAILY_WALLPAPER_VIDEO 覆盖（沿 DAILY_* 惯例，范本 dailyRecentSourceEnabled）。 */
+  wallpaperVideoEnabled: (process.env.DAILY_WALLPAPER_VIDEO ?? "false") === "true",
+  /** 壁纸视频单条时长（秒）。recipes 纪律（v2）：单条 ≤5s（漂移随时长累积），默认 4；
+   *  长循环由 buildLoop palindrome 拼接至 wallpaperVideoLoopSeconds 兜底。
+   *  honeydo CLI 上限 15（--seconds 1-15），运行时 clamp ∈ [1,15]。
+   *  env WALLPAPER_VIDEO_SECONDS 覆盖。 */
+  wallpaperVideoSeconds: Number.parseInt(process.env.WALLPAPER_VIDEO_SECONDS ?? "4", 10),
+  /** palindrome 循环目标时长（秒）。默认 8（4s 单条 ×2 palindrome 拼接）。
+   *  env WALLPAPER_VIDEO_LOOP_SECONDS 覆盖。 */
+  wallpaperVideoLoopSeconds: Number.parseInt(process.env.WALLPAPER_VIDEO_LOOP_SECONDS ?? "8", 10),
+  /** spawn honeydo 单条视频生成超时（ms）。默认 5400000（90min/条——15s 实际耗时未实测，
+   *  按 4s 成片 6-23 分钟线性外推上界预留）；NaN 或 ≤0 → 回退默认。
+   *  env WALLPAPER_VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */
+  wallpaperVideoSpawnTimeoutMs: Number.parseInt(
+    process.env.WALLPAPER_VIDEO_SPAWN_TIMEOUT_MS ?? "5400000",
+    10,
+  ),
+  /** honeydo CLI 绝对路径（spawn 用，PM2 PATH 不保证；env HONEYDO_CLI_PATH 覆盖，
+   *  默认运行时 `which honeydo` 解析）。 */
+  honeydoCliPath: resolveHoneydoCliPath(),
+  /** 人物收敛型 prompt 模板（v2 生成纪律：中文 30-50 字，「轻微呼吸起伏…动作轻柔」句式，
+   *  收敛人物动作幅度避免漂移）。--first-frame 与 --last-frame 同图（hero 预裁剪图），
+   *  prompt 描述微动回摆。 */
+  wallpaperVideoPrompt:
+    "人物保持姿态稳定，只有轻微的呼吸起伏，动作轻柔，光影柔和流动，随后缓缓回到初始画面，如呼吸般自然",
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),

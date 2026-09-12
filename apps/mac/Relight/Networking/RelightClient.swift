@@ -95,6 +95,37 @@ final class RelightClient {
         return try cache.writeOriginal(hash: photo.fileHash, ext: ext, data: data)
     }
 
+    /// 下载当日壁纸视频（Aerial 注入用）
+    ///
+    /// - Parameters:
+    ///   - pickDate: 当日日期（缓存唯一路径 aerial-video/{pickDate}.mov，路径缓存教训）
+    ///   - downloadURL: 服务端下发的 COS 绝对 URL（pick.wallpaperVideoUrl）
+    /// - Returns: 本地缓存文件 URL
+    /// - Note: ephemeral session（历史教训：默认缓存会拿旧响应）；校验 Content-Type 前缀 video/
+    func downloadWallpaperVideo(pickDate: String, downloadURL: String) async throws -> URL {
+        guard let url = URL(string: downloadURL) else {
+            throw RelightError.invalidResponse(statusCode: 0, body: "无效的壁纸视频 URL: \(downloadURL)")
+        }
+
+        let (data, response) = try await performRequest(url: url)
+        let httpResponse = response as! HTTPURLResponse
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8)
+            throw RelightError.invalidResponse(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        let contentType = (httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+        guard contentType.hasPrefix("video/") else {
+            throw RelightError.invalidResponse(
+                statusCode: httpResponse.statusCode,
+                body: "非视频响应: \(contentType)"
+            )
+        }
+
+        return try WallpaperCache.shared.writeAerialVideo(pickDate: pickDate, data: data)
+    }
+
     // MARK: - Private
 
     private func performRequest(url: URL) async throws -> (Data, URLResponse) {

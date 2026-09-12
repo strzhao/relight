@@ -9,6 +9,7 @@ import { dailySelectionWorker } from "../jobs/daily-selection";
 import { dailyVideoWorker } from "../jobs/daily-video";
 import { detectFacesWorker } from "../jobs/detect-faces";
 import { scanStorageWorker } from "../jobs/scan-storage";
+import { wallpaperVideoWorker } from "../jobs/wallpaper-video";
 import { buildInfo } from "../lib/build-info";
 import { config } from "../lib/config";
 
@@ -76,6 +77,12 @@ const dailyPushWorkerInstance = new Worker("daily-push", dailyPushWorker, {
 
 // 每日视频生成 Worker — 每天 10:00 触发（有主题才做，spawn claude -p 渲染）
 const dailyVideoWorkerInstance = new Worker("daily-video", dailyVideoWorker, {
+  connection,
+  prefix: config.bullmqPrefix,
+});
+
+// 壁纸视频生成 Worker — daily-selection 阶段 4 链式触发（串行单任务；单条 spawn 90min 级）
+const wallpaperVideoWorkerInstance = new Worker("wallpaper-video", wallpaperVideoWorker, {
   connection,
   prefix: config.bullmqPrefix,
 });
@@ -151,6 +158,7 @@ async function shutdown(signal: string): Promise<void> {
       detectFacesWorkerInstance.close(false),
       dailyPushWorkerInstance.close(false),
       dailyVideoWorkerInstance.close(false),
+      wallpaperVideoWorkerInstance.close(false),
       analyzeEvents.close(),
     ]);
     console.log("[workers] 所有 Worker 已关闭");
@@ -205,6 +213,13 @@ dailyVideoWorkerInstance.on("completed", (job) => {
 });
 dailyVideoWorkerInstance.on("failed", (job, err) => {
   console.error(`[daily-video] 任务失败: ${job?.id}`, err.message);
+});
+
+wallpaperVideoWorkerInstance.on("completed", (job) => {
+  console.log(`[wallpaper-video] 任务完成: ${job.id}`);
+});
+wallpaperVideoWorkerInstance.on("failed", (job, err) => {
+  console.error(`[wallpaper-video] 任务失败（当日回退静态）: ${job?.id}`, err.message);
 });
 
 console.log(

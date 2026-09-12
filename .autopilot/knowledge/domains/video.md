@@ -65,3 +65,20 @@
 
 - **Lesson**：失败/超时排查必 `ls -lat <videoWorkspacePath>/out/`——渲染成功但没拷走的 mp4 会躺在那里，可挽救（校验 faststart + ffprobe 后补 writeCompletedVideo）。大素材（137 张成长线）渲染 29min+，30min 硬编码超时太紧。
 - **Choice**：超时默认 45min（`config.videoSpawnTimeoutMs`，env `VIDEO_SPAWN_TIMEOUT_MS` 覆盖）；「mp4 产物缺失」err 必附 stdout tail（claude -p 退出码 0 却没出片是常见失败形态，真实回复全在 stdout，不记录=诊断盲区）。
+
+## honeydo 大图生成挂死 = macOS GPU 交互保护（非模型/机器故障）
+
+[2026-09-12] <!-- tags: honeydo, mlx, metal, gpu, 挂死, 交互保护, video-gen -->
+
+- **Scenario**：本地扩散生成（MLX/Metal）在桌面机上时长/分辨率调大后「永远卡在第一步」，小参数却一直能跑
+- **Lesson**：根因是 macOS `kIOGPUCommandBufferCallbackErrorImpactingInteractivity`——桌面 GPU 负载重时（多屏 Electron 应用、鸿蒙模拟器曾泄漏 63GB GPU 内存）系统杀/饿死长命令缓冲。三个坑：① 挂死态无任何日志/报错，只能靠 `sample <pid>` 看到卡在 `eval_impl → cond_wait`；② **CPU TIME 冻结 ≠ 挂死的可靠判据**（GPU-bound 时 Python 本来就低 CPU）——正确判据是 ioreg 的 `Renderer Utilization`（91%=我方 kernel 在算；低+Device 高=被别人占）；③ `ioreg` 里出现 `AGXMetalA12` 虚拟渲染器 = 有模拟器在跑
+- **Choice**：生成任务排空闲窗口（深夜/锁屏）；分辨率不降档牺牲画质（失败回退静态+次日重试），256p 仅作最低兜底；recipes 纪律（≤5s/短边≥700/基座12步/双锚定/人脸≥1/4）是质量铁律，15s 单条方案本身违反漂移纪律
+- **Evidence**：15s/8s/4s 傍晚挂死 vs 上午低负载同参数成功 vs 21:12 空闲窗口 4s 成功；ioreg Alloc 63.5GB→关模拟器后 4GB（核对锚点：2026-09-12）
+
+## Remotion 渲染冷启动 600s 级 + browser-executable 必须显式化
+
+[2026-09-12] <!-- tags: remotion, 冷启动, 超时, wallpaper-overlay -->
+
+- **Lesson**：`npx remotion render` 首跑 bundling + Chrome Headless 冷启动实测可达 600s 级——600s 超时会在生产首跑假超时；浏览器缓存按「cwd 向上最近 package.json」解析，cwd 在子目录工程会 miss 上层缓存触发联网重下（并发进程同卡）
+- **Choice**：显式传 `--browser-executable` 指向 workspace 已缓存 shell（零下载、确定性）；renderTextOverlay 超时 900s（契约 v2.1）；README/前置校验列入 Chrome Headless Shell 存在性检查
+- **Evidence**：smoke 热跑 1.9s vs 冷跑 600s 级（核对锚点：2026-09-12）

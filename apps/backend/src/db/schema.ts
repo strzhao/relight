@@ -200,6 +200,11 @@ export const dailyPicks = sqliteTable("daily_picks", {
     .$type<{ photoId: string; caption: string }[]>()
     .notNull()
     .default(sql`'[]'`),
+  /** 横版壁纸视频 COS URL（Aerial 用，.mov；null = 未生成/生成失败/开关关闭）。
+   *  值 = COS 上传回执 URL（非约定 key 拼接，死链教训）；回执空串不写列。 */
+  wallpaperVideoLandscapeUrl: text("wallpaper_video_landscape_url"),
+  /** 竖版壁纸视频 COS URL（画廊壁纸卡用，.mp4；null = 未生成/生成失败/开关关闭）。 */
+  wallpaperVideoPortraitUrl: text("wallpaper_video_portrait_url"),
   createdAt: text("created_at").notNull(),
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "@relight/backend",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,6 +19,7 @@
     "backfill:gallery": "tsx src/cli/backfill-gallery.ts",
     "backfill:portraits": "tsx src/cli/backfill-portraits.ts",
     "cos:cors": "tsx src/cli/setup-cos-cors.ts",
+    "wallpaper-video:rerun": "tsx src/cli/wallpaper-video.ts",
     "models:download": "tsx scripts/download-models.ts"
   },
   "dependencies": {

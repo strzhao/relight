@@ -46,3 +46,12 @@ export const dailyVideoQueue = new Queue("daily-video", {
   defaultJobOptions,
   prefix: config.bullmqPrefix,
 });
+
+/** 壁纸视频生成 Queue（daily-selection 阶段 4 链式 one-off 触发，无 repeatable pattern）。
+ *  显式 defaultJobOptions { attempts: 1 } 覆盖全局 attempts:3——单条 spawn 90min 级，
+ *  失败重试会连环占串行 Worker 且重复烧 GPU，与「失败当日回退静态」时效冲突。 */
+export const wallpaperVideoQueue = new Queue("wallpaper-video", {
+  connection,
+  defaultJobOptions: { attempts: 1 },
+  prefix: config.bullmqPrefix,
+});

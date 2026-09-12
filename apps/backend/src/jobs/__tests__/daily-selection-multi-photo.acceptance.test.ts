@@ -192,6 +192,8 @@ function createTestDb() {
       score REAL NOT NULL DEFAULT 0,
       composed_image_path TEXT,
       created_at TEXT NOT NULL,
+      wallpaper_video_landscape_url TEXT,
+      wallpaper_video_portrait_url TEXT,
       members TEXT DEFAULT '[]'
     );
     CREATE TABLE bursts (

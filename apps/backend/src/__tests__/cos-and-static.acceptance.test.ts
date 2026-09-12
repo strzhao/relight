@@ -15,9 +15,13 @@
  *   - S15 依赖外网 + 真实部署 manifest；无 MANIFEST_URL env 时 fail 并提示如何提供（不 skip）
  *   - S16 不依赖网络，直接断言
  */
+import "./helpers/restore-real-cos-env";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+// 例外说明：vitest.setup.ts 全局清空 COS 凭据防测试写生产桶；本文件是【只读】的
+// 真实 COS 冒烟（curl HEAD/GET 公有读与不可枚举），通过 helpers/restore-real-cos-env
+// 在 config 求值前恢复凭据（仅本 fork，不做任何写操作）。
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 

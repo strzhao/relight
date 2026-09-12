@@ -131,6 +131,8 @@ function createTestDb() {
       id TEXT PRIMARY KEY, photo_id TEXT NOT NULL REFERENCES photos(id),
       pick_date TEXT NOT NULL UNIQUE, title TEXT NOT NULL, narrative TEXT NOT NULL,
       score REAL NOT NULL DEFAULT 0, composed_image_path TEXT,
+      wallpaper_video_landscape_url TEXT,
+      wallpaper_video_portrait_url TEXT,
       members TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
     );
     CREATE TABLE daily_pick_entries (

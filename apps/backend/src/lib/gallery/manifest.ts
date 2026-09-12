@@ -58,6 +58,14 @@ export interface ManifestDay {
   wallpaperLandscape: string;
   /** 竖版手机壁纸 COS URL（1290×2796；composedImagePath 为 null 时留空串） */
   wallpaperPortrait: string;
+  /**
+   * 横版壁纸视频 COS URL（Aerial 用，.mov）。
+   * 条件展开：仅当 DB 回执列非空时字段存在（null/空串 → JSON 中字段缺省，不输出空串——
+   * 冻结场景 4.P2 要求开关关闭时字段不存在）。
+   */
+  wallpaperVideoLandscape?: string;
+  /** 竖版壁纸视频 COS URL（画廊壁纸卡用，.mp4；条件展开同上）。 */
+  wallpaperVideoPortrait?: string;
   photos: ManifestPhoto[];
 }
 
@@ -92,6 +100,16 @@ export function wallpaperLandscapeCosKey(pickDate: string): string {
 /** 竖版壁纸 key：`relight/wallpapers/{pickDate}_v2-contain-1290x2796.jpg` */
 export function wallpaperPortraitCosKey(pickDate: string): string {
   return `${config.cos.prefix}/wallpapers/${pickDate}_v2-contain-1290x2796.jpg`;
+}
+
+/** 横版壁纸视频 key：`relight/wallpaper-videos/{pickDate}_landscape.mov` */
+export function wallpaperVideoLandscapeCosKey(pickDate: string): string {
+  return `${config.cos.prefix}/wallpaper-videos/${pickDate}_landscape.mov`;
+}
+
+/** 竖版壁纸视频 key：`relight/wallpaper-videos/{pickDate}_portrait.mp4` */
+export function wallpaperVideoPortraitCosKey(pickDate: string): string {
+  return `${config.cos.prefix}/wallpaper-videos/${pickDate}_portrait.mp4`;
 }
 
 /** 单张缩略图 key：`relight/photos/{photoId}-thumb.jpg` */
@@ -147,6 +165,8 @@ interface PickRow {
   title: string;
   narrative: string;
   composedImagePath: string | null;
+  wallpaperVideoLandscapeUrl: string | null;
+  wallpaperVideoPortraitUrl: string | null;
 }
 interface EntryRow {
   dailyPickId: string;
@@ -201,7 +221,9 @@ export async function buildManifest(): Promise<Manifest> {
     // ---- days[]：dailyPicks 升序 ----
     const picks = sqlite
       .prepare(
-        `SELECT id, pick_date AS pickDate, title, narrative, composed_image_path AS composedImagePath
+        `SELECT id, pick_date AS pickDate, title, narrative, composed_image_path AS composedImagePath,
+                wallpaper_video_landscape_url AS wallpaperVideoLandscapeUrl,
+                wallpaper_video_portrait_url AS wallpaperVideoPortraitUrl
          FROM daily_picks
          ORDER BY pick_date ASC`,
       )
@@ -309,7 +331,10 @@ export async function buildManifest(): Promise<Manifest> {
         ? cosPublicUrl(wallpaperPortraitCosKey(p.pickDate))
         : "";
 
-      return {
+      // 壁纸视频字段：条件展开——仅当 DB 回执列非空时注入（null/空串 → 字段缺省，
+      // 不输出空串；冻结场景 4.P2 要求开关关闭时字段不存在）。值 = COS 上传回执 URL
+      //（manifest 资源 URL 用回执而非约定 key 拼——死链教训）。
+      const day: ManifestDay = {
         pickDate: p.pickDate,
         title: p.title,
         narrative: p.narrative,
@@ -317,6 +342,13 @@ export async function buildManifest(): Promise<Manifest> {
         wallpaperPortrait,
         photos,
       };
+      if (p.wallpaperVideoLandscapeUrl) {
+        day.wallpaperVideoLandscape = p.wallpaperVideoLandscapeUrl;
+      }
+      if (p.wallpaperVideoPortraitUrl) {
+        day.wallpaperVideoPortrait = p.wallpaperVideoPortraitUrl;
+      }
+      return day;
     });
 
     // ---- videos[]：status=completed AND durationSec>0（数据完整性门，见 P30.4），
