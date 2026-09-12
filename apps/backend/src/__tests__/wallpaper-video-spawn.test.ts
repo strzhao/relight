@@ -126,16 +126,17 @@ echo "{\\"out\\":\\"$out\\",\\"duration\\":15,\\"res\\":\\"720p\\"}"
   it("超时 abort → HoneydoSpawnError，message 含超时毫秒数与 stdout tail（tail ≤2000 字符）", async () => {
     // 纯 sh builtin 前台循环写 5000 个 A（无 seq 子进程，sh 一起来毫秒级产出），
     // 然后 exec sleep 30：sh 被 sleep 替换，SIGTERM 直接杀掉且无子进程持有 stdio 管道。
-    // 窗口给 2000ms：冷启动（vitest 首次 fork /bin/sh）实测可 >300ms，紧窗会 flake
-    // （SIGTERM 落地时子进程尚未产出任何 stdout，tail 断言落空）。
+    // 窗口给 5000ms：冷启动（vitest 首次 fork /bin/sh）实测可 >300ms，且 pnpm verify
+    // 全仓并发下 spawn 延迟抖动更大（2000ms 窗曾 flake：SIGTERM 落地时 stdout 尚空）。
     const script = makeFakeHoneydo(
       `i=0\nwhile [ $i -lt 500 ]; do printf 'AAAAAAAAAA'; i=$((i+1)); done; echo\nexec sleep 30\n`,
     );
-    const err = await spawnHoneydoVideo({ ...baseOpts, cliPath: script, timeoutMs: 2000 }).catch(
+    const timeoutMs = 5000;
+    const err = await spawnHoneydoVideo({ ...baseOpts, cliPath: script, timeoutMs }).catch(
       (e) => e,
     );
     expect(err).toBeInstanceOf(HoneydoSpawnError);
-    expect(err.message).toContain("2000ms");
+    expect(err.message).toContain(`${timeoutMs}ms`);
     // stdout tail ≤2000 字符：5000 个 A 被截断
     expect(err.message.length).toBeLessThan(2600);
     expect(err.message).toContain("A");
