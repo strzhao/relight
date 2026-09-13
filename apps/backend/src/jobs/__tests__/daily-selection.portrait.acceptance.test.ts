@@ -161,6 +161,7 @@ function createTestDb() {
       title TEXT NOT NULL, narrative TEXT NOT NULL, score REAL NOT NULL DEFAULT 0,
       wallpaper_video_landscape_url TEXT,
       wallpaper_video_portrait_url TEXT,
+      motion_prompt TEXT,
       composed_image_path TEXT, created_at TEXT NOT NULL, members TEXT DEFAULT '[]'
     );
     CREATE TABLE daily_pick_entries (

@@ -6,7 +6,8 @@
  * - wallpaperVideoLoopSeconds 默认 8（palindrome 目标时长；v2 新增）
  * - wallpaperVideoSpawnTimeoutMs 默认 5400000（90min/条）
  * - honeydoCliPath 存在（本机 which honeydo 可解析）且为绝对路径
- * - wallpaperVideoPrompt 人物收敛模板（「轻微呼吸起伏…动作轻柔」句式，30-50 字）
+ * - wallpaperVideoPromptPerson/Scene 分层默认模板（2026-09-13 修订：30-50 字 + Audio 指引，
+ *   env WALLPAPER_VIDEO_PROMPT_PERSON/SCENE 可覆盖）
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -83,12 +84,37 @@ describe("wallpaper video config", () => {
     expect(config.wallpaperVideoSpawnTimeoutMs).toBe(5400000);
   });
 
-  it("wallpaperVideoPrompt 为人物收敛模板（呼吸起伏/动作轻柔句式，30-50 字）", async () => {
+  it("wallpaperVideoPromptPerson/Scene 分层默认模板（30-50 字 + Audio 指引 + no talking）", async () => {
     const config = await getFreshConfig();
-    expect(config.wallpaperVideoPrompt).toContain("呼吸起伏");
-    expect(config.wallpaperVideoPrompt).toContain("动作轻柔");
-    expect(config.wallpaperVideoPrompt.length).toBeGreaterThanOrEqual(30);
-    expect(config.wallpaperVideoPrompt.length).toBeLessThanOrEqual(50);
+    // 人物默认：放开动作（2026-09-13 修订：去掉「保持姿态稳定/回到初始画面」过度收敛句式）
+    expect(config.wallpaperVideoPromptPerson).not.toContain("保持姿态稳定");
+    expect(config.wallpaperVideoPromptPerson).not.toContain("回到初始画面");
+    expect(config.wallpaperVideoPromptPerson).toContain("Audio:");
+    expect(config.wallpaperVideoPromptPerson).toContain("no talking");
+    // 风景默认：镜头/环境运动 + Audio 指引
+    expect(config.wallpaperVideoPromptScene).toContain("镜头");
+    expect(config.wallpaperVideoPromptScene).toContain("Audio:");
+    expect(config.wallpaperVideoPromptScene).toContain("no talking");
+    // 30-50 字中文主体纪律（Audio 后缀不计入）
+    for (const p of [config.wallpaperVideoPromptPerson, config.wallpaperVideoPromptScene]) {
+      expect(p, "分层默认 prompt 必须存在").toBeTruthy();
+      const zh = (p ?? "").split("Audio:")[0]?.trim() ?? "";
+      expect(zh.length).toBeGreaterThanOrEqual(30);
+      expect(zh.length).toBeLessThanOrEqual(50);
+    }
+  });
+
+  it("WALLPAPER_VIDEO_PROMPT_PERSON/SCENE env 可覆盖分层默认（A/B 调参入口）", async () => {
+    process.env.WALLPAPER_VIDEO_PROMPT_PERSON = "自定义人物运动描述，用于 A/B 验证";
+    process.env.WALLPAPER_VIDEO_PROMPT_SCENE = "自定义风景运动描述，用于 A/B 验证";
+    try {
+      const config = await getFreshConfig();
+      expect(config.wallpaperVideoPromptPerson).toContain("自定义人物");
+      expect(config.wallpaperVideoPromptScene).toContain("自定义风景");
+    } finally {
+      process.env.WALLPAPER_VIDEO_PROMPT_PERSON = undefined;
+      process.env.WALLPAPER_VIDEO_PROMPT_SCENE = undefined;
+    }
   });
 
   it("honeydoCliPath 为绝对路径（本机 which honeydo 可解析）", async () => {

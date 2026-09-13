@@ -192,15 +192,13 @@ describe("【v2】renderTextOverlay 产物 invariant（真实 Remotion 渲染，
     const head = fs.readFileSync(res.overlaidPath).subarray(0, 64).toString("latin1");
     expect(head, "成品必须是 mp4 封装（文件头含 ftyp）").toContain("ftyp");
 
-    // 契约逐字：与输入视频同分辨率同帧率
+    // 契约（2026-09-13 v3 修订）：横版画布升 1920×1080（Aerial 原生 16:9），
+    // 输入 1280×704(20:11) 在两栏画布内按 contain 重排版 → 成品 1920×1080；
+    // 帧率仍与输入同源。
     const inProbe = probeVideo(inputVideo);
     const outProbe = probeVideo(res.overlaidPath);
-    expect(outProbe.width, `成品宽度 ${outProbe.width} ≠ 输入 ${inProbe.width}`).toBe(
-      inProbe.width,
-    );
-    expect(outProbe.height, `成品高度 ${outProbe.height} ≠ 输入 ${inProbe.height}`).toBe(
-      inProbe.height,
-    );
+    expect(outProbe.width, "横版成品宽度必须 1920（两栏画布）").toBe(1920);
+    expect(outProbe.height, "横版成品高度必须 1080").toBe(1080);
     expect(
       outProbe.rFrameRate,
       `成品帧率 ${outProbe.rFrameRate} ≠ 输入帧率 ${inProbe.rFrameRate}`,
@@ -209,8 +207,8 @@ describe("【v2】renderTextOverlay 产物 invariant（真实 Remotion 渲染，
     // 契约逐字：含文字层（首帧 vs 输入首帧像素差异 >0）
     const inFrame = firstFrameRaw(inputVideo);
     const outFrame = firstFrameRaw(res.overlaidPath);
-    expect(outFrame.length, "成品首帧 raw 尺寸与输入不一致（分辨率/像素格式漂移）").toBe(
-      inFrame.length,
+    expect(outFrame.length, "成品首帧 raw 尺寸与画布不一致（分辨率/像素格式漂移）").toBe(
+      1920 * 1080 * 3,
     );
     expect(
       inFrame.equals(outFrame),

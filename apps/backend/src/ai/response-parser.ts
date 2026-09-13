@@ -56,6 +56,9 @@ export const dailyNarrateResponseSchema = z.object({
   narrative: z.string().min(10).max(200),
   score: z.number().min(0).max(10),
   reasoning: z.string().min(1),
+  /** 微动视频运动描述（2026-09-13 契约修订：AI 按画面内容生成 30-50 字 + Audio 环境音指引；
+   *  可选——旧格式响应/失败兜底时缺省，落库后由壁纸视频按有无人脸分层默认 prompt 兜底） */
+  motionPrompt: z.string().min(10).max(160).optional(),
 });
 
 export type DailyNarrateResponse = z.infer<typeof dailyNarrateResponseSchema>;
@@ -436,6 +439,10 @@ export function parseDailyNarrateResponse(rawResponse: string): {
       typeof rawJson.reasoning === "string" && rawJson.reasoning.length > 0
         ? rawJson.reasoning
         : "",
+    motionPrompt:
+      typeof rawJson.motionPrompt === "string" && rawJson.motionPrompt.length >= 10
+        ? rawJson.motionPrompt.slice(0, 160)
+        : undefined,
   };
 
   return {

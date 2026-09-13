@@ -205,6 +205,8 @@ export const dailyPicks = sqliteTable("daily_picks", {
   wallpaperVideoLandscapeUrl: text("wallpaper_video_landscape_url"),
   /** 竖版壁纸视频 COS URL（画廊壁纸卡用，.mp4；null = 未生成/生成失败/开关关闭）。 */
   wallpaperVideoPortraitUrl: text("wallpaper_video_portrait_url"),
+  /** hero 照片的微动视频运动描述（narrate AI 生成，2026-09-13；null → 壁纸视频按有无人脸分层默认 prompt） */
+  motionPrompt: text("motion_prompt"),
   createdAt: text("created_at").notNull(),
 });
 

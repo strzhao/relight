@@ -100,8 +100,10 @@ vi.mock("../lib/config", () => ({
       return holder.loopSeconds;
     },
     wallpaperVideoSpawnTimeoutMs: 5400000,
-    wallpaperVideoPrompt:
-      "画面中的景物以极缓慢的速度轻微摇曳，光影柔和流动，随后一切缓缓回到初始位置，如呼吸般自然",
+    wallpaperVideoPromptPerson:
+      "人物保持自然状态，轻轻侧头微笑，发丝和衣角随风轻扬，手部小幅度轻柔互动，光影缓缓流动",
+    wallpaperVideoPromptScene:
+      "镜头极缓慢推近，光影柔和流动，云影水波轻轻变幻，花草树叶随风微动，画面宁静而生动",
     get videoWorkspacePath() {
       return holder.videoWorkspacePath;
     },

@@ -194,6 +194,7 @@ function createTestDb() {
       created_at TEXT NOT NULL,
       wallpaper_video_landscape_url TEXT,
       wallpaper_video_portrait_url TEXT,
+      motion_prompt TEXT,
       members TEXT DEFAULT '[]'
     );
     CREATE TABLE bursts (

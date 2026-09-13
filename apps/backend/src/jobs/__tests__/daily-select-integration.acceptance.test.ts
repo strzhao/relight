@@ -133,6 +133,7 @@ function createTestDb() {
       score REAL NOT NULL DEFAULT 0, composed_image_path TEXT,
       wallpaper_video_landscape_url TEXT,
       wallpaper_video_portrait_url TEXT,
+      motion_prompt TEXT,
       members TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
     );
     CREATE TABLE daily_pick_entries (

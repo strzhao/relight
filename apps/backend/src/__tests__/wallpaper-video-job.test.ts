@@ -92,8 +92,10 @@ vi.mock("../lib/config", () => ({
     wallpaperVideoSpawnTimeoutMs: 5_400_000,
     honeydoCliPath: "/usr/local/bin/honeydo",
     storageRoot: "/tmp/wv-job-test-storage",
-    wallpaperVideoPrompt:
-      "人物保持姿态稳定，只有轻微的呼吸起伏，动作轻柔，光影柔和流动，随后缓缓回到初始画面，如呼吸般自然",
+    wallpaperVideoPromptPerson:
+      "人物保持自然状态，轻轻侧头微笑，发丝和衣角随风轻扬，手部小幅度轻柔互动，光影缓缓流动",
+    wallpaperVideoPromptScene:
+      "镜头极缓慢推近，光影柔和流动，云影水波轻轻变幻，花草树叶随风微动，画面宁静而生动",
     cos: {
       prefix: "relight",
       bucket: "b",

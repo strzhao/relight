@@ -133,6 +133,7 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
       members TEXT NOT NULL DEFAULT '[]',
       wallpaper_video_landscape_url TEXT,
       wallpaper_video_portrait_url TEXT,
+      motion_prompt TEXT,
       created_at TEXT NOT NULL
     );
 

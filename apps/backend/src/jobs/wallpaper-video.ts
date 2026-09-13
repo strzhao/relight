@@ -82,6 +82,8 @@ async function produceOneSide(opts: {
   meta: { title: string; narrative: string; takenAt?: string | null };
   canvas: { width: number; height: number };
   res: string;
+  /** 生成 prompt（解析链：pick.motionPrompt → faceBbox 分层默认） */
+  prompt: string;
   ext: "mov" | "mp4";
   cosKey: string;
   contentType: string;
@@ -95,6 +97,7 @@ async function produceOneSide(opts: {
     photoPath,
     faceBbox,
     meta,
+    prompt,
     canvas,
     res,
     ext,
@@ -118,7 +121,7 @@ async function produceOneSide(opts: {
     log(`[wallpaper-video] ${pickDate} ${res} 生成开始（seconds=${seconds}）`);
     await spawnHoneydoVideo({
       cliPath: config.honeydoCliPath,
-      prompt: config.wallpaperVideoPrompt,
+      prompt: opts.prompt,
       firstFrame: framePath,
       lastFrame: framePath,
       outPath: rawPath,
@@ -243,6 +246,16 @@ export async function runWallpaperVideo(
 
   // 4. 串行两侧「生成→buildLoop→renderTextOverlay→转码」；单侧失败旁路 log，不阻塞另一侧
   const meta = { title: pick.title, narrative: pick.narrative, takenAt: hero.takenAt ?? null };
+  // prompt 解析链（2026-09-13 契约修订）：AI narrate 的 motionPrompt 优先，
+  // 缺失时按有无人脸分层默认（人物收敛 / 风景放开），不再全场景共用一句。
+  const prompt =
+    pick.motionPrompt?.trim() ||
+    (faceBbox ? config.wallpaperVideoPromptPerson : config.wallpaperVideoPromptScene);
+  log(
+    `[wallpaper-video] ${pickDate} prompt 来源=${
+      pick.motionPrompt?.trim() ? "AI motionPrompt" : faceBbox ? "默认人物" : "默认风景"
+    }`,
+  );
   let landscape = "";
   let portrait = "";
   try {
@@ -252,6 +265,7 @@ export async function runWallpaperVideo(
       photoPath: hero.filePath,
       faceBbox,
       meta,
+      prompt,
       canvas: WALLPAPER_VIDEO_LANDSCAPE_CANVAS,
       res: WALLPAPER_VIDEO_LANDSCAPE_RES,
       ext: "mov",
@@ -275,6 +289,7 @@ export async function runWallpaperVideo(
       photoPath: hero.filePath,
       faceBbox,
       meta,
+      prompt,
       canvas: WALLPAPER_VIDEO_PORTRAIT_CANVAS,
       res: WALLPAPER_VIDEO_PORTRAIT_RES,
       ext: "mp4",

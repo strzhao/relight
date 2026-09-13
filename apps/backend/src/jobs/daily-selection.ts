@@ -210,6 +210,8 @@ interface EntryResult {
   title: string;
   narrative: string;
   score: number;
+  /** AI 按画面内容生成的微动视频运动描述（narrate 产出；缺省 → 壁纸视频分层默认 prompt） */
+  motionPrompt?: string;
   members: { photoId: string; caption: string }[];
 }
 
@@ -232,7 +234,7 @@ async function processSingleEntry(
   const isVideo = (candidate.mediaType ?? "image") === "video";
 
   // ---- narrate（vision 模型）----
-  let narrateResult: { title: string; narrative: string; score: number };
+  let narrateResult: { title: string; narrative: string; score: number; motionPrompt?: string };
 
   try {
     const promptPath = isVideo ? "daily/narrate-video" : "daily/narrate";
@@ -451,6 +453,7 @@ async function processSingleEntry(
     title: narrateResult.title,
     narrative: narrateResult.narrative,
     score: narrateResult.score,
+    motionPrompt: narrateResult.motionPrompt,
     members,
   };
 }
@@ -613,6 +616,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
       title: primary.title,
       narrative: primary.narrative,
       score: primary.score,
+      motionPrompt: primary.motionPrompt ?? null,
       members: primary.members,
       createdAt: new Date().toISOString(),
     })
@@ -623,6 +627,7 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
         title: primary.title,
         narrative: primary.narrative,
         score: primary.score,
+        motionPrompt: primary.motionPrompt ?? null,
         members: primary.members,
         composedImagePath: null,
       },
