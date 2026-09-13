@@ -1,5 +1,7 @@
+import { mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { config } from "../lib/config";
 import { convertHeicToJpeg, isHeicFile } from "../lib/heic";
@@ -284,6 +286,9 @@ function openDb(): Database.Database {
   if (!dbPath || dbPath === ":memory:") {
     throw new Error("DATABASE_PATH 未配置或为 :memory:");
   }
+  // better-sqlite3 不会自动建目录：全新环境（CI / 新 clone）下 ./data 不存在会抛
+  // "Cannot open database because the directory does not exist"——与 db/index.ts 同守护
+  mkdirSync(path.dirname(dbPath), { recursive: true });
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
@@ -979,7 +984,15 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-main().catch((e) => {
-  err("FATAL", (e as Error).stack ?? (e as Error).message);
-  process.exit(1);
-});
+// 仅直接执行时运行 main（tsx src/cli/... ）：被测试 import 时副作用（usage 打印 /
+// openDb / process.exit）会在 CI 全新环境炸掉 worker——main 里的 openDb 已有 mkdir
+// 守护，但空库无表仍会抛；导入侧（discover-dianping-photos.test.ts）只验导出形状。
+const isDirectRun =
+  typeof process.argv[1] === "string" && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().catch((e) => {
+    err("FATAL", (e as Error).stack ?? (e as Error).message);
+    process.exit(1);
+  });
+}
