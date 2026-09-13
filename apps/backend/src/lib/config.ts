@@ -156,16 +156,17 @@ export const config = {
    *  默认运行时 `which honeydo` 解析）。 */
   honeydoCliPath: resolveHoneydoCliPath(),
   /** 人物照微动默认 prompt（hero 有人脸时兜底；AI narrate 的 motionPrompt 优先）。
-   *  2026-09-13 契约修订：原「保持姿态稳定…回到初始画面」过度收敛致画面近乎静止——
-   *  回环由 --last-frame 双锚定负责，prompt 放开动作幅度；30-50 字 + Audio 环境音指引
-   *  （USAGE 纪律：音频写环境音 + no talking，语音不可控）。 */
+   *  2026-09-13 契约修订 + A/B 实测：原「保持姿态稳定…回到初始画面」过度收敛致画面近乎静止；
+   *  「轻轻侧头/发丝轻扬」等微小动作仍不可见（实测运动量仅为可见动作版 1/57）。
+   *  动作动词必须写到「肉眼可见」级别（转头张望/笑容绽开/身体摇晃/可见手部动作）；
+   *  回环由 --last-frame 双锚定负责；30-50 字 + Audio 环境音指引（no talking，语音不可控）。 */
   wallpaperVideoPromptPerson:
     process.env.WALLPAPER_VIDEO_PROMPT_PERSON ??
-    "人物保持自然状态，轻轻侧头微笑，发丝和衣角随风轻扬，手部小幅度轻柔互动，光影缓缓流动。Audio: warm indoor ambience, soft and gentle, no talking",
-  /** 风景/静物照微动默认 prompt（hero 无人脸时兜底；同上修订）。 */
+    "人物自然地转头张望，露出笑容，身体轻轻摇晃，手部有可见的轻柔动作，发丝和衣角随风轻扬。Audio: warm indoor ambience, soft and gentle, no talking",
+  /** 风景/静物照微动默认 prompt（hero 无人脸时兜底；同上：动作要肉眼可见）。 */
   wallpaperVideoPromptScene:
     process.env.WALLPAPER_VIDEO_PROMPT_SCENE ??
-    "镜头极缓慢推近，光影柔和流动，云影水波轻轻变幻，花草树叶随风微动，画面宁静而生动。Audio: natural ambience, breeze and distant birdsong, no talking",
+    "镜头缓慢推近，云影流动，水面波光粼粼，树叶和花草随风明显摇曳，光影明暗变化。Audio: natural ambience, breeze and distant birdsong, no talking",
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),
