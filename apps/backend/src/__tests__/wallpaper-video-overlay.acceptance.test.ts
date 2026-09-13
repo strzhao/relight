@@ -424,8 +424,8 @@ describe("【v2】transcodeForGallery spawn argv 契约（保留音轨：libx264
   }, 30000);
 });
 
-describe("transcodeForAerial spawn argv 契约（v1 维持：scale 1920×1080/hvc1/-an/faststart）", () => {
-  it("argv 含 -vf scale=1920:1080 ∧ -tag:v hvc1 ∧ -an ∧ -movflags +faststart；-c:v ∈ {hevc_videotoolbox, libx265}", async () => {
+describe("transcodeForAerial spawn argv 契约（2026-09-13 起：scale 1920×1080/hvc1/带音轨 aac/faststart）", () => {
+  it("argv 含 -vf scale=1920:1080 ∧ -tag:v hvc1 ∧ -c:a aac ∧ -movflags +faststart（无 -an）；-c:v ∈ {hevc_videotoolbox, libx265}", async () => {
     const dst = path.join(tmpRoot, "argv-aerial.mov");
     registeredOutputs.set(dst, aerialSrc);
     await transcodeForAerial(aerialSrc, dst);
@@ -443,8 +443,10 @@ describe("transcodeForAerial spawn argv 契约（v1 维持：scale 1920×1080/hv
     expect(vf ?? "", "-vf 必须含 scale=1920:1080").toContain("scale=1920:1080");
     // 契约逐字：-tag:v hvc1
     expect(flagValue(args, "-tag:v"), "-tag:v 必须为 hvc1").toBe("hvc1");
-    // 契约逐字：-an（无音轨——Mac 注入契约）
-    expect(args, "必须含 -an（Aerial 版无音轨）").toContain("-an");
+    // 契约逐字（2026-09-13 验收反转）：不再 -an，保留音轨（aac 128k）
+    expect(args, "不得再含 -an（2026-09-13 起横版保留音轨）").not.toContain("-an");
+    expect(flagValue(args, "-c:a"), "必须含 -c:a aac（保留音轨）").toBe("aac");
+    expect(flagValue(args, "-b:a"), "音轨码率必须 128k").toBe("128k");
     // 契约逐字：-movflags +faststart
     expect(flagValue(args, "-movflags"), "-movflags 必须为 +faststart").toBe("+faststart");
     // 契约：hevc_videotoolbox 失败 fallback libx265——二者之一

@@ -39,6 +39,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { config } from "../config";
 import { convertHeicToJpeg, isHeicBuffer } from "../heic";
+import { buildCaptureDateline } from "./capture";
 
 // ============================================================================
 // 画布与档位常量（honeydo 32 倍数约束：720p=1280×704、portrait=704×1216）
@@ -388,7 +389,8 @@ function spawnFfmpeg(args: string[], timeoutMs: number): Promise<void> {
 }
 
 /**
- * Aerial 用转码：HEVC(hvc1) .mov 1920×1080 无音轨 +faststart。
+ * Aerial 用转码：HEVC(hvc1) .mov 1920×1080 **带音轨**（aac 128k，2026-09-13 验收要求
+ * 以后生成的视频带音轨；Aerial 注入无声播放不受影响，下载/外放场景有环境音）+faststart。
  *
  * hevc_videotoolbox 失败（非本机硬件编码器/旧系统）→ fallback libx265 -crf 22。
  * 超时 600s。
@@ -400,7 +402,10 @@ export async function transcodeForAerial(src: string, dst: string): Promise<void
     src,
     "-vf",
     "scale=1920:1080:flags=lanczos",
-    "-an",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
     "-movflags",
     "+faststart",
   ];
@@ -625,13 +630,22 @@ export async function buildLoop(src: string, targetSeconds: number): Promise<Loo
 // ============================================================================
 
 export interface TextOverlayMeta {
-  /** 精选日期 YYYY-MM-DD（masthead 日期 + footer「拍摄于 …」） */
+  /** 精选日期 YYYY-MM-DD（masthead 日期） */
   pickDate: string;
   /** 主标题 */
   title: string;
   /** 叙事文案 */
   narrative: string;
+  /** hero 照片拍摄时刻 ISO（footer「拍摄于 …· N 年前」同源 web/静态壁纸）；null/缺省 → footer 不渲染 */
+  takenAt?: string | null;
 }
+
+/**
+ * footer 拍摄时刻 dateline（lib/wallpaper/capture.ts 同源封装：
+ * `formatPhotoCaptureTime(takenAt)` + 可选「 · N 年前」）。
+ * takenAt null/无效 → null（模板 footer 不渲染，与静态壁纸 footer 留白约定一致）。
+ */
+export { buildCaptureDateline } from "./capture";
 
 /** Remotion 渲染超时（契约：600s） */
 const OVERLAY_RENDER_TIMEOUT_MS = 900_000; // v2.1 契约：600→900（红队实测冷启动 bundling+Chrome 可达 600s 级）
@@ -741,6 +755,7 @@ export async function renderTextOverlay(
     pickDate: meta.pickDate,
     title: meta.title,
     narrative: meta.narrative,
+    captureDateline: buildCaptureDateline(meta.takenAt),
   };
   const args = [
     "remotion",

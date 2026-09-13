@@ -1,5 +1,6 @@
 import type { DailyPick, Photo } from "@relight/shared";
 import { formatPhotoCaptureTime } from "@relight/shared";
+import { calcYearsAgo } from "./capture";
 import {
   COLOR_BACKGROUND,
   COLOR_BORDER,
@@ -38,18 +39,6 @@ function parsePickDate(pickDate: string) {
     year: String(y),
     weekday: weekdayCN[date.getDay()] ?? "",
   };
-}
-
-/**
- * 计算 takenAt 与今日的年份差（与 web 端 calcYearsAgo 约定一致）。
- * 返回正整数；< 1 年或无效输入返回 null。
- */
-function calcYearsAgo(takenAt: string | null): number | null {
-  if (!takenAt) return null;
-  const taken = new Date(takenAt);
-  if (Number.isNaN(taken.getTime())) return null;
-  const yearDiff = new Date().getFullYear() - taken.getFullYear();
-  return yearDiff >= 1 ? yearDiff : null;
 }
 
 export interface DailyHeroJSXOpts {

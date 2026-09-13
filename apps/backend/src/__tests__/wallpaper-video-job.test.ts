@@ -168,7 +168,12 @@ const PICK = {
   narrative: "午后的光落在墙沿。",
   composedImagePath: "/tmp/wv-job-test-storage/daily-composed/2026-09-12_x.jpg",
 };
-const PHOTO = { id: "photo-1", filePath: "/photos/hero.jpg", mediaType: "image" };
+const PHOTO = {
+  id: "photo-1",
+  filePath: "/photos/hero.jpg",
+  mediaType: "image",
+  takenAt: "2016-07-18T14:35:53.000Z",
+};
 
 beforeEach(() => {
   state.pickRows = [];
@@ -254,7 +259,7 @@ describe("runWallpaperVideo", () => {
     expect(String(state.calls.buildLoop[0]?.src)).toMatch(/2026-09-12-landscape-raw\.mp4$/);
     expect(state.calls.buildLoop[0]?.targetSeconds).toBe(8);
 
-    // renderTextOverlay：输入=loop 产物，meta 透传 pickDate/title/narrative
+    // renderTextOverlay：输入=loop 产物，meta 透传 pickDate/title/narrative/takenAt
     expect(state.calls.renderTextOverlay).toHaveLength(2);
     expect(String(state.calls.renderTextOverlay[0]?.videoPath)).toMatch(
       /2026-09-12-landscape-raw-loop\.mp4$/,
@@ -263,6 +268,7 @@ describe("runWallpaperVideo", () => {
       pickDate: "2026-09-12",
       title: "巷口的猫",
       narrative: "午后的光落在墙沿。",
+      takenAt: "2016-07-18T14:35:53.000Z",
     });
 
     // 双轨转码输入 = Remotion 成品（*-loop-overlay.mp4）；横 → .mov（aerial），竖 → .mp4（gallery）

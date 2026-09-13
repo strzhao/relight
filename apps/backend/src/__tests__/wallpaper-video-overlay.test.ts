@@ -3,7 +3,7 @@
  * （v2 增量任务 14：Remotion 文字层）
  *
  * 契约（state.md ## 契约规约 计算/spawn 契约）：
- *   renderTextOverlay(videoPath, meta: {pickDate,title,narrative}) → {overlaidPath}
+ *   renderTextOverlay(videoPath, meta: {pickDate,title,narrative,takenAt?}) → {overlaidPath}
  *   spawn `npx remotion render`（cwd=wallpaper-overlay 工程、npx 绝对路径、
  *     AbortController 600s 超时、stdout tail 留证）
  *   错误枚举 OverlayRenderError：工程缺失 / Remotion 运行时缺失（不自动安装）/
@@ -18,7 +18,11 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { OverlayRenderError, renderTextOverlay } from "../lib/wallpaper/video";
+import {
+  OverlayRenderError,
+  buildCaptureDateline,
+  renderTextOverlay,
+} from "../lib/wallpaper/video";
 
 const holder = vi.hoisted(() => ({
   tmpDir: `/tmp/wv-overlay-test-${process.pid}`,
@@ -170,7 +174,12 @@ afterAll(() => {
   rmSync(holder.tmpDir, { recursive: true, force: true });
 });
 
-const META = { pickDate: "2026-09-12", title: "巷口的猫", narrative: "午后的光落在墙沿。" };
+const META = {
+  pickDate: "2026-09-12",
+  title: "巷口的猫",
+  narrative: "午后的光落在墙沿。",
+  takenAt: "2016-07-18T14:35:53.000Z",
+};
 
 describe("renderTextOverlay（mock spawn）", () => {
   it("参数拼装：npx 绝对路径 + remotion render src/index.ts <compId> + --props/--frames + cwd=工程目录", async () => {
@@ -188,12 +197,15 @@ describe("renderTextOverlay（mock spawn）", () => {
     // 竖版输入 → portrait composition
     expect(args[3]).toBe("wallpaper-overlay-portrait");
     expect(args[4]).toMatch(/input-portrait-overlay\.mp4$/);
-    // props 契约：{videoPath, pickDate, title, narrative}
+    // props 契约：{videoPath, pickDate, title, narrative, captureDateline}
     const propsIdx = args.indexOf("--props");
-    const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, string>;
+    const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
     expect(props).toEqual({
       videoPath: "wallpaper-overlay-input.mp4",
-      ...META,
+      pickDate: META.pickDate,
+      title: META.title,
+      narrative: META.narrative,
+      captureDateline: buildCaptureDateline(META.takenAt),
     });
     // frames = ceil(duration × fps)（0.5s × 24fps = 12 帧 → 0-11）
     const framesIdx = args.indexOf("--frames");
@@ -216,6 +228,17 @@ describe("renderTextOverlay（mock spawn）", () => {
     await renderTextOverlay(`${holder.tmpDir}/input-landscape.mp4`, META);
     const args = holder.spawnCalls[0]?.args ?? [];
     expect(args[3]).toBe("wallpaper-overlay-landscape");
+  });
+
+  it("takenAt 缺失 → props.captureDateline 为 null（footer 不渲染契约）", async () => {
+    await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, {
+      ...META,
+      takenAt: null,
+    });
+    const args = holder.spawnCalls[0]?.args ?? [];
+    const propsIdx = args.indexOf("--props");
+    const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
+    expect(props.captureDateline).toBeNull();
   });
 
   it("渲染期把输入拷入工程 public/，完成即清理", async () => {

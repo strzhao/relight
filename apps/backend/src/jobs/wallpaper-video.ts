@@ -79,7 +79,7 @@ async function produceOneSide(opts: {
   pickId: string;
   photoPath: string;
   faceBbox: FaceBbox | null;
-  meta: { title: string; narrative: string };
+  meta: { title: string; narrative: string; takenAt?: string | null };
   canvas: { width: number; height: number };
   res: string;
   ext: "mov" | "mp4";
@@ -135,11 +135,12 @@ async function produceOneSide(opts: {
       `[wallpaper-video] ${pickDate} ${res} palindrome 拼接完成（segments=${loop.segments}）→ ${loopPath}`,
     );
 
-    // 4. renderTextOverlay：Remotion 文字层合成（杂志排版：日期/标题/footer）
+    // 4. renderTextOverlay：Remotion 文字层合成（杂志排版：日期/标题/footer 拍摄时刻）
     const overlay = await renderTextOverlay(loopPath, {
       pickDate,
       title: meta.title,
       narrative: meta.narrative,
+      takenAt: meta.takenAt,
     });
     overlaidPath = overlay.overlaidPath;
     log(`[wallpaper-video] ${pickDate} ${res} 文字层合成完成 → ${overlaidPath}`);
@@ -241,7 +242,7 @@ export async function runWallpaperVideo(
   await mkdir(wallpaperVideoDir(), { recursive: true });
 
   // 4. 串行两侧「生成→buildLoop→renderTextOverlay→转码」；单侧失败旁路 log，不阻塞另一侧
-  const meta = { title: pick.title, narrative: pick.narrative };
+  const meta = { title: pick.title, narrative: pick.narrative, takenAt: hero.takenAt ?? null };
   let landscape = "";
   let portrait = "";
   try {

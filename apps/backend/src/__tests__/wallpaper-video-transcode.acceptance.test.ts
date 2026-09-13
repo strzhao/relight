@@ -4,16 +4,16 @@
  * 设计文档（state.md）对应契约（§契约规约 计算/spawn 契约【v2】逐字）：
  *   - transcodeForGallery 产物 invariant【v2】：容器 mp4 ∧ H.264 ∧ 有音频流（aac 立体声）
  *     ∧ 分辨率 == 源（704×1216）∧ faststart（画廊静音自动播放 + 点击开声）
- *   - transcodeForAerial 产物 invariant（v1 维持不变）：容器 mov ∧ HEVC（tag hvc1）
- *     ∧ 1920×1080 ∧ 无音频流 ∧ moov 在前（faststart）
- *   - §总体架构（v2）步骤 5：横版 HEVC(hvc1) .mov 1920×1080 无音轨 +faststart（Aerial 用）；
- *     竖版 H.264 mp4 带音轨 +faststart（画廊用）
- *   - §Mac 注入契约：transcodeForAerial 输出无音轨（系统 Aerial 槽位无声），其余同 v1
+ *   - transcodeForAerial 产物 invariant（2026-09-13 验收反转）：容器 mov ∧ HEVC（tag hvc1）
+ *     ∧ 1920×1080 ∧ **保留音轨**（aac 立体声）∧ moov 在前（faststart）
+ *   - §总体架构（v2）步骤 5：横版 HEVC(hvc1) .mov 1920×1080 带音轨 +faststart（Aerial 注入
+ *     无声播放不受影响，下载/外放有环境音）；竖版 H.264 mp4 带音轨 +faststart（画廊用）
+ *   - §Mac 注入契约（2026-09-13 更新）：双轨均保留音轨
  *
  * 验收点（round 2 编排器）：mock ffmpeg 参数断言见 wallpaper-video-overlay.acceptance.test.ts
  * （mock 面）；本文件为真实小样本 ffprobe 断言（验收点 4 可选项落实）——输入用 ffmpeg 造
  * 2s 短样片（画廊源 704×1216 竖版带立体声音轨；Aerial 源 1280×704 横版带音轨——
- * 带音轨是为了证明 -an 真实剥掉音轨）。
+ * 带音轨是为了证明音轨真实保留而非静默丢弃）。
  *
  * 红队铁律：不读蓝队实现代码；transcodeForGallery / transcodeForAerial 按契约函数名黑盒
  *   import 执行；不 skip、硬断言——ffmpeg/ffprobe 不可用一律真红。
@@ -276,8 +276,8 @@ describe("【v2】transcodeForGallery 产物 invariant：mp4 ∧ H.264 ∧ aac �
   }, 120000);
 });
 
-describe("transcodeForAerial 产物 invariant（v1 维持不变）：mov ∧ hvc1 ∧ 1920×1080 ∧ 无音轨 ∧ faststart", () => {
-  it("1280×704 带音轨源 → 产物容器 mov、tag hvc1、1920×1080、音频流数 0、moov 在前", async () => {
+describe("transcodeForAerial 产物 invariant（2026-09-13 起：mov ∧ hvc1 ∧ 1920×1080 ∧ 带音轨 ∧ faststart）", () => {
+  it("1280×704 带音轨源 → 产物容器 mov、tag hvc1、1920×1080、1 条 aac 立体声音轨、moov 在前", async () => {
     const dst = path.join(tmpRoot, "2026-09-12_landscape.mov");
     await transcodeForAerial(aerialSrc, dst);
 
@@ -292,8 +292,10 @@ describe("transcodeForAerial 产物 invariant（v1 维持不变）：mov ∧ hvc
     // 契约逐字 ③：1920×1080
     expect(p.width, `宽度必须 1920，实际 ${p.width}`).toBe(1920);
     expect(p.height, `高度必须 1080，实际 ${p.height}`).toBe(1080);
-    // 契约逐字 ④：无音频流（Mac 注入契约：系统 Aerial 槽位无声）
-    expect(p.audioStreams, `必须无音频流，实际 ${p.audioStreams}`).toBe(0);
+    // 契约逐字 ④：保留音轨（2026-09-13 验收要求：以后生成的视频带音轨）
+    expect(p.audioStreams, `必须保留 1 条音频流，实际 ${p.audioStreams}`).toBe(1);
+    expect(p.audioCodec, `音频编码必须为 aac，实际 ${p.audioCodec}`).toBe("aac");
+    expect(p.audioChannels, `音频必须立体声（2 ch），实际 ${p.audioChannels}`).toBe(2);
     // 契约逐字 ⑤：faststart（moov 在前）
     expect(moovBeforeMdat(dst), "mov 必须 +faststart（moov box 在 mdat 之前）").toBe(true);
   }, 600000);

@@ -121,7 +121,7 @@ afterAll(() => {
 });
 
 describe("transcodeForAerial / transcodeForGallery", () => {
-  it("transcodeForAerial：hevc_videotoolbox + scale=1920:1080 + hvc1 + -an +faststart", async () => {
+  it("transcodeForAerial：hevc_videotoolbox + scale=1920:1080 + hvc1 + 带音轨 aac 128k +faststart", async () => {
     const dst = `${holder.tmpDir}/out.mov`;
     await transcodeForAerial("/tmp/src.mp4", dst);
 
@@ -130,7 +130,12 @@ describe("transcodeForAerial / transcodeForGallery", () => {
     expect(args).toContain("scale=1920:1080:flags=lanczos");
     expect(args).toContain("hevc_videotoolbox");
     expect(args).toContain("hvc1");
-    expect(args).toContain("-an");
+    // 2026-09-13 验收要求：以后生成的视频带音轨（横版不再 -an）
+    expect(args).not.toContain("-an");
+    expect(args).toContain("-c:a");
+    expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
+    expect(args).toContain("-b:a");
+    expect(args[args.indexOf("-b:a") + 1]).toBe("128k");
     expect(args).toContain("+faststart");
   });
 
