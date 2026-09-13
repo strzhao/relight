@@ -162,11 +162,11 @@ export const config = {
    *  回环由 --last-frame 双锚定负责；30-50 字 + Audio 环境音指引（no talking，语音不可控）。 */
   wallpaperVideoPromptPerson:
     process.env.WALLPAPER_VIDEO_PROMPT_PERSON ??
-    "人物自然地转头张望，露出笑容，身体轻轻摇晃，手部有可见的轻柔动作，发丝和衣角随风轻扬。Audio: warm indoor ambience, soft and gentle, no talking",
+    "人物转头看向镜头，笑容绽开，身体左右摇晃，双手有明显的动作，发丝和衣角扬起。Audio: warm indoor ambience, soft and gentle, no talking",
   /** 风景/静物照微动默认 prompt（hero 无人脸时兜底；同上：动作要肉眼可见）。 */
   wallpaperVideoPromptScene:
     process.env.WALLPAPER_VIDEO_PROMPT_SCENE ??
-    "镜头缓慢推近，云影流动，水面波光粼粼，树叶和花草随风明显摇曳，光影明暗变化。Audio: natural ambience, breeze and distant birdsong, no talking",
+    "镜头明显推近，云层快速流动，水面波光荡漾，树叶和花草大幅摇曳，光影明暗变化。Audio: natural ambience, breeze and distant birdsong, no talking",
   face: {
     /** 人物头像在 /photos 顶部展示的最低 memberCount 阈值 */
     displayThreshold: Number.parseInt(process.env.FACE_RECOGNITION_THRESHOLD ?? "5", 10),
