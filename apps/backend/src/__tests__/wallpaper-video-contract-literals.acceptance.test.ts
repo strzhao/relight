@@ -216,6 +216,15 @@ describe("规则 6：三方字段名逐字一致（manifest ↔ 画廊 ↔ API�
   });
 
   it("设计文档（SSOT）同时声明三方字段名，实现侧 token 均可溯源到 SSOT", () => {
+    // [2026-09-14] CI 相容：runtime/ 不入库 → CI 无 state.md。文档侧溯源断言 capability-gate
+    // （本机有文档即真跑）；实现侧 token 锚定由上方各 its 对 manifest/gallery/db/config/routes
+    // 逐文件包含断言，全环境生效不因文档缺席而空洞。
+    if (!fs.existsSync(DESIGN_DOC)) {
+      console.warn(
+        "[contract-literals] state.md 不在本机（runtime/ 不入库）——文档侧溯源跳过，实现侧包含断言全量生效",
+      );
+      return;
+    }
     const doc = readText(DESIGN_DOC, "state.md（设计文档）");
     for (const token of [
       MANIFEST_FIELD_LANDSCAPE,
@@ -236,7 +245,25 @@ describe("规则 6：三方字段名逐字一致（manifest ↔ 画廊 ↔ API�
 // ============================================================================
 
 describe("设计文档 SSOT 字面量冻结（场景谓词 assert 字段取值的出处）", () => {
-  it("state.md 含 hvc1 / 1920×1080 / 704×1216 / video/quicktime / video/mp4 / attempts: 1 / wallpaper-videos key 字面量", () => {
+  it("SSOT 字面量冻结：实现侧含 hvc1 / 1920×1080 / 704×1216 / attempts: 1（全环境生效）；state.md 在本机时加验文档声明", () => {
+    // [2026-09-14] 实现侧锚定（全环境真跑，CI 亦有覆盖）：转码字面量在 lib/wallpaper/video.ts，
+    // attempts: 1（失败不重试）在 jobs/queues.ts defaultJobOptions
+    const impl = readText(
+      path.join(BACKEND_SRC, "lib/wallpaper/video.ts"),
+      "lib/wallpaper/video.ts",
+    );
+    expect(impl).toContain("hvc1");
+    expect(impl).toContain("1920×1080");
+    expect(impl).toContain("704×1216");
+    const queues = readText(path.join(BACKEND_SRC, "jobs/queues.ts"), "jobs/queues.ts");
+    expect(queues).toContain("attempts: 1");
+    // 文档侧声明（capability-gate：runtime/ 不入库，CI 无 state.md）
+    if (!fs.existsSync(DESIGN_DOC)) {
+      console.warn(
+        "[contract-literals] state.md 不在本机（runtime/ 不入库）——文档侧冻结断言跳过，实现侧锚定已生效",
+      );
+      return;
+    }
     const doc = readText(DESIGN_DOC, "state.md（设计文档）");
     expect(doc).toContain("hvc1");
     expect(doc).toContain("1920×1080");

@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 /**
  * 验收测试（红队）：动态视频壁纸 — wallpaper-video job 行为契约
  *（开关默认关零 spawn / spawn 失败回退静态 / COS 回执空串不写库 / 成功路径回执写库）
@@ -42,6 +42,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { setupTestSchema } from "./helpers/test-schema";
 
 // ============================================================================
+// [2026-09-14] CI 相容门控：honeydo 仅开发机可用（决策修订同 realprocess）——无 honeydo 环境全组
+// capability-gate skip（此前该文件在 CI collect 期 which 抛错整文件红，CI 覆盖本就为零；门控后
+// CI 转绿且 skip 可见，本机装 honeydo 即自动恢复全量真跑）
+const HONEYDO_AVAILABLE = spawnSync("which", ["honeydo"], { encoding: "utf8" }).status === 0;
+if (!HONEYDO_AVAILABLE) {
+  console.warn("[wallpaper-video-job] honeydo 不可用——5 组用例 capability-gate skip");
+}
+const dJob = HONEYDO_AVAILABLE ? describe : describe.skip;
+
 // hoisted holder：vi.mock factory 与 beforeAll 之间共享可变状态
 // ============================================================================
 
@@ -439,8 +448,10 @@ beforeAll(async () => {
 
   holder.dbPath = dbPath;
   holder.storageRoot = storageRoot;
-  // honeydo 绝对路径（access 存在性校验无法用 PATH 名；契约 §1 即 HONEYDO_CLI_PATH 优先 + which 兜底）
-  holder.honeydoPath = execSync("which honeydo", { encoding: "utf8" }).trim();
+  // honeydo 绝对路径（access 存在性校验无法用 PATH 名；契约 §1 即 HONEYDO_CLI_PATH 优先 + which 兜底）。
+  // CI/无 honeydo 环境留空串——需要真实路径的用例已被 dJob 门控 skip
+  const honeydoWhich = spawnSync("which", ["honeydo"], { encoding: "utf8" });
+  holder.honeydoPath = honeydoWhich.status === 0 ? String(honeydoWhich.stdout).trim() : "";
   process.env.DATABASE_PATH = dbPath;
   process.env.STORAGE_ROOT = storageRoot;
 
@@ -529,7 +540,7 @@ afterAll(() => {
 // 场景 4：开关默认关 → 零 honeydo spawn → manifest 无视频字段
 // ============================================================================
 
-describe("场景 4（代码化）：开关关闭 → job skip、零 spawn、manifest 无视频字段", () => {
+dJob("场景 4（代码化）：开关关闭 → job skip、零 spawn、manifest 无视频字段", () => {
   it("wallpaperVideoEnabled=false → 零 honeydo 调用（== 0）、零上传、零同步，DB 列不被写入", async () => {
     holder.enabled = false;
     seedTodayPick();
@@ -567,7 +578,7 @@ describe("场景 4（代码化）：开关关闭 → job skip、零 spawn、mani
 // 场景 5：生成失败 → 回退静态、job 不抛到调度层（终态 != failed）
 // ============================================================================
 
-describe("场景 5（代码化）：spawn 失败 → job 不抛、回退静态、DB 列 null", () => {
+dJob("场景 5（代码化）：spawn 失败 → job 不抛、回退静态、DB 列 null", () => {
   it("spawnHoneydoVideo 拒绝（HoneydoSpawnError 语义）→ runWallpaperVideo 正常完成不 throw", async () => {
     holder.enabled = true;
     seedTodayPick();
@@ -623,7 +634,7 @@ describe("场景 5（代码化）：spawn 失败 → job 不抛、回退静态�
 // COS 回执契约：回执空串 → DB 列不被写入
 // ============================================================================
 
-describe("COS 回执契约：uploadFile 回执空串 → DB 列不被写入、manifest 无视频字段", () => {
+dJob("COS 回执契约：uploadFile 回执空串 → DB 列不被写入、manifest 无视频字段", () => {
   it("回执为空串（上传失败语义）→ 两列保持 null", async () => {
     holder.enabled = true;
     holder.receiptMode = "empty";
@@ -657,7 +668,7 @@ describe("COS 回执契约：uploadFile 回执空串 → DB 列不被写入、ma
 // 成功路径：回执非空 → 写 DB 列 → syncDayToGallery → manifest 暴露视频字段
 // ============================================================================
 
-describe("成功路径：回执非空串 → DB 列写入回执 URL → manifest 暴露视频字段（场景 1.P2 DB 侧）", () => {
+dJob("成功路径：回执非空串 → DB 列写入回执 URL → manifest 暴露视频字段（场景 1.P2 DB 侧）", () => {
   it("DB 两列 == 回执 URL 逐字（横 .mov / 竖 .mp4），且 syncDayToGallery 以 pickDate 调用", async () => {
     holder.enabled = true;
     holder.receiptMode = "url";
@@ -711,82 +722,88 @@ describe("成功路径：回执非空串 → DB 列写入回执 URL → manifest
 // 【v2】job 串接顺序：preprocess → spawn → buildLoop → renderTextOverlay → 双转码
 // ============================================================================
 
-describe("【v2】job 串接顺序（§总体架构 v2 步骤 1-5 × 横竖两腿）：preprocess → spawn → buildLoop → renderTextOverlay → 双转码", () => {
-  it("每腿调用顺序逐字 + 双腿串行 + config 时长/loop 参数透传（非默认值证明 wiring，杀硬编码 mutation）", async () => {
-    holder.enabled = true;
-    // 非默认值：证明 job 读取 config 并透传（若 job 硬编码 4/8/15，此处即红）
-    holder.seconds = 5;
-    holder.loopSeconds = 9;
-    seedTodayPick();
+dJob(
+  "【v2】job 串接顺序（§总体架构 v2 步骤 1-5 × 横竖两腿）：preprocess → spawn → buildLoop → renderTextOverlay → 双转码",
+  () => {
+    it("每腿调用顺序逐字 + 双腿串行 + config 时长/loop 参数透传（非默认值证明 wiring，杀硬编码 mutation）", async () => {
+      holder.enabled = true;
+      // 非默认值：证明 job 读取 config 并透传（若 job 硬编码 4/8/15，此处即红）
+      holder.seconds = 5;
+      holder.loopSeconds = 9;
+      seedTodayPick();
 
-    await runWallpaperVideo(PICK_DATE);
+      await runWallpaperVideo(PICK_DATE);
 
-    // 次数（横/竖两腿：每腿 preprocess/spawn/buildLoop/overlay 各 ×1；CONTRACT_AMBIGUOUS
-    // 见文件头——「spawn ×1」按每腿落）
-    expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(2);
-    expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(2);
-    expect(mockBuildLoop).toHaveBeenCalledTimes(2);
-    expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
-    expect(mockTranscodeForAerial).toHaveBeenCalledTimes(1);
-    expect(mockTranscodeForGallery).toHaveBeenCalledTimes(1);
+      // 次数（横/竖两腿：每腿 preprocess/spawn/buildLoop/overlay 各 ×1；CONTRACT_AMBIGUOUS
+      // 见文件头——「spawn ×1」按每腿落）
+      expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(2);
+      expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(2);
+      expect(mockBuildLoop).toHaveBeenCalledTimes(2);
+      expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
+      expect(mockTranscodeForAerial).toHaveBeenCalledTimes(1);
+      expect(mockTranscodeForGallery).toHaveBeenCalledTimes(1);
 
-    // 参数透传：spawnHoneydoVideo.opts.seconds === config.wallpaperVideoSeconds（两腿皆然）；
-    // buildLoop.targetSeconds === config.wallpaperVideoLoopSeconds（两腿皆然）
-    for (const call of mockSpawnHoneydoVideo.mock.calls) {
-      expect(
-        (call?.[0] as { seconds?: number } | undefined)?.seconds,
-        "spawn.seconds 必须 === config.wallpaperVideoSeconds",
-      ).toBe(5);
-    }
-    for (const call of mockBuildLoop.mock.calls) {
-      expect(call?.[1], "buildLoop.targetSeconds 必须 === config.wallpaperVideoLoopSeconds").toBe(
-        9,
+      // 参数透传：spawnHoneydoVideo.opts.seconds === config.wallpaperVideoSeconds（两腿皆然）；
+      // buildLoop.targetSeconds === config.wallpaperVideoLoopSeconds（两腿皆然）
+      for (const call of mockSpawnHoneydoVideo.mock.calls) {
+        expect(
+          (call?.[0] as { seconds?: number } | undefined)?.seconds,
+          "spawn.seconds 必须 === config.wallpaperVideoSeconds",
+        ).toBe(5);
+      }
+      for (const call of mockBuildLoop.mock.calls) {
+        expect(call?.[1], "buildLoop.targetSeconds 必须 === config.wallpaperVideoLoopSeconds").toBe(
+          9,
+        );
+      }
+
+      // 双画布预裁剪（边界值【v2】逐字）：两腿 preprocess 画布 == {1280×704, 704×1216}
+      const canvasSet = new Set(
+        mockPreprocessHeroFrame.mock.calls.map((c) => `${c?.[1]}x${c?.[2]}`),
       );
-    }
-
-    // 双画布预裁剪（边界值【v2】逐字）：两腿 preprocess 画布 == {1280×704, 704×1216}
-    const canvasSet = new Set(mockPreprocessHeroFrame.mock.calls.map((c) => `${c?.[1]}x${c?.[2]}`));
-    expect(canvasSet, "preprocess 必须分别按横版 1280×704 与竖版 704×1216 画布裁剪").toEqual(
-      new Set(["1280x704", "704x1216"]),
-    );
-
-    // 顺序（§总体架构 v2 步骤 1-5 逐字，每腿内 preprocess → spawn → buildLoop → overlay
-    // → 转码；双腿串行：横腿(aerial)整体先于竖腿 spawn；首事件 preprocess、末事件 gallery 上传腿）
-    const seq = pipelineSeq;
-    expect(seq[0], "首事件必须是 preprocess（人脸构图先于生成）").toBe("preprocess");
-    expect(seq[seq.length - 1], "末事件必须是 gallery 转码（竖版转码收尾）").toBe("gallery");
-    const leg1Spawn = seq.indexOf("spawn");
-    const leg2Spawn = seq.indexOf("spawn", leg1Spawn + 1);
-    expect(leg1Spawn, "腿1 spawn 缺失").toBeGreaterThan(0);
-    expect(leg2Spawn, "腿2 spawn 缺失").toBeGreaterThan(leg1Spawn);
-    for (const [spawnIdx, legTag] of [
-      [leg1Spawn, "leg1"],
-      [leg2Spawn, "leg2"],
-    ] as Array<[number, string]>) {
-      const buildIdx = seq.indexOf("buildLoop", spawnIdx);
-      const overlayIdx = seq.indexOf("overlay", buildIdx);
-      expect(
-        buildIdx,
-        `${legTag}: spawn 之后必须先 buildLoop（palindrome）再 renderTextOverlay`,
-      ).toBeGreaterThan(spawnIdx);
-      expect(overlayIdx, `${legTag}: buildLoop 之后必须 renderTextOverlay`).toBeGreaterThan(
-        buildIdx,
+      expect(canvasSet, "preprocess 必须分别按横版 1280×704 与竖版 704×1216 画布裁剪").toEqual(
+        new Set(["1280x704", "704x1216"]),
       );
-    }
-    // 横腿转码(aerial)在腿1 overlay 之后、腿2 spawn 之前（串行不并行）
-    const aerialIdx = seq.indexOf("aerial");
-    expect(aerialIdx, "aerial 转码必须在腿1 renderTextOverlay 之后").toBeGreaterThan(
-      seq.indexOf("overlay", leg1Spawn),
-    );
-    expect(aerialIdx, "aerial 转码必须在腿2 spawn 之前（双腿串行）").toBeLessThan(leg2Spawn);
-    // 竖腿转码(gallery)在腿2 overlay 之后
-    expect(seq.indexOf("gallery"), "gallery 转码必须在腿2 renderTextOverlay 之后").toBeGreaterThan(
-      seq.indexOf("overlay", leg2Spawn),
-    );
 
-    // 契约 §3【v2】逐字：transcodeForAerial 输入 = Remotion 合成后的最终成品
-    expect(mockTranscodeForAerial.mock.calls[0]?.[0]).toBe(holder.overlaidPath);
-    // CONTRACT_AMBIGUOUS: transcodeForGallery 的输入源（无文字母版 vs 文字成品）契约未
-    // 逐字固定——不断言其 src，只断言它发生一次且在 renderTextOverlay 之后（上一断言）。
-  });
-});
+      // 顺序（§总体架构 v2 步骤 1-5 逐字，每腿内 preprocess → spawn → buildLoop → overlay
+      // → 转码；双腿串行：横腿(aerial)整体先于竖腿 spawn；首事件 preprocess、末事件 gallery 上传腿）
+      const seq = pipelineSeq;
+      expect(seq[0], "首事件必须是 preprocess（人脸构图先于生成）").toBe("preprocess");
+      expect(seq[seq.length - 1], "末事件必须是 gallery 转码（竖版转码收尾）").toBe("gallery");
+      const leg1Spawn = seq.indexOf("spawn");
+      const leg2Spawn = seq.indexOf("spawn", leg1Spawn + 1);
+      expect(leg1Spawn, "腿1 spawn 缺失").toBeGreaterThan(0);
+      expect(leg2Spawn, "腿2 spawn 缺失").toBeGreaterThan(leg1Spawn);
+      for (const [spawnIdx, legTag] of [
+        [leg1Spawn, "leg1"],
+        [leg2Spawn, "leg2"],
+      ] as Array<[number, string]>) {
+        const buildIdx = seq.indexOf("buildLoop", spawnIdx);
+        const overlayIdx = seq.indexOf("overlay", buildIdx);
+        expect(
+          buildIdx,
+          `${legTag}: spawn 之后必须先 buildLoop（palindrome）再 renderTextOverlay`,
+        ).toBeGreaterThan(spawnIdx);
+        expect(overlayIdx, `${legTag}: buildLoop 之后必须 renderTextOverlay`).toBeGreaterThan(
+          buildIdx,
+        );
+      }
+      // 横腿转码(aerial)在腿1 overlay 之后、腿2 spawn 之前（串行不并行）
+      const aerialIdx = seq.indexOf("aerial");
+      expect(aerialIdx, "aerial 转码必须在腿1 renderTextOverlay 之后").toBeGreaterThan(
+        seq.indexOf("overlay", leg1Spawn),
+      );
+      expect(aerialIdx, "aerial 转码必须在腿2 spawn 之前（双腿串行）").toBeLessThan(leg2Spawn);
+      // 竖腿转码(gallery)在腿2 overlay 之后
+      expect(
+        seq.indexOf("gallery"),
+        "gallery 转码必须在腿2 renderTextOverlay 之后",
+      ).toBeGreaterThan(seq.indexOf("overlay", leg2Spawn));
+
+      // 契约 §3【v2】逐字：transcodeForAerial 输入 = Remotion 合成后的最终成品
+      expect(mockTranscodeForAerial.mock.calls[0]?.[0]).toBe(holder.overlaidPath);
+      // CONTRACT_AMBIGUOUS: transcodeForGallery 的输入源（无文字母版 vs 文字成品）契约未
+      // 逐字固定——不断言其 src，只断言它发生一次且在 renderTextOverlay 之后（上一断言）。
+    });
+  },
+);

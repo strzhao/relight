@@ -9,12 +9,17 @@
  * - wallpaperVideoPromptPerson/Scene 分层默认模板（2026-09-13 修订：30-50 字 + Audio 指引，
  *   env WALLPAPER_VIDEO_PROMPT_PERSON/SCENE 可覆盖）
  */
+import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 async function getFreshConfig() {
   const mod = await import("../lib/config");
   return mod.config;
 }
+
+// [2026-09-14] CI 相容门控：honeydo CLI 仅存在于开发机——「绝对路径」断言 capability-gate
+// （skip 在 CI 报告可见，不静默；本机安装 honeydo 即自动恢复真跑）
+const HONEYDO_AVAILABLE = spawnSync("which", ["honeydo"], { encoding: "utf8" }).status === 0;
 
 describe("wallpaper video config", () => {
   const originalEnv = { ...process.env };
@@ -117,9 +122,12 @@ describe("wallpaper video config", () => {
     }
   });
 
-  it("honeydoCliPath 为绝对路径（本机 which honeydo 可解析）", async () => {
-    const config = await getFreshConfig();
-    expect(config.honeydoCliPath).toBeTruthy();
-    expect(config.honeydoCliPath.startsWith("/")).toBe(true);
-  });
+  it.skipIf(!HONEYDO_AVAILABLE)(
+    "honeydoCliPath 为绝对路径（本机 which honeydo 可解析）",
+    async () => {
+      const config = await getFreshConfig();
+      expect(config.honeydoCliPath).toBeTruthy();
+      expect(config.honeydoCliPath.startsWith("/")).toBe(true);
+    },
+  );
 });
