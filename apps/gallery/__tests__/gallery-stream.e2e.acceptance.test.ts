@@ -6,7 +6,8 @@
  *     data-stream-unit / data-unit-type(photo|video|wallpaper|date-separator)
  *     data-load-state(loading|loaded|error) / data-day-date / data-day-index
  *     data-photo-rank / data-photo-id / data-takenat-absent / data-role
- *   - 首屏首个流单元 = 今日 rank=1 照片且全屏铺满（S1.PM1）
+ *   - 首屏首个流单元 = 今日壁纸卡且全屏铺满（S1.PM1，流序改版 [2026-09-14]：
+ *     壁纸卡上移当日首位；今日首个 photo 单元仍为 rank=1）
  *   - 零点击直达，无 nav/cover-card/history-entry/thumbnail-grid（S1.PM2）
  *   - 标题与拍摄时刻压图渲染（S1.PM3）
  *   - 暖黑基底全屏（S1.PM4）
@@ -15,7 +16,7 @@
  *   - 全程无 #/history（S2.PM3）
  *   - 每个 photo 含非空 narrative（S3.PM1）
  *   - 同时播放视频 <=1（S5.PM1）
- *   - 当日流末尾 wallpaper-card（S6.PM1）+ save-hint（S6.PM2）
+ *   - 当日流首 wallpaper-card（S6.PM1，流序改版 [2026-09-14]）+ save-hint（S6.PM2）
  *   - 无壁纸天非 wallpaper-card（S7.PM1）
  *   - takenAt 缺失无 dateline（S8.PM1）+ 无 null 泄漏（S8.PM2）+ 脏字符串同样不渲染（S8.PM3）
  *   - 占位防 CLS 含 width=0 fallback 3/4（S9.PM1）+ original 指向 mid（S9.PM2）
@@ -166,38 +167,49 @@ beforeEach(async ({ page }) => {
 });
 
 // ============================================================================
-// S1.PM1：首屏首个流单元是今日 rank=1 照片且全屏铺满
+// S1.PM1：首屏首个流单元是今日壁纸卡且全屏铺满（流序改版 [2026-09-14]：
+// 壁纸卡上移当日首位；gen-manifest day0 注入 wallpaperPortrait → 流首必为壁纸卡），
+// 今日首个 photo 单元仍为 rank=1
 // ============================================================================
-describe("[S1.PM1] 首屏首单元 = 今日 rank=1 photo 全屏铺满", () => {
-  it("首单元 data-unit-type=photo AND data-photo-rank=1 AND 全屏铺满", async ({ page }) => {
+describe("[S1.PM1] 首屏首单元 = 今日壁纸卡全屏铺满（首 photo = rank1）", () => {
+  it("首单元 data-unit-type=wallpaper AND 全屏铺满 AND 今日首个 photo 单元 rank=1", async ({
+    page,
+  }) => {
     await page.goto(`${STATIC_BASE}/#/`);
     await page.waitForSelector("[data-stream-unit]", { timeout: 8000 });
 
-    const first = await page.evaluate(() => {
-      const el = document.querySelectorAll("[data-stream-unit]")[0];
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
+    const info = await page.evaluate(() => {
+      const units = Array.from(document.querySelectorAll("[data-stream-unit]"));
+      const first = units[0];
+      const firstPhoto = units.find((el) => el.getAttribute("data-unit-type") === "photo");
+      const r = first?.getBoundingClientRect();
       return {
-        unitType: el.getAttribute("data-unit-type"),
-        photoRank: el.getAttribute("data-photo-rank"),
-        width: r.width,
-        height: r.height,
-        top: r.top,
-        left: r.left,
+        unitType: first?.getAttribute("data-unit-type") ?? null,
+        role: first?.getAttribute("data-role") ?? null,
+        width: r?.width ?? null,
+        height: r?.height ?? null,
+        top: r?.top ?? null,
+        left: r?.left ?? null,
+        firstPhotoRank: firstPhoto?.getAttribute("data-photo-rank") ?? null,
+        firstPhotoDayIndex: firstPhoto?.getAttribute("data-day-index") ?? null,
         innerW: window.innerWidth,
         innerH: window.innerHeight,
       };
     });
 
-    await writeArtifact("S1.PM1", JSON.stringify(first));
-    expect(first, "首单元必须存在").not.toBeNull();
-    expect(first?.unitType).toBe("photo");
-    expect(first?.photoRank).toBe("1");
+    await writeArtifact("S1.PM1", JSON.stringify(info));
+    expect(info.unitType, "流首单元必须是今日壁纸卡（gen-manifest day0 有壁纸图）").toBe(
+      "wallpaper",
+    );
+    expect(info.role).toBe("wallpaper-card");
     // 全屏铺满（width === innerWidth, height === innerHeight，零偏移）
-    expect(first?.width).toBe(first?.innerW);
-    expect(first?.height).toBe(first?.innerH);
-    expect(first?.top).toBe(0);
-    expect(first?.left).toBe(0);
+    expect(info.width).toBe(info.innerW);
+    expect(info.height).toBe(info.innerH);
+    expect(info.top).toBe(0);
+    expect(info.left).toBe(0);
+    // 原「首单元 rank=1」断言改写为「首个 photo 单元」语义：今日首个 photo 单元 = rank1
+    expect(info.firstPhotoDayIndex, "首个 photo 单元应属今日（day-index=0）").toBe("0");
+    expect(info.firstPhotoRank).toBe("1");
   });
 });
 
@@ -449,24 +461,25 @@ describe("[S3.PM1] 每个 photo 含非空 narrative", () => {
 });
 
 // ============================================================================
-// S6.PM1 / S6.PM2：当日流末尾 wallpaper-card + save-hint
+// S6.PM1 / S6.PM2：当日流首 wallpaper-card（流序改版 [2026-09-14]：壁纸卡上移当日首位）
+// + save-hint 契约演进回归
 // ============================================================================
-describe("[S6.PM1/S6.PM2] 当日流末尾 wallpaper-card 含 img + save-hint", () => {
-  it("day-index=0 最后单元 data-role=wallpaper-card", async ({ page }) => {
+describe("[S6.PM1/S6.PM2] 当日流首 wallpaper-card 含 img + 下载按钮", () => {
+  it("day-index=0 首单元 data-role=wallpaper-card", async ({ page }) => {
     await page.goto(`${STATIC_BASE}/#/`);
     await page.waitForSelector("[data-stream-unit]", { timeout: 8000 });
 
     // 触发挂载（今日已首屏，但确保 wallpaper 单元挂上）
     await page.waitForTimeout(500);
 
-    const lastRole = await page.evaluate(() => {
+    const firstRole = await page.evaluate(() => {
       const units = Array.from(document.querySelectorAll('[data-stream-unit][data-day-index="0"]'));
-      const last = units[units.length - 1];
-      return last ? last.getAttribute("data-role") : null;
+      const first = units[0];
+      return first ? first.getAttribute("data-role") : null;
     });
 
-    await writeArtifact("S6.PM1", String(lastRole));
-    expect(lastRole).toBe("wallpaper-card");
+    await writeArtifact("S6.PM1", String(firstRole));
+    expect(firstRole).toBe("wallpaper-card");
   });
 
   it("wallpaper-card 含可保存 img + 下载按钮（save-hint 已契约演进删除）", async ({ page }) => {

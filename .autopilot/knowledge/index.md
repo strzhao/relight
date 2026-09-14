@@ -23,6 +23,8 @@
 
 ### 决策 (decisions.md)
 
+- [2026-09-14] 画廊动作栏/弹层菜单三坑（capture 外点关、aria-label 遮蔽可达名、降级重建 forceStatic）→ [gallery](domains/gallery.md)
+- [2026-09-14] 沉浸流顺序迁移断言影响面 + object-fit 盒模型 + e2e 取证去重 → [gallery](domains/gallery.md)
 - [2026-08-01] VPS 画廊推送式架构（复用 COS 桶+Caddy+域名，零新容器）→ [gallery](domains/gallery.md)
 - [2026-08-01] manifest 放 VPS 同源不放 COS（防公有读固定 key 被遍历绕过隐蔽）→ [gallery](domains/gallery.md)
 - [2026-08-01] 企微群机器人 webhook 不支持视频（靠公网 URL 播放）→ [gallery](domains/gallery.md)

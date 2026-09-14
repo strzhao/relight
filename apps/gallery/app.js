@@ -1,8 +1,10 @@
 /**
  * 拾光画廊 · 单一垂直沉浸流（state.md §前端流引擎）
  *
- * 一个 <main id="stream"> 容器按日倒序展开流单元序列（date-separator / photo / video / wallpaper），
+ * 一个 <main id="stream"> 容器按日倒序展开流单元序列（date-separator / wallpaper / video / photo），
  * scroll-snap 逐屏吸附（抖音节奏）。视频流内全屏单元 muted autoplay。
+ * 当日序 [2026-09-14]：壁纸卡上移当日首位（动态壁纸视频卡首屏可见），
+ * 无壁纸日自然回落为 video → photos。
  *
  * 数据源：同源 fetch ./manifest.json（Caddy 静态托管）。资源全走 COS 公有读直链。
  *
@@ -13,16 +15,25 @@
  *   photo 单元额外：data-day-date / data-day-index / data-photo-rank / data-photo-id / data-takenat-absent
  *   video 单元额外：data-media-type="video" / data-video-id（=themeKey，深链主键）
  *     / data-video-uuid（=manifest.videos[].id，UUID，仅为复活历史聊天里的旧推送链接）
- *   wallpaper 单元：data-role="wallpaper-card" + 右下 action-rail
- *     （旧 [data-role="save-hint"] 已按契约演进删除，被下载按钮取代——state.md 实现计划 3）
+ *   wallpaper 单元：data-role="wallpaper-card"（动态变体另带 data-has-video="1"）
+ *     + 右下 action-rail（旧 [data-role="save-hint"] 已按契约演进删除，被下载按钮取代）
  *   下载：[data-role="photo-download" | "video-download" | "wallpaper-download-portrait"
- *     | "wallpaper-download-landscape"]，均带 aria-label + data-download-state 状态机
+ *     | "wallpaper-download-landscape" | 壁纸卡动态主下载钮（见 buildWallpaperActionRail）]，
+ *     均带 aria-label
+ *     + data-download-state 状态机；壁纸卡次级下载收进「更多」菜单——
+ *     触发钮 button.rail-btn[data-role="more-menu"][aria-expanded]
+ *     + 弹层 div[data-role="more-menu-popover"][hidden]（常驻 DOM，item 全宽按钮）
  *
  * 动作栏（契约演进 [2026-08-30]，state.md 契约演进节）：
  *   三卡操作按钮统一收进右下竖排 [data-role="action-rail"]（下载恒在栏最下方）；
  *   图标全部内联 SVG（历史 emoji/字符图标 🔇/⛶/⬇ 已移除，声音按钮机读态
  *   改由 data-sound-state="muted|unmuted" 承载）；下载文案「下载」→「保存」；
  *   进全屏不再强制出声，全屏内启用原生 controls（可拖进度/自行开声）。
+ *
+ * 契约演进 [2026-09-14]：壁纸卡动作栏两态重构——动态日 [声音→保存视频→更多] /
+ *   静态日 [保存壁纸→更多]，次级下载收进「更多」弹层（横版 / 动态日的静态竖版）；
+ *   展示区智能拉通（applySmartFill）：媒体盒铺满单元，按源比例 vs 视口比例
+ *   裁切损失二选一 object-fit（cover/contain），仅切 object-fit 不改布局高度。
  *
  * 深链路由（state.md §深链路由契约）：
  *   #/                    → stream scrollTop = 0
@@ -183,6 +194,7 @@
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
     fullscreen:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
+    more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg>',
   };
 
   /** 图标 span 工厂：extraClass 用于声音按钮双图标按 data-sound-state 切换显隐 */
@@ -198,6 +210,69 @@
   /** 三卡统一右下竖排动作栏容器（契约演进 [2026-08-30]） */
   function createActionRail(children) {
     return el("div", { class: "action-rail", dataset: { role: "action-rail" } }, children);
+  }
+
+  /**
+   * 「更多」菜单（改版 [2026-09-14]：壁纸卡动作栏次级动作收进弹层——
+   * 动态日收静态壁纸竖/横版下载，静态日收横版下载）。
+   *
+   * DOM 契约：触发钮 button.rail-btn[data-role="more-menu"][aria-expanded] +
+   * 弹层 div[data-role="more-menu-popover"][hidden]，item 为全宽按钮（复用
+   * createDownloadButton 产物）。交互：点触发钮 toggle；点弹层外 / Esc 关闭；
+   * aria-expanded 同步。popover 常驻 DOM（初始 hidden，非懒创建）。
+   */
+  function createMoreMenu(items) {
+    const trigger = el(
+      "button",
+      {
+        type: "button",
+        class: "rail-btn more-menu-btn",
+        "data-role": "more-menu",
+        "aria-label": "更多选项",
+        "aria-haspopup": "true",
+        "aria-expanded": "false",
+      },
+      [svgIcon("more")],
+    );
+    const popover = el(
+      "div",
+      {
+        class: "more-menu-popover",
+        "data-role": "more-menu-popover",
+        hidden: "",
+      },
+      items,
+    );
+    const root = el("div", { class: "more-menu" }, [trigger, popover]);
+
+    function setOpen(open) {
+      popover.hidden = !open;
+      trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(popover.hidden);
+    });
+    // 点弹层内任意处（含菜单项与面板空白）收起（capture：下载按钮的 click handler
+    // 会 stopPropagation，bubble 监听收不到；隐藏 popover 不影响事件向目标派发）
+    popover.addEventListener("click", () => setOpen(false), true);
+    // 点弹层外关闭（capture：下载按钮 click handler 会 stopPropagation，bubble 监听
+    // 收不到「点主钮关菜单」——capture 在按钮 handler 之前执行，任何弹层外点必经此处；
+    // 触发钮/弹层内目标直接放行，toggle 与菜单项选择各自自管。监听随菜单实例常驻 document）
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (popover.hidden) return;
+        const t = e.target;
+        if (t instanceof Node && (popover.contains(t) || trigger.contains(t))) return;
+        setOpen(false);
+      },
+      true,
+    );
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !popover.hidden) setOpen(false);
+    });
+    return root;
   }
 
   // ============================================================================
@@ -751,6 +826,63 @@
   }
 
   // ============================================================================
+  // 展示区智能拉通（改版 [2026-09-14]）
+  //
+  //   壁纸卡两变体（.wallpaper-img / .wallpaper-video）+ 主题视频卡（.video-el）的
+  //   媒体盒恒铺满单元（CSS width/height 100%），object-fit 按源比例与视口比例的
+  //   裁切损失二选一：cropRatio = 1 - min(VW/mw, VH/mh) ÷ max(VW/mw, VH/mh)，
+  //   ≤ 0.3 → cover（裁切即可铺满），> 0.3 → contain（模糊垫底兜底）。
+  //   仅切 object-fit，不改布局高度（单元恒 100dvh），不碰 scroll-snap/横竖屏重锚。
+  // ============================================================================
+
+  /**
+   * cover/contain 智能选择（幂等）。
+   * 媒体元数据未就绪（videoWidth==0 / img 未 load）→ 不置 data-fill，CSS 默认 contain。
+   * data-fill 置在流单元（unitEl）上，CSS 作用域规则切内部媒体 object-fit。
+   */
+  function applySmartFill(mediaEl, unitEl) {
+    let mw = 0;
+    let mh = 0;
+    if (mediaEl instanceof HTMLVideoElement) {
+      mw = mediaEl.videoWidth;
+      mh = mediaEl.videoHeight;
+    } else if (mediaEl instanceof HTMLImageElement) {
+      mw = mediaEl.naturalWidth;
+      mh = mediaEl.naturalHeight;
+    }
+    if (!mw || !mh) {
+      delete unitEl.dataset.fill;
+      return;
+    }
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const ratioA = vw / mw;
+    const ratioB = vh / mh;
+    const cropRatio = 1 - Math.min(ratioA, ratioB) / Math.max(ratioA, ratioB);
+    unitEl.dataset.fill = cropRatio <= 0.3 ? "cover" : "contain";
+  }
+
+  /** resize/朝向变化重算全部已挂载智能拉通媒体（幂等重算，结果一致） */
+  function reapplySmartFillAll() {
+    const units = document.querySelectorAll(
+      '[data-stream-unit][data-unit-type="video"], [data-stream-unit][data-unit-type="wallpaper"]',
+    );
+    for (const unit of units) {
+      const media = unit.querySelector(".video-el, .wallpaper-video, .wallpaper-img");
+      if (media) applySmartFill(media, unit);
+    }
+  }
+
+  /** resize + orientationchange 监听一次性接线（retry 重入 init 防重复注册，同 orientationAnchorWired） */
+  let smartFillResizeWired = false;
+  function ensureSmartFillResize() {
+    if (smartFillResizeWired) return;
+    smartFillResizeWired = true;
+    window.addEventListener("resize", reapplySmartFillAll);
+    window.addEventListener("orientationchange", reapplySmartFillAll);
+  }
+
+  // ============================================================================
   // 流单元渲染（4 类）
   // ============================================================================
 
@@ -963,6 +1095,10 @@
       "webkit-playsinline": "",
     });
     videoEl.muted = true;
+    // 展示区智能拉通：元数据就绪后按源比例 vs 视口比例选 cover/contain（幂等）
+    videoEl.addEventListener("loadedmetadata", () => {
+      applySmartFill(videoEl, unit);
+    });
     videoEl.addEventListener("loadeddata", () => {
       unit.dataset.loadState = "loaded";
     });
@@ -1091,7 +1227,7 @@
     return unit;
   }
 
-  /** wallpaper 卡（contain + 保存提示，S6/S7；动态视频壁纸：wallpaperVideoPortrait 非空 → video 变体） */
+  /** wallpaper 卡（智能拉通 cover/contain + 右下动作栏，S6/S7；动态视频壁纸：wallpaperVideoPortrait 非空 → video 变体） */
   function renderWallpaperCard(day, dayIndex) {
     const unit = el(
       "section",
@@ -1120,38 +1256,76 @@
     return unit;
   }
 
-  /** wallpaper 卡右下动作栏（两变体共用；竖版「保存壁纸」+ 横版「电脑版」，逻辑不变）。
-   *  extraChildren：视频变体前置按钮（声音，v2 点击开声——排在下载上方同 video 卡动作栏） */
-  function buildWallpaperActionRail(day, extraChildren = []) {
-    // 右下动作栏（取代旧 save-hint「长按图片保存到相册」——契约演进见 state.md 实现计划 3：
-    // 长按语义被下载按钮覆盖且优于长按，S6.PM2 已按契约演进协议同步反转）。
-    // 契约演进 [2026-08-30]：原底部 download-bar 两个一模一样的「下载」按钮（仅 aria-label
-    // 不同，且压住壁纸自身 footer 文字）→ 语义化双按钮移入右下动作栏：
-    // 主按钮「保存壁纸」（竖版=本机使用主场景，primary 实心）常驻（本卡仅在
-    // wallpaperPortrait 非空时渲染）；次按钮「电脑版」（ghost）仅直链非空时渲染（场景 11.P2）。
+  /**
+   * wallpaper 卡右下动作栏（改版 [2026-09-14] 两态矩阵，取代旧「竖版主钮+横版次钮」直排）：
+   *   动态日（wallpaperVideoPortrait 非空）：[声音] → [主钮·保存视频] → [更多]
+   *     （弹层收静态壁纸竖版「保存静态壁纸」+ 横版「电脑版」——次级动作让位动态视频主场景）
+   *   静态日：[主钮·保存壁纸（primary）] → [更多（仅横版直链非空时，弹层收横版「电脑版」）]
+   *   菜单项保锚点：role 沿用 wallpaper-download-portrait / wallpaper-download-landscape，
+   *   均复用 createDownloadButton + bindDownloadClick，文件名契约不变。
+   *   可达名称契约：静态主钮 aria-label 含连续子串「保存壁纸」（旧「保存手机竖版壁纸」
+   *   不含该连续子串，AX 检索「保存壁纸」不可达）。
+   *   extraChildren：视频变体前置按钮（声音，v2 点击开声——排在主钮上方同 video 卡动作栏）
+   */
+  function buildWallpaperActionRail(day, extraChildren = [], { forceStatic = false } = {}) {
     const railChildren = [...extraChildren];
+    const menuItems = [];
+    // forceStatic：video error 降级重渲时 day 数据层仍是动态日，但单元已回退静态——
+    // rail 必须按静态矩阵重建（主钮=保存壁纸、菜单仅电脑版），否则降级卡残留 mp4 入口
+    const isDynamic = !forceStatic && Boolean(day.wallpaperVideoPortrait);
+    if (isDynamic) {
+      // 主钮·保存动态壁纸视频：300s 超时 + 进度回报（大文件弱网余量，同 video 卡下载）
+      const videoDl = createDownloadButton({
+        role: "wallpaper-download-video",
+        label: "保存视频",
+        variant: "primary",
+        ariaLabel: "保存动态壁纸视频",
+      });
+      bindDownloadClick(videoDl, day.wallpaperVideoPortrait, `拾光动态壁纸-${day.pickDate}.mp4`, {
+        timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS,
+        withProgress: true,
+      });
+      railChildren.push(videoDl.btn);
+      // 动态日：静态竖版壁纸降为菜单项（保 role=wallpaper-download-portrait 锚点）
+      const portraitStaticDl = createDownloadButton({
+        role: "wallpaper-download-portrait",
+        label: "保存静态壁纸",
+        ariaLabel: "保存静态壁纸（手机竖版 JPG）",
+      });
+      bindDownloadClick(
+        portraitStaticDl,
+        day.wallpaperPortrait,
+        `拾光壁纸-${day.pickDate}-手机竖版.jpg`,
+      );
+      menuItems.push(portraitStaticDl.btn);
+    } else {
+      // 静态日主钮 = 竖版壁纸下载（竖版=本机使用主场景）；aria-label 修正见上方可达名称契约
+      const portraitDl = createDownloadButton({
+        role: "wallpaper-download-portrait",
+        label: "保存壁纸",
+        variant: "primary",
+        ariaLabel: "保存壁纸（手机竖版）",
+      });
+      bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
+      railChildren.push(portraitDl.btn);
+    }
+    // 横版直链非空才收进菜单（缺直链不渲染死链控件——场景 11.P2 契约不变）
     if (day.wallpaperLandscape) {
       const landscapeDl = createDownloadButton({
         role: "wallpaper-download-landscape",
         label: "电脑版",
-        variant: "ghost",
-        ariaLabel: "保存桌面横版壁纸",
+        ariaLabel: "电脑版（桌面横版壁纸）",
       });
       bindDownloadClick(
         landscapeDl,
         day.wallpaperLandscape,
         `拾光壁纸-${day.pickDate}-桌面横版.jpg`,
       );
-      railChildren.push(landscapeDl.btn);
+      menuItems.push(landscapeDl.btn);
     }
-    const portraitDl = createDownloadButton({
-      role: "wallpaper-download-portrait",
-      label: "保存壁纸",
-      variant: "primary",
-      ariaLabel: "保存手机竖版壁纸",
-    });
-    bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
-    railChildren.push(portraitDl.btn);
+    if (menuItems.length > 0) {
+      railChildren.push(createMoreMenu(menuItems));
+    }
     return createActionRail(railChildren);
   }
 
@@ -1160,6 +1334,8 @@
     delete unit.dataset.hasVideo;
     unit.dataset.loadState = "loading";
 
+    const stage = el("div", { class: "wallpaper-stage" });
+    // 主图必须是卡内首个 img（querySelector 语义/旧断言锚点）；垫底层排其后靠 z-index 压底
     const img = el("img", {
       class: "wallpaper-img",
       src: day.wallpaperPortrait,
@@ -1169,13 +1345,27 @@
     });
     img.addEventListener("load", () => {
       unit.dataset.loadState = "loaded";
+      applySmartFill(img, unit);
     });
     img.addEventListener("error", () => {
       // 竖版壁纸 404（历史未生成）→ 单元 error 态（前端容错，不阻断后续单元）
       unit.dataset.loadState = "error";
     });
+    // contain 回退态的模糊垫底（同视频变体 .wallpaper-blur 模式，CSS blur(28px)）
+    const blur = el("img", {
+      class: "wallpaper-blur",
+      src: day.wallpaperPortrait,
+      alt: "",
+      "aria-hidden": "true",
+      loading: "lazy",
+      decoding: "async",
+    });
+    blur.addEventListener("error", () => {
+      blur.style.display = "none"; // 垫底 404 → 隐藏 blur（主图仍可展示）
+    });
+    stage.append(img, blur);
 
-    unit.replaceChildren(img, buildWallpaperActionRail(day));
+    unit.replaceChildren(stage, buildWallpaperActionRail(day, [], { forceStatic: true }));
   }
 
   /** 视频变体（.wallpaper-stage 模糊垫底 = wallpaperPortrait；muted loop 自动播放，ensureVideoIO 驱动；
@@ -1215,6 +1405,10 @@
     video.addEventListener("click", () => {
       if (video.controls) return;
       soundBtn.click();
+    });
+    // 展示区智能拉通：元数据就绪后按源比例 vs 视口比例选 cover/contain（幂等）
+    video.addEventListener("loadedmetadata", () => {
+      applySmartFill(video, unit);
     });
     video.addEventListener("loadeddata", () => {
       unit.dataset.loadState = "loaded";
@@ -1301,21 +1495,32 @@
   let sortedDays = []; // 倒序（最新在前）
   let mountedDayCount = 0; // 已挂载天数（含 unmatched 视频区）
 
-  /** 计算某一日的所有流单元（不含 date-separator 之前的） */
+  /**
+   * 计算某一日的所有流单元。
+   * 当日序 [2026-09-14]：date-separator（仅历史日）→ wallpaper（当日首位）→ video → photos。
+   * 流顶首单元 = 今日壁纸卡（有壁纸素材时），否则今日 rank=1 photo；
+   * date-separator 仍不作流首单元。回退不变式：无 wallpaperPortrait 的日子无壁纸单元，
+   * 顺序自然回落为 video → photos。
+   */
   function buildDayUnits(day, dayIndex) {
     const units = [];
     const totalPhotos = (day.photos || []).length;
     // 今日（流顶最新一天，dayIndex=0）跳过 date-separator——
-    // 流顶即今日，无需"新一天"分隔；且 S1.PM1 要求首单元是今日 rank=1 photo，
+    // 流顶即今日，无需"新一天"分隔，且流首单元语义由壁纸卡/rank=1 photo 承载，
     // date-separator 不应作为流首单元。历史日（dayIndex>=1）保留 date-separator 作过渡分隔。
     const isStreamTop = dayIndex === 0;
 
-    // date-separator（流顶跳过）
+    // date-separator（流顶跳过，不作流首单元）
     if (!isStreamTop) {
       units.push(renderDateSeparator(day, dayIndex));
     }
 
-    // video（归属日匹配 → 插该日序列首位，date-separator 之后、photo 之前）
+    // wallpaper（wallpaperPortrait 非空 → 当日首位；动态壁纸视频卡上移首屏可见）
+    if (day.wallpaperPortrait) {
+      units.push(renderWallpaperCard(day, dayIndex));
+    }
+
+    // video（归属日匹配 → 壁纸卡之后、photo 之前；无壁纸日回落为该日首单元）
     const video = getVideoForDay(day.pickDate);
     if (video) {
       units.push(renderVideoCard(video, dayIndex));
@@ -1324,11 +1529,6 @@
     // photos（rank 升序）
     for (const photo of day.photos || []) {
       units.push(renderPhotoCard(photo, day, dayIndex, totalPhotos));
-    }
-
-    // wallpaper（wallpaperPortrait 非空时）
-    if (day.wallpaperPortrait) {
-      units.push(renderWallpaperCard(day, dayIndex));
     }
 
     return units;
@@ -1407,7 +1607,7 @@
   function scheduleUrlSync(unit) {
     if (Date.now() < programmaticScrollUntil) return; // 闸门①：programmatic scroll 期间忽略
     const unitType = unit.dataset.unitType;
-    if (unitType === "wallpaper") return; // 日末尾，URL 停在最后一张 photo
+    if (unitType === "wallpaper") return; // 壁纸卡无独立深链形态（[2026-09-14] 起也不再是日末单元）——URL 停在可深链单元
     let key;
     let hash;
     if (unitType === "photo") {
@@ -1762,6 +1962,7 @@
       mountInitial();
       setupHudScroll();
       initOrientationAnchor(); // 横竖屏翻转重锚（OR-C1..C4）
+      ensureSmartFillResize(); // 展示区智能拉通 resize/朝向重算（幂等）
 
       // HUD IO 观察所有已挂载单元（增量挂载的新单元也需观察——用 mutation observer）
       const mo = new MutationObserver((mutations) => {

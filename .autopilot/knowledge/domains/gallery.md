@@ -75,3 +75,19 @@
 - **Scenario**：全屏滚动吸附流（scroll-snap + 视口高单元）在手机旋转后当前屏跳变；或在桌面引擎里验证「旋转保持位置」类修复时
 - **Lesson**：旋转跳变机理是 scrollTop 绝对像素保留 + re-snap 吸错单元，但**只有真机 WebKit 可复现**——Chromium 默认开 scroll anchoring 且保留 snap target，翻转时滚动位置被自动补偿到新吸附位，「修复生效 ≡ 无修复 ≡ 浏览器自然保持」三者观测等价，桌面 e2e 无法区分。此类修复桌面测试只能做回归保护+契约固化，真实载荷必须真机验证；红队断言若以「位置会漂移」为前提，先探针验证前提在测试引擎中成立，不成立则反转为用户可感契约。修复模式：跟踪当前阅读单元 + 仅朝向翻转触发（同朝向 resize 零副作用）+ 瞬时回滚（样式覆盖 scroll-behavior: smooth 后直赋 scrollTop）+ 复用既有 programmatic 滚动闸门防 URL 被过渡态固化。
 - **Evidence**：探针（吞 resize 监听使修复死亡后翻转）scrollTop 仍被精确补偿（1688→780=2×390；8580→18568=22×844，均恰为新朝向吸附位）；orientation re-anchor 套件 64/64 绿但真机验证仍必要（核对锚点：2026-08-31 apps/gallery orientation re-anchor 区段）
+
+## 画廊动作栏/弹层菜单交互三坑（stopPropagation×外点关、aria 遮蔽、数据层重建）
+
+[2026-09-14] <!-- tags: gallery, action-rail, popover, aria, 降级, 交互 -->
+
+- **Scenario**：vanilla JS 沉浸流给下载类按钮加「更多」溢出菜单、做可达名断言、或从数据层重渲卡片动作栏时
+- **Lesson**：① 「点外关闭」document 监听必须挂 **capture 阶段**——下载按钮 click handler 惯用 stopPropagation，bubble 监听收不到这些外点点按，菜单开着点主钮不收（真 UX bug，被红队 e2e 二次 toggle 超时逼出）；② 可达名 = `aria-label ?? textContent`——**aria-label 遮蔽可见文案**，断言要求连续子串时 aria-label 必须含该连续子串（「保存壁纸（手机竖版）」⊃「保存壁纸」，但「保存手机竖版壁纸」不含），同一个子串陷阱在蓝队与降级路径各犯一次；③ 从数据层重建界面态需显式 override——video error 降级重渲时 day 数据层仍是动态日，rail 重建若按数据分支会残留 mp4 入口，必须传 forceStatic 类参数按「当前界面态」重建
+- **Evidence**：红队套件 6 处断言级失败 → auto-fix 7 处全绿（116/116）；app.js createMoreMenu capture 外点关 + buildWallpaperActionRail forceStatic（核对锚点：2026-09-14 apps/gallery auto-fix 变更日志）
+
+## 沉浸流顺序迁移的断言影响面 + object-fit 盒模型 + e2e 取证去重
+
+[2026-09-14] <!-- tags: gallery, e2e, smart-fill, artifact, fixture -->
+
+- **Scenario**：改全屏滚动流的单元顺序（如壁纸卡上移首屏）、给媒体加 object-fit 智能裁切、或跑红蓝对抗谓词取证时
+- **Lesson**：① 单元 DOM 锚点若全按 dataset 属性查询，顺序迁移**零波及**（HUD/URL sync/深链全不受影响），破坏面集中在两类断言——位置索引（首单元/最后单元/第 N 个）与 nextElementSibling 类邻接断言，迁移前先盘点这两类（邻接类要看新顺序下是否自然满足）；② `object-fit` 裁切生效要求媒体盒 `width/height:100%` 铺满容器（`max-width+auto` 盒随固有尺寸收缩、无裁切余量），且模糊垫底层**不可占卡内首个 img 位**（querySelector 首图语义 + 旧断言锚点都指首图，垫层排后靠 z-index 压底）；③ 红队 artifact 是确定性 JSON 时，同型交互两次执行会字节级相同 → MD5 撞车被取证闸门判复制，payload 嵌 `pred id + executedAt` 自证独立；④ fs-grep 文本契约锚点会被文件头 role 枚举注释 shadow（findIndex 命中首个=注释行）——契约 token 别写进无关注释
+- **Evidence**：15 场景 48 谓词 SSOT + gallery-wallpaper-hero 私有 fixture（不动共享 gen-manifest 防旧套件二次破坏）；stop-hook §5.7 两轮 block（PRED-ARTIFACT-MISSING/DUP）修复记录（核对锚点：2026-09-14 state.md 变更日志）

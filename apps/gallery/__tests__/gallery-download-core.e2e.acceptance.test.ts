@@ -599,10 +599,12 @@ describe("[场景5] 壁纸横/竖版下载（方向 + 来源互异）", () => {
         .locator(wallpaperCardSel)
         .first()
         .locator('[data-role="wallpaper-download-landscape"]');
+      // 改版 [2026-09-14]：静态日主钮 = 竖版下载（动作栏直点）；横版按钮移入「更多」菜单
+      // （popover 常驻 DOM 初始 hidden）——点击前必须先展开菜单。
+      // 竖版主钮在菜单外，点击它会把已展开的弹层收起 → 先点竖版、再开菜单点横版。
       await portraitBtn.waitFor({ state: "visible", timeout: 10000 });
-      await landscapeBtn.waitFor({ state: "visible", timeout: 10000 });
 
-      // DOM 契约：两按钮均带 aria-label 与 data-download-state
+      // DOM 契约：两按钮均带 aria-label 与 data-download-state（属性读取与弹层开合无关）
       const uiPortrait = await readUiState(
         page,
         `${wallpaperCardSel} [data-role="wallpaper-download-portrait"]`,
@@ -621,6 +623,12 @@ describe("[场景5] 壁纸横/竖版下载（方向 + 来源互异）", () => {
       const dlPortrait = await dlPortraitPromise;
       const portraitPath = path.join(os.tmpdir(), `relight-dl-s5p-${Date.now()}.jpg`);
       await dlPortrait.saveAs(portraitPath);
+
+      // 先开更多菜单，再点菜单项（横版）
+      const moreBtn = page.locator(wallpaperCardSel).first().locator('[data-role="more-menu"]');
+      await moreBtn.waitFor({ state: "visible", timeout: 10000 });
+      await moreBtn.click();
+      await landscapeBtn.waitFor({ state: "visible", timeout: 10000 });
 
       const dlLandscapePromise = page.waitForEvent("download", { timeout: 15000 });
       await landscapeBtn.click();

@@ -451,24 +451,43 @@ video {
   transition: width 0.1s linear;
 }
 
-/* ===== 壁纸卡（contain + 右下动作栏） ===== */
+/* ===== 壁纸卡（智能拉通 cover/contain + 右下动作栏） ===== */
 .unit-wallpaper {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 底部预留动作条带（契约演进 [2026-08-30] 补充）：壁纸 footer 的 dateline 是
-     合成进图片的像素，任何悬浮按钮都可能压住它——条带高度 = 双按钮动作栏
-     （2.75×2 + gap 0.75 = 6.25rem）+ bottom 偏移 2rem + 余量，保证零遮挡 */
-  padding: 1rem 1rem 9rem;
+  /* 改版 [2026-09-14]：旧底部预留条带（padding: 1rem 1rem 9rem）已移除——
+     壁纸媒体盒铺满单元（展示区智能拉通「够大」优先），动作栏/弹层悬浮压图为接受取舍 */
   background: var(--shadow);
 }
 .unit-wallpaper .wallpaper-img {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
+  /* 改版 [2026-09-14]：盒模型由 max-width/max-height + auto 改为铺满单元——
+     object-fit 裁切要求元素盒 100%；cover/contain 由单元 [data-fill] 智能切换。
+     position+z-index：静态变体垫底层（.wallpaper-blur）在 DOM 中排主图之后，靠层级压回底层 */
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   border-radius: 0.5rem;
+}
+/* 展示区智能拉通（改版 [2026-09-14]）：applySmartFill 依源比例 vs 视口比例的裁切损失
+   （cropRatio ≤ 0.3 → cover，> 0.3 → contain 模糊垫底兜底）在流单元上置 data-fill；
+   媒体元数据未就绪时不置 data-fill → 默认 contain。仅切 object-fit，不改布局高度。
+   blur 垫底层在 cover 态不隐藏（contain 态兜底视觉、cover 态作溢出底色）。 */
+.unit-wallpaper[data-fill="cover"] .wallpaper-img,
+.unit-wallpaper[data-fill="cover"] .wallpaper-video {
+  object-fit: cover;
+}
+.unit-wallpaper[data-fill="contain"] .wallpaper-img,
+.unit-wallpaper[data-fill="contain"] .wallpaper-video {
+  object-fit: contain;
+}
+.unit-video[data-fill="cover"] .video-el {
+  object-fit: cover;
+}
+.unit-video[data-fill="contain"] .video-el {
+  object-fit: contain;
 }
 /* 旧 .save-hint「长按图片保存到相册」样式已随节点一并删除（契约演进：被下载按钮取代） */
 
@@ -501,7 +520,9 @@ video {
 
 /* ===== 右下动作栏（契约演进 [2026-08-30]：三卡操作按钮统一收进右下竖排，
    下载恒在栏最下方——离拇指最近；原 photo 右上 / video 顶部右列 / wallpaper
-   底部居中三处分散定位已删除） ===== */
+   底部居中三处分散定位已删除。改版 [2026-09-14]：壁纸卡动作栏两态重构——
+   动态日 [声音→保存视频→更多] / 静态日 [保存壁纸→更多]，次级下载收进
+   「更多」弹层，壁纸卡内下载按钮不再恒居栏底） ===== */
 .action-rail {
   position: absolute;
   right: 1rem;
@@ -541,6 +562,36 @@ video {
 .btn-icon svg {
   width: 1.25rem;
   height: 1.25rem;
+}
+
+/* ===== 「更多」菜单（改版 [2026-09-14]：壁纸卡动作栏次级下载弹层） ===== */
+.more-menu {
+  display: flex;
+  justify-content: flex-end;
+}
+/* 弹层常驻 DOM（初始 [hidden]），定位右下、动作栏上方——定位上下文是
+   .action-rail（.more-menu 不设 position，absolute 就近上溯到唯一的定位祖先），
+   弹层底边 = 动作栏顶边 + 0.75rem，不遮栏内任何按钮 */
+.more-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.75rem);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 9.5rem;
+  padding: 0.6rem;
+  border: 1px solid oklch(0.975 0.01 95 / 0.2);
+  border-radius: 0.9rem;
+  background: oklch(0.155 0.006 95 / 0.92);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 28px oklch(0.08 0.004 95 / 0.55);
+}
+/* item 全宽按钮（复用 .download-btn 胶囊，撑满弹层宽度、左对齐） */
+.more-menu-popover .download-btn {
+  width: 100%;
+  justify-content: flex-start;
 }
 
 /* ===== 下载按钮（玻璃拟态胶囊；移动端常显，不依赖 hover） ===== */

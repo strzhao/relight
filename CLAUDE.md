@@ -241,7 +241,10 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
                   key = `relight/wallpaper-videos/{pickDate}_landscape.mov` / `_portrait.mp4`，
                   manifest 视频字段条件展开——DB 回执列空则字段缺省）+
                   buildManifest → scp+ssh mv 原子推 manifest.json 到 VPS → 静态站拉 manifest
-                  渲染 #/ #/history #/video/<id>（OKLCH 品牌色单页站）。daily-video 推送 URL
+                  渲染 `#/` 沉浸流 + `#/video/<id>` 视频深链 + `#/?date=&rank=` 日期/照片深链
+                  （OKLCH 品牌色单页站）。沉浸流每日单元顺序 = 日期分隔卡 → 壁纸卡（含动态视频变体，
+                  主钮「保存视频」+「更多」菜单收静态/电脑版）→ 主题视频卡 → 照片；壁纸/视频卡展示区
+                  按 cropRatio 智能拉通（≤0.3 cover，否则 contain + 模糊垫底）。daily-video 推送 URL
                   改用 `config.galleryPublicUrl + /#/video/<id>`（修原 localhost bug）。
                   历史回填走 `backfill:gallery` CLI。
 ```

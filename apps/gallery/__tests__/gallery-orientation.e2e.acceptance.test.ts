@@ -116,7 +116,7 @@ beforeAll(async () => {
     recursive: true,
   });
 
-  // fixture：2 天以上 + 1 视频 + 今日 20 张（今日无 date-separator 置顶，首单元 = 今日 rank=1 photo）
+  // fixture：2 天以上 + 1 视频 + 今日 20 张（流序改版 [2026-09-14]：今日壁纸卡占首位，无 date-separator）
   const fx = generateFixture();
   manifestPath = fx.manifestPath;
   const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8"));
@@ -330,15 +330,15 @@ describe("[OR.PM1][OR-C1] 竖→横翻转保持当前单元", () => {
   }) => {
     await gotoStream(page);
 
-    // 定位：流内第 3 个 [data-stream-unit]（fixture 契约：今日无 date-separator 置顶，
-    // 流内第 3 个单元 = 今日 rank=3 photo；今日 20 张 ≥ 3，目标稳定）
+    // 定位：流内第 3 个 [data-stream-unit]（流序改版 [2026-09-14] fixture 契约：今日壁纸卡
+    // 占首位 → 流内第 3 个单元 = 今日 rank=2 photo；今日 20 张 ≥ 3，目标稳定）
     const target = await getUnitAt(page, 2);
     expect(target, "流内必须存在第 3 个 [data-stream-unit]").not.toBeNull();
     expect(target?.unitType, "fixture 契约：第 3 个单元应是 photo").toBe("photo");
     expect(
       target?.photoRank,
-      "fixture 契约：流内第 3 个单元应为今日 rank=3（若蓝队挂载顺序变化请核对 fixture）",
-    ).toBe("3");
+      "fixture 契约：流内第 3 个单元应为今日 rank=2（壁纸卡占首位；若蓝队挂载顺序变化请核对 fixture）",
+    ).toBe("2");
     expect(target?.dayDate, "photo 单元 DOM 契约：必须带 data-day-date").toBe(todayDate);
 
     const targetFp = await anchorAt(page, 2);
@@ -423,7 +423,7 @@ describe("[OR.PM3][OR-C2] 翻转后 URL 不被过渡态改写", () => {
       hashBefore,
       `翻转前 hash=${hashBefore} 应含 date=${todayDate}（既有 URL 联动契约）`,
     ).toContain(`date=${todayDate}`);
-    expect(hashBefore, `翻转前 hash=${hashBefore} 应含 rank=3`).toContain("rank=3");
+    expect(hashBefore, `翻转前 hash=${hashBefore} 应含 rank=2`).toContain("rank=2");
 
     // —— 驱动：竖 → 横，settle 越过 800ms + 闸门 ~900ms + debounce 300ms ——
     await page.setViewportSize({ width: LANDSCAPE.width, height: LANDSCAPE.height });
@@ -437,7 +437,7 @@ describe("[OR.PM3][OR-C2] 翻转后 URL 不被过渡态改写", () => {
     ).toBe(hashBefore);
     // 双保险：hash 仍指向翻转前那个单元（防「翻转被写成了另一条合法深链」的假绿）
     expect(hashAfter).toContain(`date=${todayDate}`);
-    expect(hashAfter).toContain("rank=3");
+    expect(hashAfter).toContain("rank=2");
 
     await writeArtifact("OR.PM3", JSON.stringify({ hashBefore, hashAfter }));
   });
