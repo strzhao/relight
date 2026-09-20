@@ -71,6 +71,7 @@
 
 ### 模式 (patterns.md)
 
+- [2026-09-20] date 无 rank 深链落位契约：壁纸卡优先 + 等价容忍断言零迁移 → [gallery](domains/gallery.md)
 - [2026-08-31] Chromium scroll anchoring 使「旋转保持」修复桌面观测等价（漂移只在真机 WebKit）→ [gallery](domains/gallery.md)
 - [2026-08-31] Playwright 全屏态窗口操作 CDP 拒绝 → 契约 seam stub 绕过模式 → [testing](domains/testing.md)
 

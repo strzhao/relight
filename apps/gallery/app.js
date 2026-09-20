@@ -37,7 +37,10 @@
  *
  * 深链路由（state.md §深链路由契约）：
  *   #/                    → stream scrollTop = 0
- *   #/?date=YYYY-MM-DD    → 该 date-separator scrollIntoView
+ *   #/?date=YYYY-MM-DD    → 当日壁纸卡 scrollIntoView（[2026-09-20] 推送链接直达，
+ *                           定位优先级 壁纸卡 → date-separator → 该日首照片；
+ *                           动态变体定位后 muted 起播，play() reject 吞错）
+ *   #/?date=...&rank=N    → 该 photo 单元 scrollIntoView（rank 优先，壁纸卡不劫持）
  *   #/video/<id>          → 该 video 单元 scrollIntoView + 自动 play
  *
  * 横竖屏重锚（orientation re-anchor，行为契约 OR-C1..C4，红队/QA 断言依据）：
@@ -1684,6 +1687,23 @@
     return h.replace(/^#/, "");
   }
 
+  /**
+   * 壁纸卡定位后的起播补偿（[2026-09-20] 无 rank date 深链直达当日壁纸卡）：
+   * 既有视口联动（ensureVideoIO）已自动播 → 跳过（勿重复强播导致重置）；
+   * 仍 paused → 显式 muted 起播；play() reject（策略/解码）吞错 console.warn，定位不受影响。
+   */
+  function playWallpaperVideoIfPaused(unit) {
+    const video = unit.querySelector("video");
+    if (!video || !video.paused) return; // 静态变体 / 视口联动已起播
+    video.muted = true;
+    const p = video.play();
+    if (p && typeof p.then === "function") {
+      p.catch((err) => {
+        console.warn("[gallery] 壁纸卡深链起播被拦截:", err);
+      });
+    }
+  }
+
   function handleDeeplink() {
     const hash = getHash();
 
@@ -1715,7 +1735,7 @@
       return;
     }
 
-    // #/?date=YYYY-MM-DD[&rank=N]（有 rank → 照片深链，无 rank → date-separator）
+    // #/?date=YYYY-MM-DD[&rank=N]（有 rank → 照片深链，无 rank → 壁纸卡优先）
     const dateMatch = /[?&]date=(\d{4}-\d{2}-\d{2})/.exec(hash);
     if (dateMatch) {
       const date = dateMatch[1];
@@ -1733,14 +1753,26 @@
           scrollToUnloadedDate(date, rank);
         }
       } else {
-        const unit = document.querySelector(
-          `[data-unit-type="date-separator"][data-day-date="${date}"]`,
+        // 无 rank date 深链 → 当日壁纸卡优先（[2026-09-20] 推送链接直达当日壁纸）：
+        // 定位优先级 壁纸卡 → date-separator → 该日首照片（scrollToUnloadedDate 同口径）；
+        // 壁纸卡无独立深链形态，URL 回写由已设的闸门①抑制（scheduleUrlSync 亦排除 wallpaper 单元）
+        const wpUnit = document.querySelector(
+          `[data-unit-type="wallpaper"][data-day-date="${date}"]`,
         );
-        if (unit) {
-          unit.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (wpUnit) {
+          wpUnit.scrollIntoView({ behavior: "smooth", block: "start" });
+          // 动态变体：定位后起播补偿（视口联动已自动播则跳过）
+          setTimeout(() => playWallpaperVideoIfPaused(wpUnit), 400);
         } else {
-          // 该日尚未挂载 → 挂载所有更旧的日直到该日出现
-          scrollToUnloadedDate(date);
+          const unit = document.querySelector(
+            `[data-unit-type="date-separator"][data-day-date="${date}"]`,
+          );
+          if (unit) {
+            unit.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            // 该日尚未挂载 → 挂载所有更旧的日直到该日出现（挂载后重查仍壁纸卡优先）
+            scrollToUnloadedDate(date);
+          }
         }
       }
       return;
@@ -1762,6 +1794,18 @@
     if (state.sentinel) streamEl.appendChild(state.sentinel);
     // 延迟一帧确保 DOM 渲染
     requestAnimationFrame(() => {
+      // 无 rank：增量挂载完成后重查当日壁纸卡优先（[2026-09-20] 与 handleDeeplink
+      // 无 rank 分支同口径）；该日无壁纸卡（老日子）→ 落入下方 separator/首照片回退
+      if (!rank) {
+        const wpUnit = document.querySelector(
+          `[data-unit-type="wallpaper"][data-day-date="${date}"]`,
+        );
+        if (wpUnit) {
+          wpUnit.scrollIntoView({ behavior: "smooth", block: "start" });
+          setTimeout(() => playWallpaperVideoIfPaused(wpUnit), 400);
+          return;
+        }
+      }
       const selector = rank
         ? `[data-unit-type="photo"][data-day-date="${date}"][data-photo-rank="${rank}"]`
         : `[data-unit-type="date-separator"][data-day-date="${date}"]`;

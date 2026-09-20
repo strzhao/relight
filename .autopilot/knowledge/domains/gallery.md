@@ -84,6 +84,14 @@
 - **Lesson**：① 「点外关闭」document 监听必须挂 **capture 阶段**——下载按钮 click handler 惯用 stopPropagation，bubble 监听收不到这些外点点按，菜单开着点主钮不收（真 UX bug，被红队 e2e 二次 toggle 超时逼出）；② 可达名 = `aria-label ?? textContent`——**aria-label 遮蔽可见文案**，断言要求连续子串时 aria-label 必须含该连续子串（「保存壁纸（手机竖版）」⊃「保存壁纸」，但「保存手机竖版壁纸」不含），同一个子串陷阱在蓝队与降级路径各犯一次；③ 从数据层重建界面态需显式 override——video error 降级重渲时 day 数据层仍是动态日，rail 重建若按数据分支会残留 mp4 入口，必须传 forceStatic 类参数按「当前界面态」重建
 - **Evidence**：红队套件 6 处断言级失败 → auto-fix 7 处全绿（116/116）；app.js createMoreMenu capture 外点关 + buildWallpaperActionRail forceStatic（核对锚点：2026-09-14 apps/gallery auto-fix 变更日志）
 
+## date 无 rank 深链落位契约：壁纸卡优先 + 等价容忍断言零迁移
+
+[2026-09-20] <!-- tags: gallery, deeplink, 壁纸卡, 契约, 断言设计 -->
+
+- **Scenario**：推送侧 date 级深链要落当日主视觉卡（而非 separator/首照片等第一内容单元），且旧套件已存在落位断言时
+- **Lesson**：① 落位断言应写「等价容忍」口径——断言 day-membership（视口停留单元的 data-day-date）+ 过折叠线（top < vph*0.5），不锁 exact unit type，后续落位策略优化才能零测试迁移；② 卡有 DOM 锚点但无深链身份时，路由分支用通用 dataset 属性组合查询定位即可，不必新增专用主键；③ 增量挂载路径的重查必须与直接路径同步改，且加高优先级分支守卫（防 rank 类深链被新落位劫持），配「守卫日不被挂出」判别断言可杀全量挂载兜底 mutation
+- **Evidence**：落位优先级改为壁纸卡优先后，既有 DL.P1/S14.PM1 断言零改动通过；红队新套件 9/9 + 回归四套件 80/80 绿（核对锚点：2026-09-20 apps/gallery/app.js handleDeeplink + gallery-deeplink-wallpaper.e2e.acceptance.test.ts）
+
 ## 沉浸流顺序迁移的断言影响面 + object-fit 盒模型 + e2e 取证去重
 
 [2026-09-14] <!-- tags: gallery, e2e, smart-fill, artifact, fixture -->
