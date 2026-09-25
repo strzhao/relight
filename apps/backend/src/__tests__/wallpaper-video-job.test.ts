@@ -255,6 +255,11 @@ describe("runWallpaperVideo", () => {
     expect(state.calls.spawn[1]?.res).toBe("portrait");
     expect(state.calls.spawn[0]?.firstFrame).toBe(state.calls.spawn[0]?.lastFrame);
     expect(state.calls.spawn[0]?.seconds).toBe(4);
+    // 画布逐轴覆盖（C2）：两条腿均显式传 width/height（横 1280×704 与 720p 档等价、竖 736×1600 覆盖 portrait 档）
+    expect(state.calls.spawn[0]?.width).toBe(1280);
+    expect(state.calls.spawn[0]?.height).toBe(704);
+    expect(state.calls.spawn[1]?.width).toBe(736);
+    expect(state.calls.spawn[1]?.height).toBe(1600);
 
     // buildLoop：palindrome 目标时长 = config.wallpaperVideoLoopSeconds（8），输入=raw 生成
     expect(state.calls.buildLoop).toHaveLength(2);

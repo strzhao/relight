@@ -3,7 +3,7 @@
  *
  * 设计文档（state.md）对应契约（§契约规约 计算/spawn 契约【v2】逐字）：
  *   - transcodeForGallery 产物 invariant【v2】：容器 mp4 ∧ H.264 ∧ 有音频流（aac 立体声）
- *     ∧ 分辨率 == 源（704×1216）∧ faststart（画廊静音自动播放 + 点击开声）
+ *     ∧ 分辨率 == 源（736×1600，2026-09-25 画布改版）∧ faststart（画廊静音自动播放 + 点击开声）
  *   - transcodeForAerial 产物 invariant（2026-09-13 验收反转）：容器 mov ∧ HEVC（tag hvc1）
  *     ∧ 1920×1080 ∧ **保留音轨**（aac 立体声）∧ moov 在前（faststart）
  *   - §总体架构（v2）步骤 5：横版 HEVC(hvc1) .mov 1920×1080 带音轨 +faststart（Aerial 注入
@@ -12,7 +12,7 @@
  *
  * 验收点（round 2 编排器）：mock ffmpeg 参数断言见 wallpaper-video-overlay.acceptance.test.ts
  * （mock 面）；本文件为真实小样本 ffprobe 断言（验收点 4 可选项落实）——输入用 ffmpeg 造
- * 2s 短样片（画廊源 704×1216 竖版带立体声音轨；Aerial 源 1280×704 横版带音轨——
+ * 2s 短样片（画廊源 736×1600 竖版带立体声音轨；Aerial 源 1280×704 横版带音轨——
  * 带音轨是为了证明音轨真实保留而非静默丢弃）。
  *
  * 红队铁律：不读蓝队实现代码；transcodeForGallery / transcodeForAerial 按契约函数名黑盒
@@ -213,9 +213,9 @@ beforeAll(async () => {
   setupTestSchema(sqlite);
   sqlite.close();
 
-  // 画廊源：704×1216 竖版（契约 invariant 逐字分辨率）带立体声音轨
+  // 画廊源：736×1600 竖版（invariant 逐字分辨率，2026-09-25 画布改版）带立体声音轨
   gallerySrc = path.join(tmpRoot, "gallery-src.mp4");
-  makeSrcWithStereoAudio(gallerySrc, "704x1216");
+  makeSrcWithStereoAudio(gallerySrc, "736x1600");
   // Aerial 源：1280×704 横版带音轨（证明 -an 真实剥离）
   aerialSrc = path.join(tmpRoot, "aerial-src.mp4");
   makeSrcWithStereoAudio(aerialSrc, "1280x704");
@@ -249,7 +249,7 @@ afterAll(() => {
 // ============================================================================
 
 describe("【v2】transcodeForGallery 产物 invariant：mp4 ∧ H.264 ∧ aac 立体声 ∧ 分辨率==源 ∧ faststart", () => {
-  it("704×1216 竖版源 → 产物容器 mp4、h264、1 条 aac 立体声音轨、704×1216、moov 在前", async () => {
+  it("736×1600 竖版源 → 产物容器 mp4、h264、1 条 aac 立体声音轨、736×1600、moov 在前", async () => {
     const dst = path.join(tmpRoot, "2026-09-12_portrait.mp4");
     await transcodeForGallery(gallerySrc, dst);
 
@@ -268,9 +268,9 @@ describe("【v2】transcodeForGallery 产物 invariant：mp4 ∧ H.264 ∧ aac �
     );
     expect(p.audioCodec, `音频编码必须为 aac，实际 ${p.audioCodec}`).toBe("aac");
     expect(p.audioChannels, `音频必须立体声（2 ch），实际 ${p.audioChannels}`).toBe(2);
-    // 契约逐字 ④：分辨率 == 源（704×1216）
-    expect(p.width, `宽度必须 704，实际 ${p.width}`).toBe(704);
-    expect(p.height, `高度必须 1216，实际 ${p.height}`).toBe(1216);
+    // 契约逐字 ④：分辨率 == 源（736×1600，transcodeForGallery 无缩放）
+    expect(p.width, `宽度必须 736，实际 ${p.width}`).toBe(736);
+    expect(p.height, `高度必须 1600，实际 ${p.height}`).toBe(1600);
     // 契约逐字 ⑤：faststart（moov 在前）
     expect(moovBeforeMdat(dst), "mp4 必须 +faststart（moov box 在 mdat 之前）").toBe(true);
   }, 120000);

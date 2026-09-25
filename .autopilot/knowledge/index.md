@@ -23,6 +23,9 @@
 
 ### 决策 (decisions.md)
 
+- [2026-09-25] 竖版画布 736×1600 对齐手机屏 + lmedia --width/--height 透传 + 验证分层法（文本级/1s 探针/自然日免费）→ [video](domains/video.md)
+- [2026-09-25] 凭据沙箱下发布面谓词须沙箱外驱动 + 谓词 artifact 规范路径 <pred-id>.out → [testing](domains/testing.md)
+- [2026-09-25] motionPrompt 拆分两步链路（qwen facts→deepseek-chat）+ deepseek-flash 是推理档 content 空 → [ai-prompt](domains/ai-prompt.md)
 - [2026-09-14] 画廊动作栏/弹层菜单三坑（capture 外点关、aria-label 遮蔽可达名、降级重建 forceStatic）→ [gallery](domains/gallery.md)
 - [2026-09-14] 沉浸流顺序迁移断言影响面 + object-fit 盒模型 + e2e 取证去重 → [gallery](domains/gallery.md)
 - [2026-08-01] VPS 画廊推送式架构（复用 COS 桶+Caddy+域名，零新容器）→ [gallery](domains/gallery.md)

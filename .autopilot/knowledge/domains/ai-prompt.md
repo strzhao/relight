@@ -77,3 +77,12 @@
 <!-- tags: whisper, cli, child-process, json, stdout, ai, transcribe, bug -->
 
 **Lesson**: 这类 CLI 的设计是结果写文件，stdout 只是人类可读进度日志。真正的 JSON 在 `<outputDir>/<stem>.json`——等 `child_process.spawn` 的 close 事件 + `code === 0` 后再 `fs.readFile()` 读取。
+
+## motionPrompt 拆分两步链路 + deepseek 模型档位选择
+
+[2026-09-25] <!-- tags: narrate, motion-prompt, deepseek, 多客户端, 拆分, 两步链路 -->
+
+- **Scenario**：壁纸视频「看不出在动」——narrate（qwen3.6-35b）写出的运动描述 7 天 6 天零状态改变；五版准则改写全部证伪（详见 memory: narrate-model-qwen-weak-at-motion）
+- **Lesson**：①**同输入同准则换模型对照**是定位这类问题的最快路径（qwen 状态改变 0.1 vs deepseek 0.6-2.0）；②deepseek OpenAI 兼容端点上 **`deepseek-flash` 是推理档（token 全进 reasoning_content、content 空）——生产用 `deepseek-chat` 直出**；推理强度可用 `reasoning_effort` 控制（none 可关）；③两步法（本地 qwen vision 出**中立画面事实记录**→外部纯文本模型写运动）让像素不出机器，且实测优于直连看图；④motion 输出纯文本用 trim+长度校验，**别套 extractAndParseJson**；新 client 的 thinking 方言参数按 provider 条件化（chat_template_kwargs 是 qwen/llama.cpp 专属）
+- **Choice**：hero-only 触发（12 entry 只 1 次 facts+1 次 motion，原先 12 次生成 11 次丢弃）；失败不写库交 `wallpaper-video.ts` 既有分层链兜底 + console.warn 落 stdout；lib 接缝 `lib/motion/generate.ts generateHeroMotionPrompt`（可独立驱动=验收接缝）
+- **Evidence**：deepseek-smoke.out（flash content 空 / chat 直出）；QA 3.P4/3.P6/6.P1-6.P3 全过（核对锚点：2026-09-25）

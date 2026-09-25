@@ -36,7 +36,7 @@ import {
   type FaceBbox,
   WALLPAPER_VIDEO_LANDSCAPE_CANVAS,
   WALLPAPER_VIDEO_LANDSCAPE_RES,
-  WALLPAPER_VIDEO_PORTRAIT_CANVAS,
+  WALLPAPER_VIDEO_PORTRAIT_CANVAS, // 竖版画布 736×1600（portrait 档经 --width/--height 逐轴覆盖）
   WALLPAPER_VIDEO_PORTRAIT_RES,
   assertVideoSpawnPrerequisites,
   buildLoop,
@@ -127,6 +127,9 @@ async function produceOneSide(opts: {
       outPath: rawPath,
       seconds,
       res,
+      // C2：两条腿均显式传画布（竖版 736×1600 覆盖 portrait 档、横版 1280×704 与 720p 档等价）
+      width: canvas.width,
+      height: canvas.height,
       timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
     });
     log(`[wallpaper-video] ${pickDate} ${res} 生成完成 → ${rawPath}`);

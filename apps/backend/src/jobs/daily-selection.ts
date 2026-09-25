@@ -1,8 +1,6 @@
-import path from "node:path";
 import type { Job } from "bullmq";
 import { eq, inArray, sql } from "drizzle-orm";
 import pLimit from "p-limit";
-import sharp from "sharp";
 import { aiClient } from "../ai/client";
 import { loadPrompts } from "../ai/prompts";
 import {
@@ -13,7 +11,7 @@ import {
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { beijingDateOf } from "../lib/datetime";
-import { RAW_EXTENSIONS, extractRawPreview } from "../lib/raw";
+import { generateHeroMotionPrompt, prepareHeroJpeg } from "../lib/motion/generate";
 import { createStorageAdapter } from "../storage";
 import { buildCandidatePool, getRecentPickedEventKeys } from "./daily-selection/candidate-pool";
 import type { ClusteredCandidate } from "./daily-selection/cluster";
@@ -210,7 +208,7 @@ interface EntryResult {
   title: string;
   narrative: string;
   score: number;
-  /** AI 按画面内容生成的微动视频运动描述（narrate 产出；缺省 → 壁纸视频分层默认 prompt） */
+  /** hero 的微动视频运动描述（hero-only 两步链路产出；缺省 → 壁纸视频分层默认 prompt） */
   motionPrompt?: string;
   members: { photoId: string; caption: string }[];
 }
@@ -234,7 +232,7 @@ async function processSingleEntry(
   const isVideo = (candidate.mediaType ?? "image") === "video";
 
   // ---- narrate（vision 模型）----
-  let narrateResult: { title: string; narrative: string; score: number; motionPrompt?: string };
+  let narrateResult: { title: string; narrative: string; score: number };
 
   try {
     const promptPath = isVideo ? "daily/narrate-video" : "daily/narrate";
@@ -297,47 +295,11 @@ async function processSingleEntry(
     }
 
     const adapter = createStorageAdapter(candidate.sourceType);
-    let buffer: Buffer;
+    // base64 三分支（视频 cover / DNG 预览 / 普通图+HEIC）抽到 lib/motion/generate 共用
+    //（hero-only 运动描述阶段同源复用，2026-09-25 拆分）
+    const base64 = await prepareHeroJpeg(candidate, adapter, (m) => log(`[rank=${rank}] ${m}`));
     const mimeType = "image/jpeg";
 
-    if (isVideo) {
-      if (!candidate.thumbnailPath) {
-        throw new Error("视频无 cover 缩略图");
-      }
-      const fs = await import("node:fs/promises");
-      const coverBuffer = await fs.readFile(candidate.thumbnailPath);
-      buffer = await sharp(coverBuffer)
-        .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer();
-    } else {
-      const ext = path.extname(candidate.filePath).toLowerCase();
-      if (RAW_EXTENSIONS.has(ext)) {
-        log(`[rank=${rank}] DNG 文件，提取 JPEG 预览`);
-        buffer = await extractRawPreview(candidate.filePath);
-        buffer = await sharp(buffer)
-          .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer();
-      } else {
-        buffer = await adapter.getFileBuffer(candidate.filePath);
-        const { isHeicBuffer, convertHeicToJpeg } = await import("../lib/heic");
-        if (isHeicBuffer(buffer)) {
-          buffer = await convertHeicToJpeg(buffer, {
-            maxWidth: 2048,
-            maxHeight: 2048,
-            quality: 85,
-          });
-        } else {
-          buffer = await sharp(buffer)
-            .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
-            .jpeg({ quality: 85 })
-            .toBuffer();
-        }
-      }
-    }
-
-    const base64 = buffer.toString("base64");
     const narrateRawResponse = await aiClient.analyzePhoto(
       base64,
       mimeType,
@@ -453,9 +415,52 @@ async function processSingleEntry(
     title: narrateResult.title,
     narrative: narrateResult.narrative,
     score: narrateResult.score,
-    motionPrompt: narrateResult.motionPrompt,
     members,
   };
+}
+
+/**
+ * hero-only 运动描述阶段（2026-09-25 拆分，契约 C6）：仅对 rank=0 的 hero 走
+ * facts(本地 qwen vision) → motion(外部 deepseek 纯文本) 两步链路，结果写入
+ * primary.motionPrompt（随 dailyPicks upsert 落 `daily_picks.motion_prompt`，契约 C5
+ * 列名与语义不变）。
+ *
+ * 容错（C6）：任一步失败 → motionPrompt 保持 undefined（落库 null，交给
+ * wallpaper-video 既有分层解析链兜底）+ console.warn 落 stdout（不能只 job.log——
+ * 那是 BullMQ→Redis，PM2 日志里看不到）。独立 try/catch，绝不阻塞精选主流程。
+ *
+ * 导出供单测（C6「仅 hero 触发次数」契约元素）。
+ */
+export async function attachHeroMotionPrompt(
+  hero: ClusteredCandidate,
+  primary: EntryResult,
+  log: (m: string) => void,
+): Promise<void> {
+  try {
+    const prompt = await generateHeroMotionPrompt(
+      {
+        photoId: hero.photoId,
+        mediaType: hero.mediaType,
+        filePath: hero.filePath,
+        thumbnailPath: hero.thumbnailPath,
+        sourceType: hero.sourceType,
+      },
+      { log },
+    );
+    if (prompt) {
+      primary.motionPrompt = prompt;
+      log(`hero 运动描述生成成功（${prompt.length} 字）`);
+    } else {
+      log("hero 运动描述未生成（motion_prompt 保持 null，壁纸视频走分层默认 prompt）");
+    }
+  } catch (err) {
+    console.warn(
+      `[daily-selection] hero 运动描述生成异常（不影响精选，motion_prompt 保持 null）: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    log("hero 运动描述异常（motion_prompt 保持 null）");
+  }
 }
 
 /**
@@ -597,6 +602,15 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   if (!primary) {
     job.log("内部错误：entryResults 为空");
     return;
+  }
+
+  // ---- 阶段 1.6: hero-only 运动描述生成（facts→motion 两步链路；12 条 entry 仅 rank=0
+  //      触发 1 次 facts + 1 次 motion，其余 11 份叙事不再产运动描述——契约 C6）----
+  // 失败不写库（motion_prompt 保持 null → 壁纸视频分层默认 prompt 兜底）+ console.warn 落 stdout。
+  const heroCandidate = candidates[0];
+  if (heroCandidate) {
+    job.log("阶段 1.6: hero 运动描述生成（facts → motion）");
+    await attachHeroMotionPrompt(heroCandidate, primary, (m) => job.log(m));
   }
 
   // ---- 阶段 2: 写库（事务：DELETE + bulk INSERT + upsert dailyPicks）----

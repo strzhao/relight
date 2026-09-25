@@ -82,3 +82,12 @@
 - **Lesson**：`npx remotion render` 首跑 bundling + Chrome Headless 冷启动实测可达 600s 级——600s 超时会在生产首跑假超时；浏览器缓存按「cwd 向上最近 package.json」解析，cwd 在子目录工程会 miss 上层缓存触发联网重下（并发进程同卡）
 - **Choice**：显式传 `--browser-executable` 指向 workspace 已缓存 shell（零下载、确定性）；renderTextOverlay 超时 900s（契约 v2.1）；README/前置校验列入 Chrome Headless Shell 存在性检查
 - **Evidence**：smoke 热跑 1.9s vs 冷跑 600s 级（核对锚点：2026-09-12）
+
+## 竖版画布对齐手机屏 + lmedia --width/--height 透传（2026-09-25 画布 v3）
+
+[2026-09-25] <!-- tags: wallpaper-video, 画布, lmedia, mmh3turbo, 画廊, cover 裁切, 验证分层 -->
+
+- **Scenario**：画廊 H5 手机端动态壁纸卡左右裁切 20%（烧录文字被切）；竖版 preset 只有 0.579/0.558 两种，到不了手机屏比例 0.46
+- **Lesson**：mmh3turbo 引擎原生支持 `--width/--height`（`generate.py:71-72`，**逐轴覆盖 --res**，未给的轴退回档位；必须 32 的倍数），只是 lmedia 未透传——加两个 option + 校验即通，无需改引擎/换 preset。画布 704×1216→736×1600（0.460，与静态壁纸 0.4614 同量级）后 gallery cover 裁切 20.19%→0.45%；竖版 Remotion 排版常量由 `scale=min(w/1290,h/2796)` 派生会**自动跟随但约束轴翻转**（0.435→0.570，字号 +31% 需人工回看）；注意力 token/潜帧 +37.5%（836→1150），单次重跑（双腿）实测 111.8min
+- **Choice**：relight 两条腿都显式传 width/height（横版 1280×704 与 720p 档等价、冻结不随档位变——刻意）；`-r` 照旧传保 stdout 回执语义。**验证分层法**（后续开发效率关键）：prompt/运动描述改写=纯文本 dry run 秒级（motion-once.ts 接缝）；画布/链路接通=`--seconds 1` 单腿探针 ~15min；运动质量=**明早 10:00 每日精选自然出片免费验证**；全量 4s 验收只在改生成核心时做
+- **Evidence**：各视口裁切实测表（iPhone/ProMax/窄屏全 <0.5%）；qa 真跑 111.8min 无挂死（核对锚点：2026-09-25 `.autopilot/runtime/requirements/20260925-开始实现/`）

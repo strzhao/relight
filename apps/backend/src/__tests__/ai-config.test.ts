@@ -116,4 +116,47 @@ describe("AI Config promptVersion — 验收测试", () => {
       expect(config.ai.promptVersion).not.toBeNull();
     });
   });
+
+  // ---- 运动描述专用外部文本模型（2026-09-25 拆分，契约 C8）----
+
+  describe("运动描述模型配置（AI_MOTION_*，契约 C8）", () => {
+    it("AI_MOTION_* 未设置时应落默认值（deepseek 接入点 / 空 key / deepseek-chat）", async () => {
+      // biome-ignore lint/performance/noDelete: process.env 必须用 delete 取消设置
+      delete process.env.AI_MOTION_BASE_URL;
+      // biome-ignore lint/performance/noDelete: process.env 必须用 delete 取消设置
+      delete process.env.AI_MOTION_API_KEY;
+      // biome-ignore lint/performance/noDelete: process.env 必须用 delete 取消设置
+      delete process.env.AI_MOTION_MODEL;
+      const config = await getFreshConfig();
+
+      expect(config.ai.motionBaseUrl).toBe("https://api.deepseek.com/v1");
+      // 默认空串 = motion 阶段旁路（不写库仅 warn），凭据绝不硬编码进仓库
+      expect(config.ai.motionApiKey).toBe("");
+      expect(config.ai.motionModel).toBe("deepseek-chat");
+    });
+
+    it("AI_MOTION_BASE_URL / AI_MOTION_MODEL 应从环境变量读取", async () => {
+      process.env.AI_MOTION_BASE_URL = "https://motion-fallback.example/v1";
+      process.env.AI_MOTION_MODEL = "test-motion-model";
+      const config = await getFreshConfig();
+
+      expect(config.ai.motionBaseUrl).toBe("https://motion-fallback.example/v1");
+      expect(config.ai.motionModel).toBe("test-motion-model");
+    });
+
+    it("AI_MOTION_API_KEY 应从环境变量读取（凭据只经 env 注入）", async () => {
+      process.env.AI_MOTION_API_KEY = "sk-test-nonempty";
+      const config = await getFreshConfig();
+
+      expect(config.ai.motionApiKey).toBe("sk-test-nonempty");
+    });
+
+    it("config.ai 应保留 motion 三字段（结构不回退）", async () => {
+      const config = await getFreshConfig();
+
+      expect(config.ai).toHaveProperty("motionBaseUrl");
+      expect(config.ai).toHaveProperty("motionApiKey");
+      expect(config.ai).toHaveProperty("motionModel");
+    });
+  });
 });

@@ -56,9 +56,9 @@ export const dailyNarrateResponseSchema = z.object({
   narrative: z.string().min(10).max(200),
   score: z.number().min(0).max(10),
   reasoning: z.string().min(1),
-  /** 微动视频运动描述（2026-09-13 契约修订：AI 按画面内容生成 30-50 字 + Audio 环境音指引；
-   *  可选——旧格式响应/失败兜底时缺省，落库后由壁纸视频按有无人脸分层默认 prompt 兜底） */
-  motionPrompt: z.string().min(10).max(160).optional(),
+  // [2026-09-25 契约收窄 C9] 运动描述字段已移除——改由 hero-only 两步链路
+  // （facts → 外部 deepseek，lib/motion/generate.ts）生成，narrate 不再产、不再解析该字段，
+  // 避免双写来源无法判定哪份生效。
 });
 
 export type DailyNarrateResponse = z.infer<typeof dailyNarrateResponseSchema>;
@@ -439,10 +439,6 @@ export function parseDailyNarrateResponse(rawResponse: string): {
       typeof rawJson.reasoning === "string" && rawJson.reasoning.length > 0
         ? rawJson.reasoning
         : "",
-    motionPrompt:
-      typeof rawJson.motionPrompt === "string" && rawJson.motionPrompt.length >= 10
-        ? rawJson.motionPrompt.slice(0, 160)
-        : undefined,
   };
 
   return {
@@ -450,4 +446,82 @@ export function parseDailyNarrateResponse(rawResponse: string): {
     error: `Zod 校验失败: ${result.error.message}`,
     fallback,
   };
+}
+
+// ===== 运动描述两步链路（2026-09-25 拆分：facts → motion，见 lib/motion/generate.ts）=====
+
+/** 画面事实记录响应：{record: 中立事实文本}（严禁含运动/动作词的约束在 prompt 侧） */
+export const motionFactsResponseSchema = z.object({
+  record: z.string().min(10),
+});
+
+export type MotionFactsResponse = z.infer<typeof motionFactsResponseSchema>;
+
+/**
+ * 解析画面事实记录响应（第一步，本地 qwen vision）。
+ *
+ * 照 parseDailyNarrateResponse 的「extractAndParseJson + safeParse + 手写容错」三段式：
+ * 模型偶尔会按事实记录的原话输出纯文本而非 JSON——此时手写容错回退为「把 trim 后的
+ * 原始响应整段当作 record」（事实记录本身就是要喂给下一步的自由文本，宁可用不弃）。
+ */
+export function parseMotionFactsResponse(rawResponse: string): {
+  parsed: MotionFactsResponse | null;
+  error: string | null;
+  fallback: MotionFactsResponse | null;
+} {
+  if (typeof rawResponse !== "string" || rawResponse.trim().length === 0) {
+    return { parsed: null, error: "响应为空", fallback: null };
+  }
+
+  const { parsed: rawJson, error: extractError } = extractAndParseJson(rawResponse);
+
+  if (rawJson) {
+    const result = motionFactsResponseSchema.safeParse(rawJson);
+    if (result.success) {
+      return { parsed: result.data, error: null, fallback: result.data };
+    }
+  }
+
+  // 手写容错：非 JSON / 键名不符 → 原始文本整段作为 record（≥10 字才可用）
+  const trimmed = rawResponse.trim();
+  if (trimmed.length >= 10) {
+    const fallback: MotionFactsResponse = { record: trimmed };
+    return { parsed: null, error: extractError ?? "Zod 校验失败", fallback };
+  }
+
+  return {
+    parsed: null,
+    error: extractError ?? "事实记录过短（<10 字）",
+    fallback: null,
+  };
+}
+
+/** 运动描述纯文本长度校验（沿用原 narrate motionPrompt 的 10..160 口径，契约 C5） */
+const MOTION_PROMPT_MIN = 10;
+const MOTION_PROMPT_MAX = 160;
+
+/**
+ * 解析运动描述响应（第二步，外部 deepseek 纯文本输出）。
+ *
+ * 契约：motion 模型输出为纯文本——只做 trim + 长度 10..160 校验，
+ * 不套 extractAndParseJson（30-50 字中文 + Audio 英文短语收尾不是 JSON）。
+ */
+export function parseMotionResponse(rawResponse: string): {
+  prompt: string | null;
+  error: string | null;
+} {
+  if (typeof rawResponse !== "string") {
+    return { prompt: null, error: "响应不是字符串" };
+  }
+  const text = rawResponse.trim();
+  if (text.length === 0) {
+    return { prompt: null, error: "响应为空" };
+  }
+  if (text.length < MOTION_PROMPT_MIN || text.length > MOTION_PROMPT_MAX) {
+    return {
+      prompt: null,
+      error: `运动描述长度越界（${text.length}，允许 ${MOTION_PROMPT_MIN}..${MOTION_PROMPT_MAX}）: ${text.slice(0, 40)}…`,
+    };
+  }
+  return { prompt: text, error: null };
 }

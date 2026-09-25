@@ -7,8 +7,8 @@
  *   - §后端设计 §3：preprocessHeroFrame(photoPath, width, height) → Promise<string>：
  *     sharp cover 裁剪+resize 到目标画布比例，产 tmp png（防引擎拉伸变形）；
  *     【v2】升级人脸构图裁剪（faces bbox → ≥1/4 占比，缺失回退中心）
- *   - 边界值【v2】：横版画布 1280×704、竖版画布 704×1216（预裁剪按此比例 cover-crop，
- *     人脸占比 ≥1/4，faces bbox 缺失回退中心）
+ *   - 边界值（2026-09-25 画布改版）：横版画布 1280×704、竖版画布 736×1600（预裁剪按此比例
+ *     cover-crop，人脸占比 ≥1/4，faces bbox 缺失回退中心）
  *   - 验收点（round 2 编排器）：有 faces bbox → crop 窗口含 bbox 中心且脸高 ≥ 画布 1/4
  *     （对 preprocessHeroFrame 输出做像素级验证：以 bbox 相对位置断言）；
  *     无 bbox → 回退中心（现行为不变）。mock db 查询。
@@ -16,10 +16,11 @@
  * 像素级验证方案（不读实现，纯几何 + 像素探针）：
  *   输入 2000×1000。bbox = [1300,300,400,400]（中心 (1500,500)）。marker：左半红
  *   [1300,1500)×[300,700)、右半蓝 [1500,1700)×[300,700)。
- *   cover-crop 到 704×1216 的窗口宽 = 1000×(704/1216) ≈ 579（高全含）。
- *   红蓝两半同时可见 ⇔ 窗口左缘 L ∈ (921,1500) ⇔ bbox 中心 1500 ∈ [L, L+579]（数学蕴含）。
- *   脸高（marker 纵向跨度）在输出中 = 400×(704/579) ≈ 486 ≥ 1216/4 = 304。
- *   回退中心：无 faces 行 → 现行为 sharp cover 中心裁剪（窗口 ≈ [710,1290]）：
+ *   cover-crop 到 736×1600 的窗口宽 = 1000×(736/1600) = 460（高全含）。
+ *   红蓝两半同时可见 ⇔ 窗口左缘 L ∈ (1040,1500] ⇔ bbox 中心 1500 ∈ [L, L+460]（数学蕴含）。
+ *   脸高（marker 纵向跨度）在输出中 = 400×(1600/1000) = 640 ≥ 1600/4 = 400
+ *   （人脸构图窗口下限 = 画布高与全幅 cover 窗口高的较小值 = 1000，不超分放大）。
+ *   回退中心：无 faces 行 → 现行为 sharp cover 中心裁剪（窗口 ≈ [770,1230]）：
  *   中心绿 marker [900,1100] 可见、左右边缘 marker（[0,150] / [1850,2000]）不可见。
  *
  * db mock：真实 drizzle over 临时 sqlite（setupTestSchema 含 faces 表）——实现经 ../db
@@ -194,9 +195,9 @@ let preprocessHeroFrame: (
   opts?: { faceBbox?: { x: number; y: number; w: number; h: number } | null },
 ) => Promise<string>;
 
-/** 画布（契约边界值【v2】：竖版 704×1216） */
-const CANVAS_W = 704;
-const CANVAS_H = 1216;
+/** 画布（边界值：竖版 736×1600，2026-09-25 画布改版） */
+const CANVAS_W = 736;
+const CANVAS_H = 1600;
 /** 脸高占比下限（契约逐字：人脸占比 ≥1/4 → 脸高 ≥ 画布高 1/4） */
 const FACE_HEIGHT_MIN = Math.ceil(CANVAS_H / 4);
 
@@ -281,7 +282,7 @@ afterAll(() => {
 // ============================================================================
 
 describe("【v2】preprocessHeroFrame 人脸构图裁剪：有 faces bbox → crop 窗口含 bbox 中心 ∧ 脸高 ≥ 画布 1/4", () => {
-  it("bbox [1300,300,400,400] → 输出 704×1216 png；红蓝两半同时可见（⇔ bbox 中心在裁剪窗内）；脸高 ≥ 304px", async () => {
+  it("bbox [1300,300,400,400] → 输出 736×1600 png；红蓝两半同时可见（⇔ bbox 中心在裁剪窗内）；脸高 ≥ 400px", async () => {
     const photoPath = path.join(tmpRoot, "hero-bbox.png");
     // 【v2.1】契约声明接口：bbox 经 opts 传入（对象形态 {x,y,w,h}，与 faces 表列语义同源；
     // db→getLargestFaceBbox→opts 接线由 job 验收覆盖）
@@ -297,13 +298,13 @@ describe("【v2】preprocessHeroFrame 人脸构图裁剪：有 faces bbox → cr
     expect(head.toString("latin1", 1, 4)).toBe("PNG");
     expect(out).not.toBe(photoPath);
 
-    // 契约：裁剪+resize 到目标画布比例（704×1216）
+    // 契约：裁剪+resize 到目标画布比例（736×1600）
     const scan = await scanPixels(out);
     expect(scan.width, `输出宽度必须 ${CANVAS_W}`).toBe(CANVAS_W);
     expect(scan.height, `输出高度必须 ${CANVAS_H}`).toBe(CANVAS_H);
 
     // 像素级蕴含（见文件头数学注释）：红半 [1300,1500) 与蓝半 [1500,1700) 同时可见
-    // ⇔ 裁剪窗左缘 L ∈ (921,1500) ⇔ bbox 中心 x=1500 ∈ [L, L+579]
+    // ⇔ 裁剪窗左缘 L ∈ (1040,1500] ⇔ bbox 中心 x=1500 ∈ [L, L+460]
     expect(
       scan.redCount,
       "红半 marker 不可见——bbox 左半未进裁剪窗（人脸构图未生效或偏移越界）",
@@ -323,7 +324,7 @@ describe("【v2】preprocessHeroFrame 人脸构图裁剪：有 faces bbox → cr
 });
 
 describe("【v2】preprocessHeroFrame 回退中心：无 faces bbox → 现行为不变（中心 cover 裁剪）", () => {
-  it("无 faces 行 → 中心绿 marker 可见、左右边缘 marker 均不可见 ∧ 输出 704×1216 png", async () => {
+  it("无 faces 行 → 中心绿 marker 可见、左右边缘 marker 均不可见 ∧ 输出 736×1600 png", async () => {
     const photoPath = path.join(tmpRoot, "hero-center.png");
     const out = await preprocessHeroFrame(photoPath, CANVAS_W, CANVAS_H);
 
@@ -337,7 +338,7 @@ describe("【v2】preprocessHeroFrame 回退中心：无 faces bbox → 现行�
     expect(scan.width).toBe(CANVAS_W);
     expect(scan.height).toBe(CANVAS_H);
 
-    // 2000×1000 cover 到 704×1216 的中心窗 ≈ 源 x ∈ [710,1290]：
+    // 2000×1000 cover 到 736×1600 的中心窗 ≈ 源 x ∈ [770,1230]：
     // 中心绿 [900,1100) 必含；左缘红 [0,150) / 右缘蓝 [1850,2000) 必不含
     expect(
       scan.greenCount,

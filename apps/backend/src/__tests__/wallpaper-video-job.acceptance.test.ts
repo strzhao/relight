@@ -757,12 +757,12 @@ dJob(
         );
       }
 
-      // 双画布预裁剪（边界值【v2】逐字）：两腿 preprocess 画布 == {1280×704, 704×1216}
+      // 双画布预裁剪（边界值逐字）：两腿 preprocess 画布 == {1280×704, 736×1600}
       const canvasSet = new Set(
         mockPreprocessHeroFrame.mock.calls.map((c) => `${c?.[1]}x${c?.[2]}`),
       );
-      expect(canvasSet, "preprocess 必须分别按横版 1280×704 与竖版 704×1216 画布裁剪").toEqual(
-        new Set(["1280x704", "704x1216"]),
+      expect(canvasSet, "preprocess 必须分别按横版 1280×704 与竖版 736×1600 画布裁剪").toEqual(
+        new Set(["1280x704", "736x1600"]),
       );
 
       // 顺序（§总体架构 v2 步骤 1-5 逐字，每腿内 preprocess → spawn → buildLoop → overlay

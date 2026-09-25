@@ -54,6 +54,16 @@ export const config = {
     model: process.env.AI_MODEL ?? "qwen3.6-35b",
     visionModel: process.env.AI_VISION_MODEL ?? "qwen3.6-35b",
     promptVersion: process.env.AI_PROMPT_VERSION || "v2",
+    /**
+     * 运动描述（motionPrompt）专用外部文本模型（2026-09-25 拆分：narrate 不再产 motionPrompt，
+     * 改由 hero-only 两步链路 facts(本地 qwen vision) → motion(外部 deepseek 纯文本) 生成，
+     * 见 lib/motion/generate.ts）。默认指向现有 deepseek 接入点；凭据只经 env 注入
+     * （apps/backend/.env，gitignore），绝不写入仓库。
+     */
+    motionBaseUrl: process.env.AI_MOTION_BASE_URL ?? "https://api.deepseek.com/v1",
+    /** 凭据：默认空串——为空时 motion 阶段直接失败旁路（不写库、console.warn 留痕） */
+    motionApiKey: process.env.AI_MOTION_API_KEY ?? "",
+    motionModel: process.env.AI_MOTION_MODEL ?? "deepseek-chat",
   },
   video: {
     enabled: process.env.VIDEO_ENABLED !== "false",

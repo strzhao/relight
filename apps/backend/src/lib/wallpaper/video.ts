@@ -2,7 +2,7 @@
  * 壁纸视频生成模块（动态视频壁纸，state.md ## 后端设计 3 / ## 契约规约 计算/spawn 契约；v2 增量任务 12-15）
  *
  *   preprocessHeroFrame(photoPath, width, height, opts) → tmp png 绝对路径
- *     sharp cover 裁剪+resize 到目标画布比例（横 1280×704 / 竖 704×1216，32 倍数约束）。
+ *     sharp cover 裁剪+resize 到目标画布比例（横 1280×704 / 竖 736×1600，32 倍数约束）。
  *     v2 人脸构图裁剪：opts.faceBbox（faces 表最大 bbox）→「脸占画布高度 ≥1/4」推 crop
  *     窗口（中心对齐人脸）；缺失/退化 → 回退现状中心构图。
  *     honeydo first-frame 引擎直接 LANCZOS 拉伸到画布——调用方必须先按画布比例 cover-crop，
@@ -42,13 +42,15 @@ import { convertHeicToJpeg, isHeicBuffer } from "../heic";
 import { buildCaptureDateline } from "./capture";
 
 // ============================================================================
-// 画布与档位常量（honeydo 32 倍数约束：720p=1280×704、portrait=704×1216）
+// 画布与档位常量（honeydo 32 倍数约束：720p=1280×704；竖版经 --width/--height
+// 逐轴覆盖 portrait 档 → 736×1600，比例 0.46 与静态竖版壁纸 1290×2796 对齐，
+// 画廊手机端 cover 裁切从 ~20% 降到 <0.5%）
 // ============================================================================
 
-/** 横版生成画布（honeydo res 档 720p） */
+/** 横版生成画布（honeydo res 档 720p；--width/--height 显式传同值） */
 export const WALLPAPER_VIDEO_LANDSCAPE_CANVAS = { width: 1280, height: 704 } as const;
-/** 竖版生成画布（honeydo res 档 portrait） */
-export const WALLPAPER_VIDEO_PORTRAIT_CANVAS = { width: 704, height: 1216 } as const;
+/** 竖版生成画布（portrait 档 + --width/--height 逐轴覆盖；736=23×32、1600=50×32） */
+export const WALLPAPER_VIDEO_PORTRAIT_CANVAS = { width: 736, height: 1600 } as const;
 /** honeydo res 档位：横版 */
 export const WALLPAPER_VIDEO_LANDSCAPE_RES = "720p";
 /** honeydo res 档位：竖版 */
@@ -204,6 +206,16 @@ export interface HoneydoVideoOptions {
   seconds: number;
   /** 分辨率档（720p / portrait） */
   res: string;
+  /**
+   * 画布宽（px，32 倍数）——传入时向 CLI 追加 `--width`，逐轴覆盖 res 档位画布；
+   * 不传时行为与未支持该参数前逐字一致（C2）。
+   *
+   * 横版显式传值与 720p 档位等价，但日后若调 -r 720p 档位，横版尺寸会静默不变——
+   * 这是刻意的（画布改动只针对竖版：竖版从 portrait 档原值覆盖到 736×1600）。
+   */
+  width?: number;
+  /** 画布高（px，32 倍数）——语义同 width，逐轴覆盖 res 档位画布 */
+  height?: number;
   /** 超时 ms（默认 config.wallpaperVideoSpawnTimeoutMs，NaN/≤0 → 5400000） */
   timeoutMs?: number;
 }
@@ -252,6 +264,9 @@ export async function spawnHoneydoVideo(opts: HoneydoVideoOptions): Promise<Hone
     "--seconds",
     String(opts.seconds),
   ];
+  // 画布逐轴覆盖（C2：仅在传入时追加，不传时 argv 与现状逐字一致）
+  if (opts.width !== undefined) args.push("--width", String(opts.width));
+  if (opts.height !== undefined) args.push("--height", String(opts.height));
 
   let stdout = "";
   let stderr = "";

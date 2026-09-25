@@ -173,3 +173,11 @@
 - **Scenario**：测试链路间接调用带上传/推送副作用的模块（syncDayToGallery 等），各测试文件都没直接引用 upload/push——没人觉得需要 mock
 - **Lesson**：dotenv 在模块导入时才灌 .env 且**不覆盖已存在的 process.env 键**——所以 setupFiles 里「delete env 键」无效，必须**预置空串占位**；但 `""` 对 `??` 不触发兜底，bucket/region 类「有硬编码默认」的键不能占位（否则 URL 拼成 `https://.cos..`），只占位凭据类（SECRET_ID/KEY/APPID）。只读冒烟例外（需真实凭据拼 URL）用**独立副作用模块**在 config 求值前 `dotenv.config({override:true})`——ESM import 顺序敏感，副作用模块必须排在 config import 之前
 - **Evidence**：dng-narrate 链路真实上传 COS（当日壁纸被 fixture 覆盖成 652B）+ 真推 VPS manifest；vitest.setup.ts 守卫后 3 连跑全绿 + COS LastModified/VPS generatedAt 双不变（核对锚点：2026-09-12 apps/backend/vitest.setup.ts）
+
+## 凭据沙箱对 QA 谓词求值的影响 + 谓词 artifact 规范路径
+
+[2026-09-25] <!-- tags: vitest, 凭据沙箱, 谓词求值, artifact, 自动驾驶 QA -->
+
+- **Scenario**：QA 需真跑壁纸视频重跑验证发布链（COS 上传/manifest 推送），但套件内 spawn 的进程继承沙箱空串凭据 → 上传静默返回空串、回执不写——**不是缺陷，是 09-12 守卫在正确工作**；发布面谓词必须沙箱外驱动（干净 env 手动 rerun），或延后到自然日发布后求值
+- **Lesson**：①沙箱内「产物落盘 + exit 0」可真验，「上传/推送面」不可验——设计验证方案时就要把两面拆开，别让 QA 套件白烧 GPU；②stop-hook §5.7 校验谓词 artifact 用**规范路径** `/tmp/autopilot-artifacts/<pred-id>.out`（如 `3.P1.out`）——红队 writeArtifact 的 `场景3.P1.out` 前缀名不被认，编排器求值后须按裸名落位；③真跑类红队测试的超时要按「单腿实测 × 腿数 + Remotion 冷启动」估算，别用想当然的整数上限（2h 上限 vs 双腿 111.8min 实测险胜）
+- **Evidence**：20260925 任务 QA——沙箱内 rerun 上传空串/回执保留旧值无污染；28 谓词 artifact 裸名落位后 §5.7 过（核对锚点：2026-09-25 apps/backend/vitest.setup.ts）

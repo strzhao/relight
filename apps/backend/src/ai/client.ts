@@ -101,6 +101,50 @@ export class RelightAIClient {
     const msg = response.choices[0]?.message;
     return msg?.content || (msg as unknown as Record<string, string>).reasoning_content || "";
   }
+
+  /**
+   * 文本对话——per-call 覆盖 model/baseUrl/apiKey（2026-09-25 新增：运动描述专用外部
+   * 文本模型通路，见 lib/motion/generate.ts）。
+   *
+   * thinking 参数按 provider 条件化（勿照搬 chat()）：`chat_template_kwargs:
+   * {enable_thinking:false}` 是 qwen/llama.cpp 方言，deepseek 等云端 OpenAI 兼容端点
+   * 不认（2026-09-25 冒烟：api.deepseek.com/v1 的 deepseek-chat 直出纯文本，无需该参数）。
+   * 规则：仅当目标 baseUrl 指向本地服务（127.0.0.1/localhost/[::1]）时才注入该方言参数。
+   */
+  async chatWithModel(
+    prompt: string,
+    systemPrompt: string | undefined,
+    options: { model: string; baseUrl: string; apiKey: string; maxTokens?: number },
+  ): Promise<string> {
+    const target = new OpenAI({
+      baseURL: options.baseUrl,
+      apiKey: options.apiKey,
+      timeout: 120000,
+      maxRetries: 0,
+    });
+
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: prompt });
+
+    const isLocalDialect = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])([:/]|$)/.test(
+      options.baseUrl,
+    );
+    const response = await target.chat.completions.create({
+      model: options.model,
+      messages,
+      max_tokens: options.maxTokens ?? 4096,
+      // qwen3 chat template extension（仅本地 qwen 方言端点需要）
+      ...(isLocalDialect
+        ? { chat_template_kwargs: { enable_thinking: false } as Record<string, unknown> }
+        : {}),
+    });
+
+    const msg = response.choices[0]?.message;
+    return msg?.content || "";
+  }
 }
 
 export const aiClient = new RelightAIClient();

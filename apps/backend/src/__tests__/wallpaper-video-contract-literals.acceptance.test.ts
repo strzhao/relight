@@ -254,7 +254,8 @@ describe("设计文档 SSOT 字面量冻结（场景谓词 assert 字段取值�
     );
     expect(impl).toContain("hvc1");
     expect(impl).toContain("1920×1080");
-    expect(impl).toContain("704×1216");
+    // [2026-09-25] 竖版画布改版：portrait 档经 --width/--height 逐轴覆盖 → 736×1600
+    expect(impl).toContain("736×1600");
     const queues = readText(path.join(BACKEND_SRC, "jobs/queues.ts"), "jobs/queues.ts");
     expect(queues).toContain("attempts: 1");
     // 文档侧声明（capability-gate：runtime/ 不入库，CI 无 state.md）
@@ -267,7 +268,8 @@ describe("设计文档 SSOT 字面量冻结（场景谓词 assert 字段取值�
     const doc = readText(DESIGN_DOC, "state.md（设计文档）");
     expect(doc).toContain("hvc1");
     expect(doc).toContain("1920×1080");
-    expect(doc).toContain("704×1216");
+    // [2026-09-25] 竖版画布改版 704×1216 → 736×1600（被读的 state.md 三处字面量同步更新）
+    expect(doc).toContain("736×1600");
     expect(doc).toContain(CONTENT_TYPE_LANDSCAPE);
     expect(doc).toContain(CONTENT_TYPE_PORTRAIT);
     expect(doc).toContain("attempts: 1");

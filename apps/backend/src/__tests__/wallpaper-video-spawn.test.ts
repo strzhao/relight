@@ -96,6 +96,38 @@ echo "{\\"out\\":\\"$out\\",\\"duration\\":15,\\"res\\":\\"720p\\"}"
     expect(args[args.indexOf("--first-frame") + 1]).toBe(baseOpts.firstFrame);
     expect(args).toContain("--last-frame");
     expect(args[args.indexOf("--last-frame") + 1]).toBe(baseOpts.lastFrame);
+    // 不传 width/height → argv 不含 --width/--height（C2：不传时行为与现状逐字一致）
+    expect(args).not.toContain("--width");
+    expect(args).not.toContain("--height");
+  });
+
+  it("传 width/height → argv 追加 --width/--height（画布逐轴覆盖 res 档位，C2）", async () => {
+    const script = makeFakeHoneydo(`
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+touch "$out"
+echo "{\\"out\\":\\"$out\\",\\"duration\\":15,\\"res\\":\\"portrait\\"}"
+`);
+    await spawnHoneydoVideo({
+      ...baseOpts,
+      cliPath: script,
+      res: "portrait",
+      width: 736,
+      height: 1600,
+    });
+
+    const args = readCapture(capturePath);
+    expect(args).toContain("--width");
+    expect(args[args.indexOf("--width") + 1]).toBe("736");
+    expect(args).toContain("--height");
+    expect(args[args.indexOf("--height") + 1]).toBe("1600");
+    // -r 仍照旧传（保证 stdout 回执字段语义不乱，C3）
+    expect(args).toContain("-r");
+    expect(args[args.indexOf("-r") + 1]).toBe("portrait");
   });
 
   it("非零退出 → HoneydoSpawnError，message 含 stdout tail", async () => {
