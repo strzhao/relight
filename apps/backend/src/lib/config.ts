@@ -40,7 +40,13 @@ export const config = {
   webPort: Number.parseInt(process.env.WEB_PORT ?? "3601", 10),
   databasePath: process.env.DATABASE_PATH ?? "./data/relight.db",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
-  storageRoot: process.env.STORAGE_ROOT ?? "./photos",
+  /**
+   * 必须 resolve 成绝对路径：这个值会原样经 env（OUTPUT_PATH / META_PATH / COVER_PATH）
+   * 传给 `claude -p` 生成视频，而那个进程的 cwd 是 videoWorkspacePath（仓库内另一个目录）。
+   * 相对路径会让 skill 把产物写进 <videoWorkspacePath>/photos/.video-cache/，后端却在
+   * <storageRoot>/.video-cache/ 找 → 渲染成功却报「mp4 产物缺失」（japan-2018 连挂 5 天的根因）。
+   */
+  storageRoot: path.resolve(process.env.STORAGE_ROOT ?? "./photos"),
   bullmqPrefix: process.env.BULLMQ_PREFIX ?? "bull",
   ai: {
     baseUrl: process.env.AI_BASE_URL ?? "http://127.0.0.1:8001/v1",
