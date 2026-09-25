@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 每日精选壁纸企业微信群推送（每天北京时间 10:00 自动推送横版 + 手机竖版 + mac 控制中心配置 webhook 与启用开关 + 测试发送）。
 
-每日视频自动化（每天北京时间 10:00 cron 跑 video-discovery 做主题发现——旅行 / 人物成长线；命中主题才 spawn `claude -p` 调 memory-video skill 生成 1080p vlog，落盘 + 写 videos/videoUsages 表 + 企业微信推送封面与详情链接；无主题静默跳过，质量优先、非每日必出；主题发现对 trip/person 双分支做对称去重（completed 永久 + failed 7 天冷却，settings `video.skipPersonIds` 可跳过脏聚类）；claude -p 超时默认 45 分钟（env `VIDEO_SPAWN_TIMEOUT_MS` 覆盖）。
+每日视频自动化（每天北京时间 10:00 cron 跑 video-discovery 做主题发现——旅行 / 人物成长线；命中主题才 spawn `claude -p` 调 memory-video skill 生成 1080p vlog，落盘 + 写 videos/videoUsages 表 + 企业微信推送封面与详情链接；无主题静默跳过，质量优先、非每日必出；主题发现对 trip/person 双分支做对称去重（completed 永久 + failed 7 天冷却，settings `video.skipPersonIds` 可跳过脏聚类，脏簇权威记录就在这个 key 里）；**person 分支另有素材量门槛**（`PERSON_MIN_PHOTOS=12`/`YEARS=3`/`SCENES=4`）挡微碎片簇——聚类持续产出的连拍/单日聚会碎片照片新、按 freshness 永远排前面，不加门槛会把每天唯一的名额反复吃掉（2026-09-06~25 连续 20 天零出片即此因）；门槛只筛「够不够拍一条线」这种客观事实，「像不像一个人」由 skill 视觉核验判；claude -p 超时默认 45 分钟（env `VIDEO_SPAWN_TIMEOUT_MS` 覆盖）。**skill 本体与它的核验脚本**：`.claude/skills/memory-video/`（`scripts/person-contact-sheet.cjs` 一条命令出人物簇核验素材包——contact 整图按年摊开 / faces 特写 / vs-named 与已知人物并排，约 3 秒；**判断靠看图不靠 cos 阈值**，理由与三种结局长在 `references/person-growth.md`）。
 
 ## 技术栈
 
@@ -174,6 +174,8 @@ packages/shared/ # 共享类型、Zod Schema、API 路由常量
 - `backfill-thumbnails.ts` — 补救 `thumbnail_path IS NULL` 的历史照片缩略图，复用 generateThumbnail，支持 `--dry-run`/`--limit`/`--media-type`（script: `backfill:thumbnails`）
 - `backfill-daily-picks.ts` — 补跑历史缺失的每日精选（检测 dailyPicks 表缺失日期，逐日回填；`--dry-run` 演练 / `--yes` 执行 / `--enqueue` 入队；默认 `--from=最早照片日`、`--to=今日`；复用 worker pickDate 覆盖，进程内顺序或 BullMQ 入队）（script: `backfill:daily-picks`）
 - `backfill-gallery.ts` — 历史回填画廊同步（遍历已有 dailyPicks/videos，复用 `uploadDayAssets`/`uploadVideoAssets` 上传 COS + 最后统一刷一次 manifest 推 VPS；`--dry-run` 演练 / `--yes` 执行 / `--limit` 限量；资源上传失败才 exit 2，manifest 推送失败仅 warn 不致命）（script: `backfill:gallery`）
+- `dry-run-video-discovery.ts` — 演练：打印 video-discovery 的候选主题排名（`discoverVideoCandidates()` 新鲜度降序，不 spawn）。**「为什么今天选中这个视频主题 / 为什么连续不出片」先跑它**——daily-video 每天只取第 1 名，`--top=N` / `--all` 看全量候选可判断名额被谁占住（script: `tsx src/cli/dry-run-video-discovery.ts`）
+- `run-daily-video-once.ts` — 手动跑**一个**视频主题，走生产同一条 `runVideoGeneration` 链路（不写 videos/video_usages 表，产物落 `<STORAGE_ROOT>/.video-cache/`）。用于验证 memory-video skill 改动、复盘某主题为何不出片、补跑单个主题：`--person=<personId> [--to-year=YYYY] [--title=...]`（script: `tsx src/cli/run-daily-video-once.ts`）
 - `setup-cos-cors.ts` — 一次性配置 COS 桶 CORS 放行画廊站跨域 fetch（幂等 getBucketCors → mergeCorsRules 合并只追加不删除、单/复数键双兼容 + 重复规则去重自愈 → putBucketCors；默认 dry-run / `--yes` 执行；退出码 0 成功含幂等 skip、1 凭据缺失、2 API 失败）（script: `cos:cors`）
 
 ### 前端架构 (apps/web)
