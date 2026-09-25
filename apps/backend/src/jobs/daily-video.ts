@@ -170,7 +170,7 @@ export async function dailyVideoWorker(job: Job): Promise<void> {
   job.log(`[daily-video] done pushed=${pushed}`);
 }
 
-interface CompletedVideoInput {
+export interface CompletedVideoInput {
   themeKind: "trip" | "person";
   themeKey: string;
   title: string;
@@ -189,7 +189,10 @@ interface CompletedVideoInput {
  * BullMQ 重试整段重渲染，日级死循环）。setWhere status='failed' 保留
  * 「已有 completed 行不覆盖」语义（与 writeFailedVideo 对称）。
  */
-async function writeCompletedVideo(input: CompletedVideoInput, now: string): Promise<string> {
+export async function writeCompletedVideo(
+  input: CompletedVideoInput,
+  now: string,
+): Promise<string> {
   const videoId = crypto.randomUUID();
   const db2 = (await import("../db")).db;
 
@@ -321,7 +324,11 @@ async function probeDurationSafe(videoPath: string, fallback: number): Promise<n
  * ffmpeg -ss 0 -i mp4 -frames:v 1 -q:v 3 cover.jpg
  * 失败仅 log（推送时封面缺失会自动降级为只发文字消息）。
  */
-async function ensureCoverFromVideo(videoPath: string, coverPath: string, job: Job): Promise<void> {
+export async function ensureCoverFromVideo(
+  videoPath: string,
+  coverPath: string,
+  job: Pick<Job, "log">,
+): Promise<void> {
   try {
     const { access } = await import("node:fs/promises");
     try {
