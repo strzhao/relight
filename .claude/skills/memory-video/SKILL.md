@@ -1,6 +1,6 @@
 ---
 name: memory-video
-description: 把一组照片生成「全屏沉浸 + 章节暗线叙事 + 霞鹜文楷字幕」的回忆/旅行/人物成长线短片（mp4，原图 1080p）。当用户要做照片视频、旅行短片、vlog、回忆视频、给一组照片配叙事出片、任意命名人物的成长线/人生弧线（relight persons 表里的人，如赵合一/翁雪珂）、或提到 relight 视频生成/每日视频/旅行短片/人物成长线时，务必使用本 skill。覆盖选片（去连拍+场景分桶+时间序 / 人物 cos≥0.5 过滤）、章节暗线叙事（LLM 提案章节+弧线字幕）、Remotion 渲染、html 预览全流程；可选音乐节拍匹配（缩放脉冲跟拍，苹果 Memories 效果）。
+description: 把一组照片生成「全屏沉浸 + 章节暗线叙事 + 霞鹜文楷字幕」的回忆/旅行/人物成长线短片（mp4，原图 1080p）。当用户要做照片视频、旅行短片、vlog、回忆视频、给一组照片配叙事出片、任意命名人物的成长线/人生弧线（relight persons 表里的人，如赵合一/翁雪珂）、或提到 relight 视频生成/每日视频/旅行短片/人物成长线时，务必使用本 skill。覆盖人物簇视觉核验（摊开看照片判断是不是一个人）、选片（去连拍+场景分桶+时间序）、章节暗线叙事（LLM 提案章节+弧线字幕）、Remotion 渲染、html 预览全流程；可选音乐节拍匹配（缩放脉冲跟拍，苹果 Memories 效果）。
 ---
 
 # 记忆视频生成（Memory Video）
@@ -27,7 +27,7 @@ description: 把一组照片生成「全屏沉浸 + 章节暗线叙事 + 霞鹜�
 ### 1. 选片
 输入主题 → 查 relight DB → **去连拍**（每 burst 留代表）→ **场景分桶**（保证覆盖旅行全貌，不只美学 top）→ **时间序**排列 → 选 ~20-24 张。
 - 旅行主题：GPS 聚类单次旅行（同区域 + 间隔≤5天），排除日常圈
-- **人物主题（成长线）**：**人脸 cos≥0.5 过滤**（face embedding vs person centroid 余弦相似度）+ 去连拍 + 按年（孩子）或人生阶段（成人）选片。叙事骨架由 LLM 提案（孩子=年龄里程碑，成人=人生阶段）。详见 `references/person-growth.md`
+- **人物主题（成长线）**：**先看一眼再出片**——跑 `scripts/person-contact-sheet.cjs <personId>` 把簇摊开成图，看过之后再决定出不出、怎么选。cos 只在选片时当排序器用，不当过滤器。叙事骨架由 LLM 提案（孩子=年龄里程碑，成人=人生阶段）。详见 `references/person-growth.md`
 - 关键：别只按美学选（会漏场景），要**场景多样性 + 美学**双维度
 - **素材必须用原图（硬约束，不可降级）**：选出的每张，从 `photos.file_path`（**绝对路径**，如 `/Users/stringzhao/nas-photos/.../IMG_xxxx.HEIC`）取原图。原图多为 HEIC，Remotion/浏览器渲染不了，须转 JPEG：`sips -s format jpeg -Z 1920 "<原图>" --out "public/themes/<topic>/NN.jpg"`（macOS 自带 sips，无依赖；-Z 1920 保证 1080p 横屏短边≥1080 清晰）。**原图缺失（`existsSync(file_path)===false`）立刻 hard fail**——打印缺失路径、停止整个流程，**绝不降级用 800px 缩略图顶替**（缩略图 1080p 必糊，且降级会掩盖素材缺失问题）。DB 有 `thumbnail_path` 但原图不可用的照片，淘汰并报错。
 
@@ -80,7 +80,9 @@ Remotion 项目结构见 `references/remotion-setup.md`。
 - **原图是 HEIC 且为绝对路径**：`photos.file_path` 是**绝对路径**（如 `/Users/stringzhao/nas-photos/...`），不是相对 STORAGE_ROOT。Remotion 渲染不了 HEIC，须 `sips -s format jpeg -Z 1920` 转 JPEG（实测 893KB HEIC→675KB JPEG）。NAS 软链（nas-photos→/Volumes/...）会漂移，原图全读不到时须先修软链。
 - **原图缺失 hard fail，绝不降级缩略图**：800px 缩略图在 1080p 下必糊，且用缩略图顶替会掩盖素材缺失。缺原图就停，报清楚哪张缺。
 - **缩略图文件可能缺失**：db 有记录但 jpg 不在，召回须 `existsSync` 过滤（此条仅 dry-run 选片占位；正式渲染用原图，见上）
-- **非交互落盘必须用 env 绝对路径**：后端 spawn 时把产物绝对路径同时通过环境变量传出（`OUTPUT_PATH` / `META_PATH` / `COVER_PATH`，均为绝对路径）+ prompt 文本。finalize/落盘脚本**必须直接读 `process.env.OUTPUT_PATH` 等**，禁止自己硬编码或从相对路径推断目录。**血泪教训**：曾有一次 claude 生成 `finalize-japan.cjs` 把 `DST_DIR` 硬编码成 `/Users/.../relight/photos/.video-cache`（仓库根 photos），而 daily-video job 检查的是 `apps/backend/photos/.video-cache`（STORAGE_ROOT）——mp4 渲染成功却被拷错目录，job 报「mp4 产物缺失」，叠加 discovery 的 failed 不去重，japan-2018 连挂 5 天、锁死整个出片名额。根因就是没用 env 给定的绝对路径。
+- **非交互落盘必须用 env 绝对路径**：后端 spawn 时把产物绝对路径通过环境变量传出（`OUTPUT_PATH` / `META_PATH` / `COVER_PATH`）+ prompt 文本。finalize/落盘脚本**必须直接读 `process.env.OUTPUT_PATH` 等**，禁止自己硬编码或从相对路径推断目录。**血泪教训**：曾有一次 claude 生成 `finalize-japan.cjs` 把 `DST_DIR` 硬编码成 `/Users/.../relight/photos/.video-cache`（仓库根 photos），而 daily-video job 检查的是 `apps/backend/photos/.video-cache`（STORAGE_ROOT）——mp4 渲染成功却被拷错目录，job 报「mp4 产物缺失」，叠加 discovery 的 failed 不去重，japan-2018 连挂 5 天、锁死整个出片名额。根因就是没用 env 给定的绝对路径。（2026-09-25 已从源头修掉：`config.storageRoot` 改为 `path.resolve(...)`，env 传出的就是绝对路径——但脚本仍要直接用 env，不要自己拼。）
+- **进 SVG 的文本必须先消毒**：库里存在带控制字符的脏数据（`persons.fff1a89c` 的 name 是 `"\u0010赵狄苏"`，终端显示成 `^P`），而 librsvg 遇到 XML 非法字符直接抛 `Input buffer has corrupt header: glib: XML parse error ... PCDATA invalid Char value 16`——报错信息完全指不到元凶，能查很久。任何拼进 SVG 字符串的名字/标题都要走一遍消毒（范例见 `scripts/person-contact-sheet.cjs` 的 `xmlSafe`）。
+- **thumbnail_path 的基准是后端进程 cwd**：DB 里存的是 `photos/thumbnails/<uuid>.jpg`，基准是 `apps/backend/`，**不是** STORAGE_ROOT —— 拼成 `<storageRoot>/photos/thumbnails/...` 会静默全落空。
 - **地名别靠手写 GPS 区间**：东北/日本、贵州/重庆边界会判错。优先用 AI narrative 的视觉识别（认出洪崖洞=重庆），GPS 只辅助
 - **sharp 必须加 `.rotate()`**：iPhone 照片有 EXIF orientation，不 rotate 会把竖图当横图（relight detect-faces.ts 也用 .rotate()）。HEIC 先 sips 转，再 sharp.rotate()
 - **渲染必须 `gl=angle`**：Remotion 默认 gl=null（swiftshader 软件渲染）在长期未重启 / WindowServer 占 GPU 的机器**崩溃卡死**（重装 chrome 也救不回）。`chromiumOptions: { gl: "angle" }` 走 Metal GPU，1080p ~36s，**不用重启电脑**
@@ -94,16 +96,18 @@ Remotion 项目结构见 `references/remotion-setup.md`。
 
 ## 人物成长线（任意命名人物）
 
-任意 relight 命名人物（persons 表）的成长/人生弧线短片。**叙事骨架由 LLM 按照片内容提案**（引擎不预设），两种已验证范式：
+任意 relight 命名人物（persons 表）的成长/人生弧线短片。**叙事骨架由 LLM 按照片内容提案**（引擎不预设），已验证范式：
 - **孩子 → 年龄里程碑**：稚嫩→好奇→欢腾→远行（合一 2022-2026，首尾「睁眼的小→远方的远」）
 - **成人 → 人生阶段**：少女→相恋→新婚→孕育→为母（翁雪珂 2013-2026，首尾「独自远行→牵手看世界」）
 
-**三个关键点**：
-1. **cos≥0.5 过滤是地基**——用户指认的误识别全在 cos<0.4。用 `analyze-faces.cjs` 先查 cos 分布是否健康。
-2. **婴儿期 gap（孩子主题）**：0-3 岁 cos 衰减（centroid 被近期照片主导），cos≥0.5 池可能真空。补救用 qwen vision 视觉二次确认，或跳过从 3 岁起。成人无此问题。
-3. **跨视频去重（亲子照陷阱）**：一张亲子照母亲+孩子都识别，会同时进两人候选池。正式版建 `video_usages` 表排除已用照片；dry-run 手动避开。
+**判断靠看，不靠算**。这一簇该不该出片是一个看照片的判断——脚本给的 cos、pairwise、相似度全都只是**注意力索引**（告诉你先看哪里），不能替你下结论。这个库里母女/姐妹相似脸落在 0.5-0.7 是常态，幼年与成年脸天然不像，遮挡会让 embedding 饱和到 0.8+（石像/海报/面雕都能自聚成簇）——**任何单一阈值都必然两头出错**。
 
-选片脚本 `select-person-growth.cjs [person_id] [name]`（按年美学/场景多样）+ `convert-{name}.cjs`（原图转 1080p）。完整指引见 `references/person-growth.md`。
+跑 `scripts/person-contact-sheet.cjs <personId>` 拿到核验素材包（contact 整图摊开 / faces 特写 / vs-named 与已知人物并排 + 事实摘要），看完图再决定。三种结局：**出片** / **这是已出片人物的碎片** / **这不是一个人**（后两种登记 `video.skipPersonIds`）。完整判据与选片见 `references/person-growth.md`。
+
+- **婴儿期 gap（孩子主题）**：0-3 岁 cos 衰减（centroid 被近期照片主导）。靠看画面语境确认，不靠 cos 证明；或跳过从 3 岁起。成人无此问题。
+- **跨视频去重（亲子照陷阱）**：一张亲子照母亲+孩子都识别，会同时进两人候选池。建 `video_usages` 表排除已用照片。
+
+选片脚本 `select-person-growth.cjs [person_id] [name]`（按年美学/场景多样）+ `convert-{name}.cjs`（原图转 1080p）。
 
 ## 数据源
 
@@ -111,7 +115,7 @@ Remotion 项目结构见 `references/remotion-setup.md`。
 
 ## 产物位置参考
 
-当前完整实现（重庆样例）在 `relight/.autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun/`：Immersive 模板 + select-cq.cjs（旅行选片）+ select-person-growth.cjs（人物成长线选片，任意 person_id）+ recall-trips.cjs（旅行聚类）+ analyze-faces.cjs（人脸 cos 分布）+ convert-{name}.cjs（原图转 1080p）+ 字体 + 配乐。新主题换数据复用这套。
+脚本分两处，别混：**本 skill 自带的**在 `.claude/skills/memory-video/scripts/`（如核验素材包 `person-contact-sheet.cjs`，随 skill 版本走）；**渲染工具链**在 `relight/.autopilot/runtime/requirements/20260725-每日视频生成/video-dryrun/`（runtime 产物）：Immersive 模板 + select-cq.cjs（旅行选片）+ select-person-growth.cjs（人物成长线选片，任意 person_id）+ recall-trips.cjs（旅行聚类）+ convert-{name}.cjs（原图转 1080p）+ 字体 + 配乐 + render-immersive.mjs。新主题换数据复用这套。
 
 **已出片样例**（均在 `out/`）：CQ-Chongqing-1080p.mp4（旅行·24张）、CQ-Heji.mp4（合一年龄里程碑·17张）、CQ-Weng.mp4（翁雪珂人生阶段·16张）、CQ-Weng-Beat7.mp4（翁雪珂+缩放脉冲跟拍·节拍匹配验证）、CQ-Weng-Mood.mp4（翁雪珂+章节mood效果池·三层嵌套验证）、FX-MoodMix.mp4（mood池纯展示·3静3暖3动3烈）。
 
@@ -128,11 +132,22 @@ Remotion 项目结构见 `references/remotion-setup.md`。
 | 步骤 | 交互模式 | 非交互自动化模式 |
 |------|---------|----------------|
 | html 预览 | 生成 preview.html 供用户确认 | **跳过**（不生成预览，不等待确认） |
+| 主题核验 | 用户能一眼看出主题不对 | **person 主题必须先跑核验素材包并看图**（见下「步骤 0」）——后端每天只 spawn 一个主题，判断错误会白白吃掉当天名额 |
 | 选片 | 用户可能手动调整 photoId 列表 | **trip：从 prompt 素材池自主选最终片数（≥20，按旅行丰富度做完整 vlog，不限上限，别只取 top 也别全硬塞）**；person：personId+截止年走成长线选片 |
 | 叙事/mood | 用户可微调章节 | **LLM 正常提案章节+弧线字幕**（无人工介入，一次出） |
 | 渲染目标 | 可选 dry-run（720p 验证） | **直接 1080p**（`gl=angle`，`chromiumOptions: { gl: "angle" }`） |
 | 产物落盘 | 交互式指定 | **mp4 + 元数据 json 写到后端给定绝对路径**（**直接用 `process.env.OUTPUT_PATH` / `META_PATH` / `COVER_PATH`**，禁止自己推断目录，见下「落盘路径契约」） |
 | 失败处理 | 用户介入 | **非零退出，不降级**（原图缺失/渲染崩/字体缺都直接退出码≠0，后端写 failed 行） |
+
+### 步骤 0：person 主题先核验，再动手
+
+`person` 主题收到的 personId 来自聚类，**它可能根本不是一个人**（合影混合簇、已出片人物的拆分簇、石像/海报的非人脸误检）。花两分钟看图确认，比渲染 45 分钟后再发现选片乱七八糟划算得多：
+
+```bash
+node scripts/person-contact-sheet.cjs <personId>
+```
+
+看完 contact / faces / vs-named 三张表再决定。判据与三种结局见 `references/person-growth.md`。**拒做时说清你看到了什么**（这是后端和后续排查唯一的线索），并把 personId 追加进 `settings.video.skipPersonIds`，否则同一个坏簇会在 7 天冷却后再次锁死名额。
 
 ### prompt 契约（后端构造，skill 解析）
 
@@ -166,10 +181,16 @@ skill 须从 prompt 解析出：
 ### 退出码语义
 
 - **0**：成功，mp4 + json 已写到约定路径（后端读 exit code=0 后校验文件存在，写 completed 行 + 推送）
-- **非 0**：失败（原图缺失 / 渲染崩 / 字体缺失 / Remotion 报错）。后端读 stderr 记 failed 行，**不重试渲染、不降级缩略图、不凑弱主题**。
+- **非 0**：失败。三种原因，都要在 stderr 里写清：
+  - **主题不合格**（看了图，不是一个人 / 是已出片人物的碎片）——先登记 `skipPersonIds` 再退出
+  - **原图缺失**（打印缺失路径）
+  - **渲染/字体/Remotion 报错**
+
+  后端读 stderr 记 failed 行，**不重试渲染、不降级缩略图、不凑弱主题**。
 
 ### 关键复用点（非交互模式同样适用）
 
+- **主题核验素材包**：`scripts/person-contact-sheet.cjs <personId>`（本 skill 自带，person 主题必跑）
 - 选片脚本：`select-cq.cjs`（旅行）/ `select-person-growth.cjs [person_id] [name]`（人物）—— 非交互模式传 prompt 解析的参数，不询问用户
 - beatmap 生成（音乐节拍匹配）：`node build-beatmap.cjs beats-xxx.json "4,3,3,2,4" snap [beatsPerShot]`——旅行 themeKind=trip 传 12（~6.4s 利落），人物 person 不传（默认 16，~8.5s 抒情）。详见 `references/beat-sync.md`
 - 渲染：`render-immersive.mjs`（已含 `gl=angle`，1080p）

@@ -22,7 +22,7 @@ photo_id, tag_id, confidence；tags: id, name（中文，如「夜景」「人�
 ### bursts
 连拍组：id, representative_id, member_count
 
-## 人脸 cos 过滤（人物主题必备）
+## 人脸 embedding（人物主题必备）
 
 embedding 存为 **base64 字符串**（512 维 float32 → 2048 字节 → base64 2732 字符）：
 ```js
@@ -34,12 +34,13 @@ function toVec(buf) {
   return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
 }
 function cosSim(a, c) { /* dot/(|a||c|) */ }
-// face vs person centroid，cos≥0.5 = 高置信度
 ```
 
 **踩坑**：直接当裸 float32 解析全成噪声（cos≈0）。必须 base64 解码。
 
-**婴儿期识别衰减**：赵合一 2019-2021（1-2岁）cos<0.4 全误识别（centroid 被近期照片主导）。人物成长线处理：婴儿期跳过或视觉补救。
+**cos 只用来排序，不用来过滤**——它告诉你先看哪张，不告诉你这簇是不是一个人。这个库里母女/姐妹相似脸落在 0.5-0.7 是常态，遮挡（墨镜/口罩/侧脸/小脸）会让 embedding 饱和到 0.8+，石像与海报也能自聚成簇。**判断这个人是谁、是不是同一个人，靠把照片摊开看**（见 person-growth 的核验素材包）。
+
+**婴儿期识别衰减**：赵合一 2019-2021（1-2岁）cos<0.4（centroid 被近期照片主导）。这类照片照样能用——靠画面语境判断，不靠 cos 证明。
 
 ## 选片查询模板
 
@@ -54,13 +55,13 @@ function cosSim(a, c) { /* dot/(|a||c|) */ }
 桶定义（标签）：夜景 / 桥梁·几何 / 建筑 / 人像（单人肖像/人像摄影/女性）/ 街景（城市街景/街头摄影）/ 氛围（纪实/日常/怀旧/宁静）。每桶美学 top 4，去连拍。
 
 ### 人物成长线
-faces.person_id=X + cos≥0.5 + 去连拍 + 按年（孩子）或人生阶段（成人）选片。完整流程 + 2 个已验证案例见 memory-video skill 的 `references/person-growth.md`。
+faces.person_id=X + 去连拍 + 按年（孩子）或人生阶段（成人）选片（cos 当排序器）。出片前先摊开看，完整流程见 memory-video skill 的 `references/person-growth.md`。
 
 命名人物清单（persons 表）：
 ```sql
 SELECT id, name, member_count FROM persons WHERE name IS NOT NULL AND name != '' ORDER BY member_count DESC;
 ```
-当前：赵合一(1310) / 翁雪珂(867) / 王语晨(142) / 赵桂雄(142) / 徐群仙(137) / 赵锡根(92) / 赵狄苏(27，名字有 `^P` 脏字符待清洗)。
+当前：赵合一(1322) / 翁雪珂(870) / 赵桂雄(144) / 王语晨(142) / 徐群仙(137) / 赵锡根(93) / 赵狄苏(27)。
 
 ### 情感主题
 emotional_analysis.primary ∈ {平静, 宁静, 快乐, 温馨}（JSON LIKE 匹配）。
@@ -71,7 +72,7 @@ emotional_analysis.primary ∈ {平静, 宁静, 快乐, 温馨}（JSON LIKE 匹�
 - 美学 + 场景多样性双维度（不只美学 top）
 - 地名优先 AI narrative 视觉识别（GPS 区间会判错，如重庆/贵州边界）
 
-工具脚本（video-dryrun）：`select-cq.cjs`（选片）、`recall-trips.cjs`（旅行聚类）、`analyze-faces.cjs`（人脸 cos）。
+工具脚本：人物簇核验用本 skill 自带的 `scripts/person-contact-sheet.cjs`（摊开看图，见 person-growth）；选片/聚类在 video-dryrun：`select-cq.cjs`（旅行选片）、`select-person-growth.cjs`（人物选片）、`recall-trips.cjs`（旅行聚类）。
 
 ## 原图访问（1080p 正式版必须，不可降级）
 

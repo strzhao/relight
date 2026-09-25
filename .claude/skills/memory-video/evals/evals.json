@@ -5,21 +5,28 @@
       "id": 1,
       "name": "travel-short",
       "prompt": "把去年去日本那次旅行的照片做成一个回忆短片，要有叙事感，不是单纯的照片轮播",
-      "expected_output": "一部 ~2 分钟旅行短片 mp4：全屏 Ken Burns + 章节暗线（如 到达/风景/人物/美食/归程 的情绪弧线）+ 霞鹜文楷弧线字幕 + 标题/收尾卡 + FreePD 配乐，外加一个 html 预览页。字幕推进情绪而非描述画面。",
+      "expected_output": "一部 ~2 分钟旅行短片 mp4：全屏 Ken Burns + 章节暗线（如 到达/风景/人物/美食/归程 的情绪弧线）+ 霞鹜文楷弧线字幕 + 标题/收尾卡 + 配乐，外加一个 html 预览页。字幕推进情绪而非描述画面。",
       "files": []
     },
     {
       "id": 2,
       "name": "person-growth-line",
       "prompt": "我家孩子从出生到现在，用相册里的照片做个成长线视频",
-      "expected_output": "人物成长线短片：人脸 cos≥0.5 过滤误识别（face embedding vs person centroid），按年份里程碑选片，章节暗线（襁褓/蹒跚/奔跑），弧线字幕。婴儿期识别不准时诚实跳过或视觉补救，不混入他人。",
+      "expected_output": "人物成长线短片：先跑 person-contact-sheet.cjs 把簇摊开成图并看过，确认是同一个孩子、跨年有变化后再出片；按时段/年龄里程碑选片，章节暗线（襁褓/蹒跚/奔跑），弧线字幕。婴儿期识别衰减时靠画面语境判断或诚实跳过，不混入他人。",
       "files": []
     },
     {
       "id": 3,
-      "name": "explicit-chapter-narrative",
-      "prompt": "重庆2021那次旅行的照片生成个 vlog，叙事要像 B 站那种有章节的不是平铺的",
-      "expected_output": "重庆旅行短片：去连拍 + 场景分桶 + 时间序选 ~24 张，5 章情绪暗线（烟火/夜/城/人/归），弧线字幕推进情绪，章节卡过渡，霞鹜文楷字幕，~2 分钟。",
+      "name": "dirty-cluster-rejection",
+      "prompt": "用 memory-video skill 生成视频，非交互自动化模式。主题：person / 707b7713-81f8-4394-af5f-014cfb1150b7-2026（人物 · 成长线），素材：personId=707b7713-81f8-4394-af5f-014cfb1150b7 截止年=2026",
+      "expected_output": "跑核验素材包并看图后**拒做**：看出这是某个已出片人物的碎片/合影混合簇，而不是一个可出片的独立人物。产出为零（不渲染、不降级），stderr 说清「看到了什么」，并把 personId 追加进 settings.video.skipPersonIds。全程不应手写新的核验脚本。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "clean-unnamed-arc",
+      "prompt": "用 memory-video skill 生成视频，非交互自动化模式。主题：person / 181ab6f6-a4f9-404c-a70f-5cd065fafd70-2025（王语晨 · 成长线），素材：personId=181ab6f6-a4f9-404c-a70f-5cd065fafd70 截止年=2025",
+      "expected_output": "跑核验素材包并看图后**出片**：确认是一位真实的人在跨年长大（不是任何命名人物的拆分簇），选片跨年、章节骨架为年龄里程碑，产出 1080p mp4 + 元数据 json 到 OUTPUT_PATH/META_PATH。全程不应手写新的核验脚本。",
       "files": []
     }
   ]
