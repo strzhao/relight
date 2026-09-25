@@ -196,6 +196,44 @@ function insertPhoto(f: FixtureDB, p: PhotoFixture): void {
   }
 }
 
+/**
+ * 植入一条**够格的成长线素材**：跨年 + 够张数 + 够独立场景数。
+ *
+ * discovery 有素材量门槛（PERSON_MIN_PHOTOS/YEARS/SCENES，挡微碎片簇），
+ * 所以只测去重/新鲜度的用例也得给足真实体量——否则它测到的是门槛、不是它想测的契约。
+ *
+ * @returns 生成的 photoId 列表（按年份、天内序号）
+ */
+function insertPersonArc(
+  f: FixtureDB,
+  opts: {
+    personId: string;
+    centroid: Float32Array;
+    years: number[];
+    perYear?: number;
+    prefix?: string;
+  },
+): string[] {
+  const perYear = opts.perYear ?? 6;
+  const prefix = opts.prefix ?? opts.personId;
+  const faces: { faceId: string; photoId: string; embedding: Float32Array }[] = [];
+  const photoIds: string[] = [];
+  for (const year of opts.years) {
+    for (let i = 0; i < perYear; i++) {
+      const photoId = `${prefix}-${year}-${i}`;
+      // 每天一张：独立场景数 = 该年照片数，保证跨过 PERSON_MIN_SCENES
+      insertPhoto(f, {
+        photoId,
+        takenAt: `${year}-06-${String(i + 1).padStart(2, "0")}T10:00:00Z`,
+      });
+      faces.push({ faceId: `f-${prefix}-${year}-${i}`, photoId, embedding: opts.centroid });
+      photoIds.push(photoId);
+    }
+  }
+  insertPersonWithFaces(f, { personId: opts.personId, centroid: opts.centroid, faces });
+  return photoIds;
+}
+
 /** 植入 person + 其 faces（每张 face 指向某 photo，含 embedding base64） */
 function insertPersonWithFaces(
   f: FixtureDB,
@@ -391,31 +429,15 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
     });
 
     it("人物候选：person 有多年度照片（cos≥0.5 同人）+ 最新年晚于已 consumed 年 → person 候选", async () => {
-      // 植入 person-42，含 2022 + 2024 两个年度的 face（同人 embedding cos=1.0 ≥ 0.5）
+      // 植入 person-42 的成长素材（同人 embedding cos=1.0 ≥ 0.5）。
+      // 必须够素材量门槛（≥12 张 / ≥3 年 / ≥4 个拍摄日），否则会被微碎片门槛挡掉，
+      // 测到的就不是「有没有候选」而是门槛本身了。
       const personCentroid = unitVector512(); // [1,0,0,...]
-      const photoIds2022 = ["p42-2022-a", "p42-2022-b"];
-      const photoIds2024 = ["p42-2024-a", "p42-2024-b"];
-      for (const pid of photoIds2022) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2022-06-01T10:00:00Z" });
-      }
-      for (const pid of photoIds2024) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2024-06-01T10:00:00Z" });
-      }
-      insertPersonWithFaces(fixture, {
+      insertPersonArc(fixture, {
         personId: "person-42",
         centroid: personCentroid,
-        faces: [
-          ...photoIds2022.map((pid, i) => ({
-            faceId: `f42-22-${i}`,
-            photoId: pid,
-            embedding: personCentroid, // cos=1.0 ≥0.5
-          })),
-          ...photoIds2024.map((pid, i) => ({
-            faceId: `f42-24-${i}`,
-            photoId: pid,
-            embedding: personCentroid,
-          })),
-        ],
+        years: [2022, 2023, 2024],
+        prefix: "p42",
       });
 
       const { discoverVideoCandidates } = await import("../jobs/video-discovery");
@@ -481,6 +503,80 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
         (c) => c.themeKind === "trip" && c.themeKey.includes("2024"),
       );
       expect(chongqingTrips.length, "旅行素材 <15 张不应产生候选").toBe(0);
+    });
+
+    // ------------------------------------------------------------------
+    // 人物素材量门槛（PERSON_MIN_PHOTOS / YEARS / SCENES）
+    //
+    // 背景：face clustering 会持续生产微碎片簇（连拍、单日聚会、合影里揉进去的几张脸），
+    // 它们照片新、按 freshness 排序永远排前面，而 daily-video 每天只取第 1 名 ——
+    // 于是名额被反复吃掉（2026-09-06~25 连续 20 天零出片，83 个候选里 78 个只有 1~8 张）。
+    // 这里挡住的是「够不够拍一条线」；「像不像一个人」需要看图，是 skill 的职责，不在此判。
+    // ------------------------------------------------------------------
+
+    it("人物微碎片簇（8 张、单日连拍）→ 不候选（素材量门槛）", async () => {
+      const personCentroid = unitVector512();
+      for (let i = 0; i < 8; i++) {
+        const photoId = `frag-${i}`;
+        // 全部挤在同一天同一场景 = 连拍碎片，不是成长线
+        insertPhoto(fixture, { photoId, takenAt: `2026-09-01T10:0${i}:00Z` });
+        insertPersonWithFaces(fixture, {
+          personId: `frag-person-${i}`, // 每张一个独立簇，模拟聚类碎片
+          centroid: personCentroid,
+          faces: [{ faceId: `ff-${i}`, photoId, embedding: personCentroid }],
+        });
+      }
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      expect(
+        candidates.filter((c) => c.themeKind === "person").length,
+        "单日连拍碎片不应产生人物候选",
+      ).toBe(0);
+    });
+
+    it("人物簇跨年不足（2 年）→ 不候选（看不出成长）", async () => {
+      const personCentroid = unitVector512();
+      insertPersonArc(fixture, {
+        personId: "two-year-person",
+        centroid: personCentroid,
+        years: [2024, 2025],
+        perYear: 10, // 张数够（20），但只跨 2 年
+        prefix: "ty",
+      });
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      expect(
+        candidates.filter((c) => c.themeKind === "person").length,
+        "仅跨 2 年的人物不应产生成长线候选",
+      ).toBe(0);
+    });
+
+    it("人物簇全是同一天的聚会照（20 张同一天）→ 不候选（独立场景数不足）", async () => {
+      const personCentroid = unitVector512();
+      const faces = [];
+      for (let i = 0; i < 20; i++) {
+        const photoId = `party-${i}`;
+        insertPhoto(fixture, {
+          photoId,
+          takenAt: `2026-05-01T10:${String(i).padStart(2, "0")}:00Z`,
+        });
+        faces.push({ faceId: `fp-${i}`, photoId, embedding: personCentroid });
+      }
+      // 跨年靠 takenAt 造不出（全在同一天），故这里直接用同一批照片验证「独立场景数」这一维
+      insertPersonWithFaces(fixture, {
+        personId: "party-person",
+        centroid: personCentroid,
+        faces,
+      });
+
+      const { discoverVideoCandidates } = await import("../jobs/video-discovery");
+      const candidates = await discoverVideoCandidates();
+      expect(
+        candidates.filter((c) => c.themeKind === "person").length,
+        "单日聚会照不应产生成长线候选",
+      ).toBe(0);
     });
 
     it("无候选时后续不产 mp4 / 不推送（videos 行数 + video_usages 行数均 0）", async () => {
@@ -612,39 +708,21 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
   describe("IDEMPOTENT-DEDUPE-PERSON：人物 toYear 去重", () => {
     it("person-42 已 consumed 到 2023，无 2024+ 新照片 → 不候选", async () => {
       const personCentroid = unitVector512();
-      // 仅植入 2022 + 2023 年度照片（最新年=2023）
-      const photoIds2022 = ["p42d-2022-a", "p42d-2022-b"];
-      const photoIds2023 = ["p42d-2023-a", "p42d-2023-b"];
-      for (const pid of photoIds2022) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2022-06-01T10:00:00Z" });
-      }
-      for (const pid of photoIds2023) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2023-06-01T10:00:00Z" });
-      }
-      insertPersonWithFaces(fixture, {
+      // 素材够门槛、最新年=2023 —— 这样「不候选」只可能来自去重逻辑，不是被素材量门槛挡掉
+      const photoIds = insertPersonArc(fixture, {
         personId: "person-42",
         centroid: personCentroid,
-        faces: [
-          ...photoIds2022.map((pid, i) => ({
-            faceId: `f42d-22-${i}`,
-            photoId: pid,
-            embedding: personCentroid,
-          })),
-          ...photoIds2023.map((pid, i) => ({
-            faceId: `f42d-23-${i}`,
-            photoId: pid,
-            embedding: personCentroid,
-          })),
-        ],
+        years: [2021, 2022, 2023],
+        prefix: "p42d",
       });
 
       // 预置：person-42 已 consumed 到 2023（即 themeKey=person-42-2023 已出片）
       insertCompletedVideo(fixture, {
         themeKind: "person",
         themeKey: "person-42-2023",
-        photoIds: [...photoIds2022, ...photoIds2023],
+        photoIds,
       });
-      for (const pid of [...photoIds2022, ...photoIds2023]) {
+      for (const pid of photoIds) {
         insertVideoUsage(fixture, {
           themeKind: "person",
           themeKey: "person-42-2023",
@@ -667,38 +745,22 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
 
     it("person-42 已 consumed 到 2023，但有 2025 新照片 → 可候选（新阶段）", async () => {
       const personCentroid = unitVector512();
-      const photoIds2023 = ["p42e-2023-a", "p42e-2023-b"];
-      const photoIds2025 = ["p42e-2025-a", "p42e-2025-b"];
-      for (const pid of photoIds2023) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2023-06-01T10:00:00Z" });
-      }
-      for (const pid of photoIds2025) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2025-06-01T10:00:00Z" });
-      }
-      insertPersonWithFaces(fixture, {
+      // 素材够门槛（2022/2023/2025 跨 3 年 × 6 张），确保被拦/被放行只由去重逻辑决定
+      const arcPhotoIds = insertPersonArc(fixture, {
         personId: "person-42",
         centroid: personCentroid,
-        faces: [
-          ...photoIds2023.map((pid, i) => ({
-            faceId: `f42e-23-${i}`,
-            photoId: pid,
-            embedding: personCentroid,
-          })),
-          ...photoIds2025.map((pid, i) => ({
-            faceId: `f42e-25-${i}`,
-            photoId: pid,
-            embedding: personCentroid,
-          })),
-        ],
+        years: [2022, 2023, 2025],
+        prefix: "p42e",
       });
 
-      // 预置 consumed 到 2023
+      // 预置 consumed 到 2023：把 2022+2023 的素材标为已用过，2025 是「新阶段」
+      const consumedPhotoIds = arcPhotoIds.filter((pid) => !pid.includes("-2025-"));
       insertCompletedVideo(fixture, {
         themeKind: "person",
         themeKey: "person-42-2023",
-        photoIds: photoIds2023,
+        photoIds: consumedPhotoIds,
       });
-      for (const pid of photoIds2023) {
+      for (const pid of consumedPhotoIds) {
         insertVideoUsage(fixture, {
           themeKind: "person",
           themeKey: "person-42-2023",
@@ -724,46 +786,38 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
       const centroidA = unitVector512(1);
       const centroidB = vectorWithSim(centroidA, 0.3); // cos=0.3 <0.5，不同人
 
-      // 照片 P 含两人脸（亲子照）
-      insertPhoto(fixture, { photoId: "shared-photo-P", takenAt: "2024-06-01T10:00:00Z" });
-      // person-A 其他照片
-      for (let i = 0; i < 3; i++) {
-        insertPhoto(fixture, {
-          photoId: `pa-only-${i}`,
-          takenAt: `2024-06-0${i + 2}T10:00:00Z`,
-        });
-      }
-      // person-B 2025 新照片（让 B 有候选）
-      insertPhoto(fixture, { photoId: "pb-2025-x", takenAt: "2025-07-01T10:00:00Z" });
-      insertPhoto(fixture, { photoId: "pb-2025-y", takenAt: "2025-07-02T10:00:00Z" });
-
-      insertPersonWithFaces(fixture, {
+      // 两人各自要有够门槛的成长素材，否则 B 被素材量门槛挡住，就测不到「已 consumed 的 P 被排除」了
+      const photoIdsA = insertPersonArc(fixture, {
         personId: "person-A",
         centroid: centroidA,
-        faces: [
-          { faceId: "fa-shared", photoId: "shared-photo-P", embedding: centroidA },
-          ...[0, 1, 2].map((i) => ({
-            faceId: `fa-only-${i}`,
-            photoId: `pa-only-${i}`,
-            embedding: centroidA,
-          })),
-        ],
+        years: [2022, 2023, 2024],
+        prefix: "pa",
       });
-      insertPersonWithFaces(fixture, {
+      insertPersonArc(fixture, {
         personId: "person-B",
         centroid: centroidB,
-        faces: [
-          { faceId: "fb-shared", photoId: "shared-photo-P", embedding: centroidB },
-          { faceId: "fb-2025-x", photoId: "pb-2025-x", embedding: centroidB },
-          { faceId: "fb-2025-y", photoId: "pb-2025-y", embedding: centroidB },
-        ],
+        years: [2022, 2023, 2025],
+        prefix: "pb",
       });
 
-      // 预置 person-A 已 consumed 掉 shared-photo-P
+      // 亲子照 P：同一张照片含两人脸
+      insertPhoto(fixture, { photoId: "shared-photo-P", takenAt: "2024-06-01T10:00:00Z" });
+      const insertExtraFace = fixture.sqlite.prepare(
+        `INSERT INTO faces (id, photo_id, person_id, bbox_x, bbox_y, bbox_w, bbox_h,
+                            detection_score, embedding, detected_at)
+         VALUES (?, 'shared-photo-P', ?, 100, 100, 200, 200, 0.95, ?, ?)`,
+      );
+      const b64 = (v: Float32Array) =>
+        Buffer.from(v.buffer, v.byteOffset, v.byteLength).toString("base64");
+      const now = new Date().toISOString();
+      insertExtraFace.run("fa-shared", "person-A", b64(centroidA), now);
+      insertExtraFace.run("fb-shared", "person-B", b64(centroidB), now);
+
+      // 预置 person-A 已 consumed 掉 shared-photo-P（连同 A 的 2024 素材一起出过片）
       insertCompletedVideo(fixture, {
         themeKind: "person",
         themeKey: "person-A-2024",
-        photoIds: ["shared-photo-P", "pa-only-0", "pa-only-1", "pa-only-2"],
+        photoIds: ["shared-photo-P", ...photoIdsA],
       });
       insertVideoUsage(fixture, {
         themeKind: "person",
@@ -966,20 +1020,15 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
 
   describe("PERSON-FRESHNESS-DIMENSION：person freshness = 素材最新 takenAt 毫秒", () => {
     it("person freshness 应等于其素材最新照片时刻（毫秒），且新鲜 trip 排在老素材 person 前", async () => {
-      // 旧素材 person（2022-06-01）
+      // 老素材 person（最新 2025-06-05，够素材量门槛——本用例只测 freshness 量纲）。
+      // 年份取 2023+ 是因为选片对 ≤2022 的年份每年只取 2 张、
+      // 对 2023+ 每年取 5 张；要让「素材最新时刻」真的进得了候选，用近年更直接。
       const personCentroid = unitVector512();
-      const photoIds2022 = ["pf-2022-a", "pf-2022-b"];
-      for (const pid of photoIds2022) {
-        insertPhoto(fixture, { photoId: pid, takenAt: "2022-06-01T10:00:00Z" });
-      }
-      insertPersonWithFaces(fixture, {
+      insertPersonArc(fixture, {
         personId: "person-fresh",
         centroid: personCentroid,
-        faces: photoIds2022.map((pid, i) => ({
-          faceId: `ff-22-${i}`,
-          photoId: pid,
-          embedding: personCentroid,
-        })),
+        years: [2023, 2024, 2025],
+        prefix: "pf",
       });
 
       // 新鲜 trip（最后一张距 now 5 天，毫秒级 freshness 远大于 2022）
@@ -1002,7 +1051,8 @@ describe("每日视频主题发现 — 验收测试（真实 SQLite fixture）",
       expect(person).toBeDefined();
 
       // 量纲断言：两者同为毫秒级（>1e12），person 的 freshness 精确等于素材最新时刻
-      const expected = Date.parse("2022-06-01T10:00:00Z");
+      // （insertPersonArc 按年 06-01..06-0N 每天一张，故最新 = 2025-06-05）
+      const expected = Date.parse("2025-06-05T10:00:00Z");
       expect(person!.freshness, "person freshness = 素材最新 takenAt 毫秒").toBe(expected);
       expect(person!.freshness, "person freshness 应为毫秒级量纲").toBeGreaterThan(1e12);
       expect(

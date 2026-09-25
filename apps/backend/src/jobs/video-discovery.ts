@@ -107,6 +107,24 @@ const FAR_REGION = "远方";
 /** 人物成长线 cos 阈值（recall-growth.cjs:41 筛 >=0.5） */
 const PERSON_COS_THRESHOLD = 0.5;
 
+/**
+ * 人物主题的**素材量门槛**——只筛「够不够拍一条线」，不筛「像不像一个人」。
+ *
+ * 为什么需要：face clustering 会持续生产**微碎片簇**（同一场景的连拍、单日聚会、
+ * 合影里被揉进去的几张脸），而它们因为照片新，按新鲜度排序永远排在最前面。
+ * daily-video 每天只取第 1 名，于是名额被反复吃掉：2026-09-06~25 连续 20 天
+ * 命中的 person 主题全部被 skill 核验拒做，零出片。实测当时的候选池里
+ * 83 个候选有 78 个只有 1~8 张照片——物理上撑不起成长线。
+ *
+ * 为什么不在这里判身份：「这一簇是不是同一个人」需要**看图**，任何数值阈值在这个库上
+ * 都会两头出错（母女姐妹相似脸落在 0.5-0.7，遮挡会让 embedding 饱和）——那是 skill
+ * 步骤 0 视觉核验的职责（跑 person-contact-sheet.cjs，约 2 分钟）。这里只做代码能
+ * 客观判定的部分：素材体量。两者是分工，不是重复。
+ */
+const PERSON_MIN_PHOTOS = 12; // 成长线约需 16 镜；低于 12 张连选片余量都不够
+const PERSON_MIN_YEARS = 3; // 「成长线」要有时间在走——跨 3 个年份以下看不出变化
+const PERSON_MIN_SCENES = 4; // 独立拍摄日下限：排除单日聚会/一场连拍
+
 /** 候选主题统一形状 */
 export interface VideoCandidate {
   themeKind: "trip" | "person";
@@ -451,6 +469,27 @@ async function discoverPersonGrowth(): Promise<VideoCandidate[]> {
       }
     }
     if (picks.length === 0) continue;
+
+    // 素材量门槛（见 PERSON_MIN_* 注释）：碎片簇在这里被挡住，不再占用当天名额。
+    // 量的是**簇的真实素材**（byYear 里 cos 达标的全部照片），不是上面的 picks ——
+    // picks 受逐年配额（≤2022 取 2 / 其余取 5）封顶，拿它当素材量会把「年份跨度」
+    // 和「照片总数」两件事混在一起，3 年以内的真实人物会被误杀。
+    let materialPhotos = 0;
+    const materialDays = new Set<string>();
+    for (const arr of byYear.values()) {
+      materialPhotos += arr.length;
+      for (const x of arr) {
+        const takenAt = byPhoto.get(x.photoId)?.takenAt;
+        if (takenAt) materialDays.add(takenAt.slice(0, 10));
+      }
+    }
+    if (
+      materialPhotos < PERSON_MIN_PHOTOS ||
+      byYear.size < PERSON_MIN_YEARS ||
+      materialDays.size < PERSON_MIN_SCENES
+    ) {
+      continue;
+    }
 
     const displayName = person.nickname || person.name || "人物";
     candidates.push({

@@ -314,24 +314,31 @@ function unitVector512(): Float32Array {
 }
 
 /**
- * 植入一个有「成长弧线」的 person：2023（旧阶段）+ 2025（新阶段）各 2 张。
+ * 植入一个有「成长弧线」的 person：2021（更早阶段）+ 2023（旧阶段）+ 2025（新阶段），每年 5 张。
  * 未预置任何 videoUsages/completed → maxConsumedYear=0 < maxYear=2025，候选必然成立
  * （discoverPersonGrowth 现行 toYear 取最新照片年 → themeKey=`${personId}-2025`）。
+ *
+ * 每年 5 张、每年 5 个不同拍摄日：必须跨过 discovery 的人物素材量门槛
+ * （PERSON_MIN_PHOTOS=12 / YEARS=3 / SCENES=4），否则本文件各用例测到的是那道门槛，
+ * 而不是它们各自要验的死循环/去重/名单契约。photoId 前缀（p21/p23/p25）保持稳定。
  */
 function seedPersonArc(f: FixtureEnv, personId: string): void {
   const v = unitVector512();
-  const ids2023 = [`${personId}-p23-a`, `${personId}-p23-b`];
-  const ids2025 = [`${personId}-p25-a`, `${personId}-p25-b`];
-  for (const pid of ids2023) insertPhoto(f, { photoId: pid, takenAt: "2023-06-01T10:00:00Z" });
-  for (const pid of ids2025) insertPhoto(f, { photoId: pid, takenAt: "2025-06-01T10:00:00Z" });
-  insertPersonWithFaces(f, {
-    personId,
-    centroid: v,
-    faces: [
-      ...ids2023.map((pid, i) => ({ faceId: `${pid}-f`, photoId: pid, embedding: v })),
-      ...ids2025.map((pid, i) => ({ faceId: `${pid}-f`, photoId: pid, embedding: v })),
-    ],
-  });
+  const years: Array<[string, string]> = [
+    ["p21", "2021"],
+    ["p23", "2023"],
+    ["p25", "2025"],
+  ];
+  const faces: { faceId: string; photoId: string; embedding: Float32Array }[] = [];
+  for (const [tag, year] of years) {
+    for (let i = 0; i < 5; i++) {
+      const pid = `${personId}-${tag}-${"abcde"[i]}`;
+      // 每天一张 → 独立场景数 = 15，稳过 PERSON_MIN_SCENES
+      insertPhoto(f, { photoId: pid, takenAt: `${year}-06-0${i + 1}T10:00:00Z` });
+      faces.push({ faceId: `${pid}-f`, photoId: pid, embedding: v });
+    }
+  }
+  insertPersonWithFaces(f, { personId, centroid: v, faces });
 }
 
 /** 植入旅行素材：重庆·川南 GPS（lat 29.5 lng 106.5 → regionSlug chongqing），连续 N 天，themeKey=chongqing-<year> */
