@@ -49,14 +49,15 @@ async function pruneStaleRepeatables(
   }
 }
 
-/** 注册每日精选重复任务（每天北京时间凌晨 0:00） */
+/** 注册每日精选重复任务（每天北京时间凌晨 3:00，错开深夜用电脑时段——精选完成后
+ *  阶段4 链式的 wallpaper-video（lmedia 微动化）占满 GPU 40-90min） */
 export async function registerDailyRepeatableJob(): Promise<void> {
-  await pruneStaleRepeatables(dailyQueue, "daily-selection-cron", "0 0 * * *", "Asia/Shanghai");
+  await pruneStaleRepeatables(dailyQueue, "daily-selection-cron", "0 3 * * *", "Asia/Shanghai");
   await dailyQueue.add(
     "daily-selection-cron",
     {},
     {
-      repeat: { pattern: "0 0 * * *", tz: "Asia/Shanghai" },
+      repeat: { pattern: "0 3 * * *", tz: "Asia/Shanghai" },
       jobId: "daily-selection-cron",
     },
   );
@@ -88,7 +89,7 @@ export async function registerDailyVideoRepeatableJob(): Promise<void> {
   );
 }
 
-/** 注册扫描重复任务（每天北京时间凌晨 2:00，避开每日精选 0:00） */
+/** 注册扫描重复任务（每天北京时间凌晨 2:00，先于每日精选 3:00 完成） */
 export async function registerScanRepeatableJob(): Promise<void> {
   const sources = await db
     .select({ id: schema.storageSources.id })
