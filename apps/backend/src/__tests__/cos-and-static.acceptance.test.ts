@@ -14,6 +14,12 @@
  * 强断言铁律：
  *   - S15 依赖外网 + 真实部署 manifest；无 MANIFEST_URL env 时 fail 并提示如何提供（不 skip）
  *   - S16 不依赖网络，直接断言
+ *
+ * [2026-09-26] 铁律例外（capability-gate 先例同 2026-09-14 db9852c）：S15 属「线上画廊 +
+ * 真实 COS 桶」prod 冒烟——prod 数据漂移时红是**正确报警**（2026-09-25 实证：manifest 引用的
+ * 视频对象被删，该测试先于用户发现），但报警应落在开发机而非代码 CI——CI 红会阻塞无关提交
+ * 的 verify。故 CI（env CI=true，GitHub Actions 恒置）对 S15 三个套件 skip + 可见 warn；
+ * 开发机照常真跑，无 MANIFEST_URL env 仍 fail 不 skip。
  */
 import "./helpers/restore-real-cos-env";
 import { execFileSync } from "node:child_process";
@@ -39,6 +45,15 @@ const COS_BUCKET_ROOT_OVERRIDE = process.env.S15_COS_BUCKET_ROOT; // e.g. https:
 const GALLERY_DIR = process.env.GALLERY_DIR ?? path.resolve(__dirname, "../../../gallery");
 
 fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+
+// S15 prod 冒烟 capability-gate（理由见文件头 [2026-09-26]）：CI 无 prod 报警职责，skip + 可见 warn
+const RUNNING_IN_CI = process.env.CI === "true";
+if (RUNNING_IN_CI) {
+  console.warn(
+    "[cos-and-static] CI 环境跳过 S15 prod 冒烟（依赖线上 manifest + 真实 COS 桶，prod 漂移报警在开发机跑）",
+  );
+}
+const dProdSmoke = RUNNING_IN_CI ? describe.skip : describe;
 
 async function writeArtifact(id: string, content: string): Promise<void> {
   await fs.promises.writeFile(path.join(ARTIFACT_DIR, `${id}.out`), content);
@@ -106,7 +121,7 @@ async function fetchManifest(): Promise<{
 // ============================================================================
 // S15.PM1：manifest 内 COS 直链公有读 200
 // ============================================================================
-describe("[S15.PM1] manifest 内 COS 直链公有读 200", () => {
+dProdSmoke("[S15.PM1] manifest 内 COS 直链公有读 200", () => {
   it("首个 photo.original 与 video.mp4 curl -I 状态码 == 200", async () => {
     const { photos, videos } = await fetchManifest();
     expect(photos.length, "manifest 应至少 1 张 photo").toBeGreaterThan(0);
@@ -128,7 +143,7 @@ describe("[S15.PM1] manifest 内 COS 直链公有读 200", () => {
 // ============================================================================
 // S15.PM2：COS bucket 根列表 403/404 不可枚举
 // ============================================================================
-describe("[S15.PM2] COS bucket 根不可枚举", () => {
+dProdSmoke("[S15.PM2] COS bucket 根不可枚举", () => {
   it("curl -I COS bucket 根路径状态码 == 403 OR == 404", async () => {
     const { photos } = await fetchManifest();
     const sample = photos[0]!.original;
@@ -150,7 +165,7 @@ describe("[S15.PM2] COS bucket 根不可枚举", () => {
 // ============================================================================
 // S15.PM3：已知 photoId mid/thumb URL 公有读 GET 200
 // ============================================================================
-describe("[S15.PM3] 已知 photoId mid/thumb URL GET 200", () => {
+dProdSmoke("[S15.PM3] 已知 photoId mid/thumb URL GET 200", () => {
   it("首 photo original(mid) 与 thumbnail 直链 GET 状态码 == 200", async () => {
     const { photos } = await fetchManifest();
     expect(photos.length).toBeGreaterThan(0);

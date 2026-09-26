@@ -225,6 +225,9 @@ const dOverlay = OVERLAY_PRESENT ? describe : describe.skip;
 
 dOverlay("C4：Remotion wallpaper-overlay-portrait composition 契约", () => {
   const overlayCorpus = (() => {
+    // describe.skip 仍会执行本收集回调——目录缺失（CI）时直接返回空 corpus 防 ENOENT
+    // （2026-09-26 CI 实证：探针 WARN 打了，readdirSync 照样崩）
+    if (!OVERLAY_PRESENT) return "";
     const out: string[] = [];
     const walk = (d: string): void => {
       for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
