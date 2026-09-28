@@ -1,34 +1,22 @@
 /**
- * 验收测试（红队）：动态视频壁纸 — preprocessHeroFrame 人脸构图裁剪【v2 增量】（像素级验证）
+ * 验收测试（红队）：动态视频壁纸 — preprocessHeroFrame 预裁剪【20260928 单腿原生改版】（像素级验证）
  *
- * 设计文档（state.md）对应契约：
- *   - §总体架构（v2）步骤 1：dailyPicks 取 hero 原图；人脸构图裁剪（faces bbox → 1/4 占比，
- *     回退中心）
- *   - §后端设计 §3：preprocessHeroFrame(photoPath, width, height) → Promise<string>：
- *     sharp cover 裁剪+resize 到目标画布比例，产 tmp png（防引擎拉伸变形）；
- *     【v2】升级人脸构图裁剪（faces bbox → ≥1/4 占比，缺失回退中心）
- *   - 边界值（2026-09-25 画布改版）：横版画布 1280×704、竖版画布 736×1600（预裁剪按此比例
- *     cover-crop，人脸占比 ≥1/4，faces bbox 缺失回退中心）
- *   - 验收点（round 2 编排器）：有 faces bbox → crop 窗口含 bbox 中心且脸高 ≥ 画布 1/4
- *     （对 preprocessHeroFrame 输出做像素级验证：以 bbox 相对位置断言）；
- *     无 bbox → 回退中心（现行为不变）。mock db 查询。
+ * 设计文档（state.md ## 设计文档 D2 / ## 契约规约）：
+ *   - preprocessHeroFrame(photoPath, width, height) → Promise<string>：sharp cover 微裁+resize
+ *     到目标画布比例，产 tmp png（防引擎 LANCZOS 拉伸变形——锚定帧直接拉伸到画布，
+ *     预裁比例必须精确等于画布比例）
+ *   - 【20260928】**去除 v2 人脸窗口裁剪**：原生比例下构图已忠实，预裁仅做比例对齐与预算缩放，
+ *     统一中心 cover 微裁（人脸 bbox 仅用于 prompt 分层默认，job 层职责）
+ *   - 画布由 computeNativeCanvas 按原图比例算出（本文件用 9:16 原生参考档 800×1440，
+ *     design D1 参考输出逐字），驱动 preprocessHeroFrame 黑盒执行
  *
  * 像素级验证方案（不读实现，纯几何 + 像素探针）：
- *   输入 2000×1000。bbox = [1300,300,400,400]（中心 (1500,500)）。marker：左半红
- *   [1300,1500)×[300,700)、右半蓝 [1500,1700)×[300,700)。
- *   cover-crop 到 736×1600 的窗口宽 = 1000×(736/1600) = 460（高全含）。
- *   红蓝两半同时可见 ⇔ 窗口左缘 L ∈ (1040,1500] ⇔ bbox 中心 1500 ∈ [L, L+460]（数学蕴含）。
- *   脸高（marker 纵向跨度）在输出中 = 400×(1600/1000) = 640 ≥ 1600/4 = 400
- *   （人脸构图窗口下限 = 画布高与全幅 cover 窗口高的较小值 = 1000，不超分放大）。
- *   回退中心：无 faces 行 → 现行为 sharp cover 中心裁剪（窗口 ≈ [770,1230]）：
- *   中心绿 marker [900,1100] 可见、左右边缘 marker（[0,150] / [1850,2000]）不可见。
+ *   输入 2000×1000（比例 2.0）。cover 到 800×1440 的窗口宽 = 1000×(800/1440) ≈ 556
+ *   （高全含），中心窗 x ∈ [722,1278]：
+ *   - 中心构图照片：中心绿 marker [900,1100) 必含；左缘红 [0,150) / 右缘蓝 [1850,2000) 必不含。
+ *   - 偏右脸照片（红蓝 marker [1300,1700)）：中心裁剪**必不含**——若实现仍按人脸重构图
+ *     （窗口右移对齐脸心），红蓝 marker 即现形 → 本断言 kill 人脸窗口残留（20260928 直接命中）。
  *
- * db mock：真实 drizzle over 临时 sqlite（setupTestSchema 含 faces 表）——实现经 ../db
- *   查 photos/faces 的任何 drizzle 查询形态都能命中，红队不读查询代码。
- * 【v2.1 仲裁留痕】契约裁定：人脸查询在 job 层（getLargestFaceBbox，lib 函数无 DB 依赖），
- *   preprocessHeroFrame 经 opts.faceBbox 接收坐标（state.md §契约规约 v2.1 签名声明）。
- *   本文件 bbox 用例改为按声明接口显式传 opts 驱动；db→getLargestFaceBbox→opts 的接线
- *   由 wallpaper-video-job.acceptance.test.ts 的 faceBbox 透传断言覆盖（mock 面）。
  * 红队铁律：不读蓝队实现代码；不 skip、硬断言（sharp/依赖缺失即真红）。
  */
 import fs from "node:fs";
@@ -188,40 +176,20 @@ async function scanPixels(pngPath: string): Promise<PixelScan & { width: number;
 
 let tmpRoot = "";
 let sqlite: Database.Database;
-let preprocessHeroFrame: (
-  photoPath: string,
-  width: number,
-  height: number,
-  opts?: { faceBbox?: { x: number; y: number; w: number; h: number } | null },
-) => Promise<string>;
+let preprocessHeroFrame: (photoPath: string, width: number, height: number) => Promise<string>;
 
-/** 画布（边界值：竖版 736×1600，2026-09-25 画布改版） */
-const CANVAS_W = 736;
-const CANVAS_H = 1600;
-/** 脸高占比下限（契约逐字：人脸占比 ≥1/4 → 脸高 ≥ 画布高 1/4） */
-const FACE_HEIGHT_MIN = Math.ceil(CANVAS_H / 4);
+/** 画布（design D1 参考输出逐字：9:16 原生档 → 800×1440） */
+const CANVAS_W = 800;
+const CANVAS_H = 1440;
 
-/** 种子：storage_sources + photos（file_path 指向 fixture 绝对路径）+ 可选 faces bbox 行 */
-function seedPhoto(
-  photoId: string,
-  photoPath: string,
-  bbox: [number, number, number, number] | null,
-): void {
+/** 种子：storage_sources + photos（file_path 指向 fixture 绝对路径） */
+function seedPhoto(photoId: string, photoPath: string): void {
   sqlite
     .prepare(
       `INSERT INTO photos (id, storage_source_id, file_path, file_hash, width, height, file_size, created_at)
        VALUES (?, 'src-pp', ?, ?, 2000, 1000, 1024, '2026-01-01T00:00:00.000Z')`,
     )
     .run(photoId, photoPath, `hash-${photoId}`);
-  if (bbox) {
-    const [bx, by, bw, bh] = bbox;
-    sqlite
-      .prepare(
-        `INSERT INTO faces (id, photo_id, person_id, bbox_x, bbox_y, bbox_w, bbox_h, detection_score, embedding, detected_at, attributes)
-         VALUES ('face-1', ?, NULL, ?, ?, ?, ?, 0.99, '[]', '2026-09-12T06:00:00.000Z', NULL)`,
-      )
-      .run(photoId, bx, by, bw, bh);
-  }
 }
 
 beforeAll(async () => {
@@ -243,22 +211,22 @@ beforeAll(async () => {
     )
     .run(path.join(tmpRoot, "storage"));
 
-  // fixture ①：bbox 构图照片（bbox = [1300,300,400,400]；左半红右半蓝 marker）
-  const bboxPhoto = path.join(tmpRoot, "hero-bbox.png");
-  await makePhoto(bboxPhoto, (raw) => {
-    setRect(raw, 1300, 300, 1500, 700, [220, 40, 40]); // 左半红
-    setRect(raw, 1500, 300, 1700, 700, [40, 40, 220]); // 右半蓝
+  // fixture ①：偏右脸照片（红蓝 marker [1300,1700)×[300,700)——中心窗 [722,1278] 必不含）
+  const facePhoto = path.join(tmpRoot, "hero-face-right.png");
+  await makePhoto(facePhoto, (raw) => {
+    setRect(raw, 1300, 300, 1500, 700, [220, 40, 40]); // 脸左半红
+    setRect(raw, 1500, 300, 1700, 700, [40, 40, 220]); // 脸右半蓝
   });
-  seedPhoto("photo-bbox", bboxPhoto, [1300, 300, 400, 400]);
+  seedPhoto("photo-face", facePhoto);
 
-  // fixture ②：无 faces 中心构图照片（中心绿 + 左右边缘 marker）
+  // fixture ②：中心构图照片（中心绿 + 左右边缘 marker）
   const centerPhoto = path.join(tmpRoot, "hero-center.png");
   await makePhoto(centerPhoto, (raw) => {
     setRect(raw, 900, 300, 1100, 700, [40, 220, 40]); // 中心绿（中心裁剪必含）
     setRect(raw, 0, 400, 150, 600, [220, 40, 40]); // 左缘红（中心裁剪必不含）
     setRect(raw, 1850, 400, 2000, 600, [40, 40, 220]); // 右缘蓝（中心裁剪必不含）
   });
-  seedPhoto("photo-center", centerPhoto, null);
+  seedPhoto("photo-center", centerPhoto);
 
   const mod = (await import("../lib/wallpaper/video")) as unknown as Record<string, unknown>;
   expect(
@@ -281,14 +249,10 @@ afterAll(() => {
 // 契约断言
 // ============================================================================
 
-describe("【v2】preprocessHeroFrame 人脸构图裁剪：有 faces bbox → crop 窗口含 bbox 中心 ∧ 脸高 ≥ 画布 1/4", () => {
-  it("bbox [1300,300,400,400] → 输出 736×1600 png；红蓝两半同时可见（⇔ bbox 中心在裁剪窗内）；脸高 ≥ 400px", async () => {
-    const photoPath = path.join(tmpRoot, "hero-bbox.png");
-    // 【v2.1】契约声明接口：bbox 经 opts 传入（对象形态 {x,y,w,h}，与 faces 表列语义同源；
-    // db→getLargestFaceBbox→opts 接线由 job 验收覆盖）
-    const out = await preprocessHeroFrame(photoPath, CANVAS_W, CANVAS_H, {
-      faceBbox: { x: 1300, y: 300, w: 400, h: 400 },
-    });
+describe("【20260928】preprocessHeroFrame 统一中心 cover 微裁（人脸窗口已去除）", () => {
+  it("偏右脸照片 → 仍中心裁剪：脸 marker（红/蓝）不现形（kill 人脸窗口残留）∧ 输出 800×1440 png", async () => {
+    const photoPath = path.join(tmpRoot, "hero-face-right.png");
+    const out = await preprocessHeroFrame(photoPath, CANVAS_W, CANVAS_H);
 
     // 契约：产 tmp png（存在 ∧ PNG 文件头）
     expect(typeof out).toBe("string");
@@ -298,33 +262,18 @@ describe("【v2】preprocessHeroFrame 人脸构图裁剪：有 faces bbox → cr
     expect(head.toString("latin1", 1, 4)).toBe("PNG");
     expect(out).not.toBe(photoPath);
 
-    // 契约：裁剪+resize 到目标画布比例（736×1600）
+    // 契约：裁剪+resize 到目标画布（800×1440，design D1 参考档）
     const scan = await scanPixels(out);
     expect(scan.width, `输出宽度必须 ${CANVAS_W}`).toBe(CANVAS_W);
     expect(scan.height, `输出高度必须 ${CANVAS_H}`).toBe(CANVAS_H);
 
-    // 像素级蕴含（见文件头数学注释）：红半 [1300,1500) 与蓝半 [1500,1700) 同时可见
-    // ⇔ 裁剪窗左缘 L ∈ (1040,1500] ⇔ bbox 中心 x=1500 ∈ [L, L+460]
-    expect(
-      scan.redCount,
-      "红半 marker 不可见——bbox 左半未进裁剪窗（人脸构图未生效或偏移越界）",
-    ).toBeGreaterThan(0);
-    expect(
-      scan.blueCount,
-      "蓝半 marker 不可见——bbox 右半未进裁剪窗（bbox 中心 x=1500 不在窗口内）",
-    ).toBeGreaterThan(0);
-
-    // 契约逐字：脸高 ≥ 画布 1/4（marker 纵向跨度 = 脸高在输出中的像素高度）
-    const faceHeight = scan.markerMaxY - scan.markerMinY + 1;
-    expect(
-      faceHeight,
-      `脸高 ${faceHeight}px < 画布 1/4（${FACE_HEIGHT_MIN}px，${CANVAS_H}/4）`,
-    ).toBeGreaterThanOrEqual(FACE_HEIGHT_MIN);
+    // 20260928 直接命中：中心窗 x ∈ [722,1278] 不含脸 marker [1300,1700)——
+    // 若实现仍按人脸重构图（窗口右移对齐脸心 1500），红/蓝 marker 即现形 → 此处即红
+    expect(scan.redCount, "脸左半红 marker 现形——人脸窗口裁剪残留（20260928 已废除）").toBe(0);
+    expect(scan.blueCount, "脸右半蓝 marker 现形——人脸窗口裁剪残留（20260928 已废除）").toBe(0);
   }, 30000);
-});
 
-describe("【v2】preprocessHeroFrame 回退中心：无 faces bbox → 现行为不变（中心 cover 裁剪）", () => {
-  it("无 faces 行 → 中心绿 marker 可见、左右边缘 marker 均不可见 ∧ 输出 736×1600 png", async () => {
+  it("中心构图照片 → 中心绿 marker 可见、左右边缘 marker 均不可见 ∧ 输出 800×1440 png", async () => {
     const photoPath = path.join(tmpRoot, "hero-center.png");
     const out = await preprocessHeroFrame(photoPath, CANVAS_W, CANVAS_H);
 
@@ -338,13 +287,10 @@ describe("【v2】preprocessHeroFrame 回退中心：无 faces bbox → 现行�
     expect(scan.width).toBe(CANVAS_W);
     expect(scan.height).toBe(CANVAS_H);
 
-    // 2000×1000 cover 到 736×1600 的中心窗 ≈ 源 x ∈ [770,1230]：
+    // 2000×1000 cover 到 800×1440 的中心窗 ≈ 源 x ∈ [722,1278]：
     // 中心绿 [900,1100) 必含；左缘红 [0,150) / 右缘蓝 [1850,2000) 必不含
-    expect(
-      scan.greenCount,
-      "中心 marker 不可见——回退行为偏离中心裁剪（现行为不变契约被破坏）",
-    ).toBeGreaterThan(0);
-    expect(scan.redCount, "左缘 marker 可见——裁剪窗偏左，回退行为不是中心裁剪").toBe(0);
-    expect(scan.blueCount, "右缘 marker 可见——裁剪窗偏右，回退行为不是中心裁剪").toBe(0);
+    expect(scan.greenCount, "中心 marker 不可见——预裁剪偏离中心 cover 裁剪").toBeGreaterThan(0);
+    expect(scan.redCount, "左缘 marker 可见——裁剪窗偏左，不是中心裁剪").toBe(0);
+    expect(scan.blueCount, "右缘 marker 可见——裁剪窗偏右，不是中心裁剪").toBe(0);
   }, 30000);
 });

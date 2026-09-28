@@ -55,15 +55,19 @@ function regionFrom(source: string, anchor: RegExp, chars: number): string {
 // 三方字段名（规则 6 的三方：manifest 产出 ↔ 画廊消费 ↔ API 暴露）
 const MANIFEST_FIELD_LANDSCAPE = "wallpaperVideoLandscape";
 const MANIFEST_FIELD_PORTRAIT = "wallpaperVideoPortrait";
+const MANIFEST_FIELD_NATIVE = "wallpaperVideoNative";
 const GALLERY_CONSUMED_PORTRAIT = "wallpaperVideoPortrait";
+const GALLERY_CONSUMED_NATIVE = "wallpaperVideoNative";
 const API_FIELD_URL = "wallpaperVideoUrl";
 // DB 列名（snake_case，§后端设计 §2 逐字）
 const DB_COL_LANDSCAPE = "wallpaper_video_landscape_url";
 const DB_COL_PORTRAIT = "wallpaper_video_portrait_url";
+const DB_COL_NATIVE = "wallpaper_video_native_url";
 // COS key / contentType（§契约规约 逐字）
 const COS_KEY_DIR = "wallpaper-videos/";
 const COS_KEY_LANDSCAPE_SUFFIX = "_landscape.mov";
 const COS_KEY_PORTRAIT_SUFFIX = "_portrait.mp4";
+const COS_KEY_NATIVE_SUFFIX = "_native.mp4";
 const CONTENT_TYPE_LANDSCAPE = "video/quicktime";
 const CONTENT_TYPE_PORTRAIT = "video/mp4";
 // 开关（§后端设计 §1 逐字）
@@ -160,7 +164,7 @@ describe("队列注册契约：wallpaperVideoQueue 显式 defaultJobOptions { at
 // ============================================================================
 
 describe("COS key 与 contentType 契约字面量（§契约规约 逐字）", () => {
-  it("manifest.ts 含 wallpaper-videos/ 目录与 _landscape.mov / _portrait.mp4 key 字面量", () => {
+  it("manifest.ts 含 wallpaper-videos/ 目录与 _landscape.mov / _portrait.mp4 / _native.mp4 key 字面量", () => {
     const src = readText(
       path.join(BACKEND_SRC, "lib/gallery/manifest.ts"),
       "lib/gallery/manifest.ts",
@@ -168,6 +172,7 @@ describe("COS key 与 contentType 契约字面量（§契约规约 逐字）", (
     expect(src).toContain(COS_KEY_DIR);
     expect(src).toContain(COS_KEY_LANDSCAPE_SUFFIX);
     expect(src).toContain(COS_KEY_PORTRAIT_SUFFIX);
+    expect(src).toContain(COS_KEY_NATIVE_SUFFIX);
   });
 
   it("contentType 字面量 video/quicktime 与 video/mp4 存在于 job/视频库/manifest 之一", () => {
@@ -184,10 +189,11 @@ describe("COS key 与 contentType 契约字面量（§契约规约 逐字）", (
     expect(corpus).toContain(CONTENT_TYPE_PORTRAIT);
   });
 
-  it("schema.ts 含两列 snake_case 列名（nullable TEXT 语义由列名锚定）", () => {
+  it("schema.ts 含三列 snake_case 列名（native 20260928 新增；nullable TEXT 语义由列名锚定）", () => {
     const src = readText(path.join(BACKEND_SRC, "db/schema.ts"), "db/schema.ts");
     expect(src).toContain(DB_COL_LANDSCAPE);
     expect(src).toContain(DB_COL_PORTRAIT);
+    expect(src).toContain(DB_COL_NATIVE);
   });
 });
 
@@ -196,17 +202,24 @@ describe("COS key 与 contentType 契约字面量（§契约规约 逐字）", (
 // ============================================================================
 
 describe("规则 6：三方字段名逐字一致（manifest ↔ 画廊 ↔ API）", () => {
-  it("manifest 产出侧（lib/gallery/manifest.ts）含 wallpaperVideoLandscape / wallpaperVideoPortrait 两个逐字字段名", () => {
+  it("manifest 产出侧（lib/gallery/manifest.ts）含 wallpaperVideoLandscape / wallpaperVideoPortrait / wallpaperVideoNative 逐字字段名", () => {
     const src = readText(path.join(BACKEND_SRC, "lib/gallery/manifest.ts"), "manifest.ts");
     expect(src).toContain(MANIFEST_FIELD_LANDSCAPE);
     expect(src).toContain(MANIFEST_FIELD_PORTRAIT);
+    expect(src).toContain(MANIFEST_FIELD_NATIVE);
   });
 
-  it("画廊消费侧（apps/gallery/app.js）消费的字段名与 manifest 产出侧逐字相同（wallpaperVideoPortrait）", () => {
+  it("画廊消费侧（apps/gallery/app.js）消费的字段名与 manifest 产出侧逐字相同（native 优先 + portrait legacy 回退）", () => {
     const src = readText(path.join(REPO_ROOT, "apps/gallery/app.js"), "apps/gallery/app.js");
     expect(src).toContain(GALLERY_CONSUMED_PORTRAIT);
+    expect(src).toContain(GALLERY_CONSUMED_NATIVE);
     // 逐字一致（同源字面量比较——名称漂移在此即红）
     expect(GALLERY_CONSUMED_PORTRAIT).toBe(MANIFEST_FIELD_PORTRAIT);
+    expect(GALLERY_CONSUMED_NATIVE).toBe(MANIFEST_FIELD_NATIVE);
+    // 20260928 优先级：native > portrait > landscape（URL 取值链逐字）
+    expect(src).toMatch(
+      /wallpaperVideoNative\s*\|\|\s*day\.wallpaperVideoPortrait\s*\|\|\s*day\.wallpaperVideoLandscape/,
+    );
   });
 
   it("API 侧（routes/daily.ts）含 wallpaperVideoUrl 字段名与 wallpaper-video 路由字面量", () => {
@@ -254,8 +267,13 @@ describe("设计文档 SSOT 字面量冻结（场景谓词 assert 字段取值�
     );
     expect(impl).toContain("hvc1");
     expect(impl).toContain("1920×1080");
-    // [2026-09-25] 竖版画布改版：portrait 档经 --width/--height 逐轴覆盖 → 736×1600
-    expect(impl).toContain("736×1600");
+    // [2026-09-28] 单腿原生：736×1600 档声明随固定画布常量一并退役，像素预算锚点在画布 SSOT
+    const nativeCanvas = readText(
+      path.join(BACKEND_SRC, "lib/wallpaper/native-canvas.ts"),
+      "lib/wallpaper/native-canvas.ts",
+    );
+    expect(nativeCanvas).toContain("1_177_600");
+    expect(nativeCanvas).toContain("736×1600");
     const queues = readText(path.join(BACKEND_SRC, "jobs/queues.ts"), "jobs/queues.ts");
     expect(queues).toContain("attempts: 1");
     // 文档侧声明（capability-gate：runtime/ 不入库，CI 无 state.md）

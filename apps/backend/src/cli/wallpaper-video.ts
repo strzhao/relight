@@ -10,7 +10,8 @@
  * 契约：
  *   - 参数 --pickDate 必填，isValidYmd 校验（YYYY-MM-DD 格式 + 实际日期合法性）
  *   - 退出码：0 成功/跳过，1 失败（参数错误 / 主流程 throw）
- *   - stdout 逐行进度 + 末行 JSON {pickDate, landscape: <url|"">, portrait: <url|"">}
+ *   - stdout 逐行进度 + 末行 JSON {pickDate, native: <url|"">, landscape: <url|"">}
+ *    （20260928 单腿原生：native=原生 mp4 回执；landscape=16:9 兼容 .mov 回执（仅兼容日非空））
  */
 import { runWallpaperVideo } from "../jobs/wallpaper-video";
 
@@ -38,9 +39,9 @@ export function parsePickDateArg(argv: string[]): string | undefined {
   return undefined;
 }
 
-/** 末行 JSON（契约：{pickDate, landscape, portrait}） */
-export function formatResultLine(pickDate: string, landscape: string, portrait: string): string {
-  return JSON.stringify({ pickDate, landscape, portrait });
+/** 末行 JSON（契约：{pickDate, native, landscape}） */
+export function formatResultLine(pickDate: string, native: string, landscape: string): string {
+  return JSON.stringify({ pickDate, native, landscape });
 }
 
 async function main(): Promise<void> {
@@ -58,9 +59,9 @@ async function main(): Promise<void> {
   }
 
   console.log(`[wallpaper-video:rerun] 开始 pickDate=${pickDate}`);
-  const { landscape, portrait } = await runWallpaperVideo(pickDate, console.log);
+  const { native, landscape } = await runWallpaperVideo(pickDate, console.log);
   // 末行机读 JSON（红队/QA 解析用）
-  console.log(formatResultLine(pickDate, landscape, portrait));
+  console.log(formatResultLine(pickDate, native, landscape));
   process.exit(0);
 }
 

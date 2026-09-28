@@ -3,13 +3,14 @@ import { spawnSync } from "node:child_process";
  * 验收测试（红队）：动态视频壁纸 — renderTextOverlay / 双转码 spawn 调用契约【v2 增量】（mock 面）
  *
  * 设计文档（state.md）对应契约（§契约规约 计算/spawn 契约【v2】逐字）：
- *   - renderTextOverlay(videoPath, meta: {pickDate,title,narrative}) → {overlaidPath}
+ *   - renderTextOverlay(videoPath, meta: {pickDate,title,narrative,takenAt?,canvasWidth,
+ *     canvasHeight}) → {overlaidPath}（20260928 props 纯超集扩展 + comp 按画布比例选）
  *   - 错误枚举：OverlayRenderError（remotion 非零退出 / 产物缺失 / 超时 900s（v2.1））
  *   - §后端设计 §1【v2】：videoWorkspacePath 下新增 wallpaper-overlay/ 工程，
  *     直接 `npx remotion render`（无 AI、确定性渲染）
  *   - transcodeForGallery【v2】：保留音轨 `-c:v libx264 -crf 18 -c:a aac -b:a 128k
  *     -movflags +faststart`（画廊静音自动播放 + 点击开声），超时 120s
- *   - transcodeForAerial：`-vf scale=1920:1080:flags=lanczos -c:v hevc_videotoolbox
+ *   - transcodeForAerialNative（20260928 单腿条件产出）：`-vf crop(居中裁16:9)+scale=1920:1080:flags=lanczos+setsar=1 -c:v hevc_videotoolbox
  *     -b:v 8M -tag:v hvc1 -an -movflags +faststart`（hevc_videotoolbox 失败 fallback
  *     `-c:v libx265 -crf 22 -tag:v hvc1`），超时 600s（Aerial 转码未改，v2.1 只调 renderTextOverlay 900s）
  *
@@ -209,10 +210,17 @@ function flagValue(args: string[], flag: string): string | null {
 let tmpRoot = "";
 let renderTextOverlay: (
   videoPath: string,
-  meta: { pickDate: string; title: string; narrative: string },
+  meta: {
+    pickDate: string;
+    title: string;
+    narrative: string;
+    takenAt?: string | null;
+    canvasWidth: number;
+    canvasHeight: number;
+  },
 ) => Promise<{ overlaidPath: string }>;
 let transcodeForGallery: (src: string, dst: string) => Promise<void>;
-let transcodeForAerial: (src: string, dst: string) => Promise<void>;
+let transcodeForAerialNative: (src: string, dst: string) => Promise<void>;
 let overlaySrc = "";
 let gallerySrc = "";
 let aerialSrc = "";
@@ -299,10 +307,12 @@ beforeAll(async () => {
     "契约函数 renderTextOverlay 未由 lib/wallpaper/video 导出（§契约规约【v2】）",
   ).toBe("function");
   expect(typeof mod.transcodeForGallery, "契约函数 transcodeForGallery 未导出").toBe("function");
-  expect(typeof mod.transcodeForAerial, "契约函数 transcodeForAerial 未导出").toBe("function");
+  expect(typeof mod.transcodeForAerialNative, "契约函数 transcodeForAerialNative 未导出").toBe(
+    "function",
+  );
   renderTextOverlay = mod.renderTextOverlay as typeof renderTextOverlay;
   transcodeForGallery = mod.transcodeForGallery as typeof transcodeForGallery;
-  transcodeForAerial = mod.transcodeForAerial as typeof transcodeForAerial;
+  transcodeForAerialNative = mod.transcodeForAerialNative as typeof transcodeForAerialNative;
 }, 60000);
 
 beforeEach(() => {
@@ -335,6 +345,9 @@ describe("【v2】renderTextOverlay spawn 调用契约（mock spawn；§后端�
       pickDate: "2026-09-12",
       title: "金色黄昏",
       narrative: "五年前的今天，你在海边捕捉到了这张温暖的照片。",
+      // 20260928：生成画布透传（comp 选择 + calculateMetadata 尺寸依据）
+      canvasWidth: 1440,
+      canvasHeight: 800,
     });
 
     // 返回契约：{overlaidPath}（产物必须真实存在于磁盘）
@@ -372,6 +385,8 @@ describe("【v2】renderTextOverlay spawn 调用契约（mock spawn；§后端�
         pickDate: "2026-09-12",
         title: "金色黄昏",
         narrative: "narrative",
+        canvasWidth: 1440,
+        canvasHeight: 800,
       });
     } catch (e) {
       caught = e;
@@ -389,6 +404,8 @@ describe("【v2】renderTextOverlay spawn 调用契约（mock spawn；§后端�
         pickDate: "2026-09-12",
         title: "金色黄昏",
         narrative: "narrative",
+        canvasWidth: 1440,
+        canvasHeight: 800,
       });
     } catch (e) {
       caught = e;
@@ -424,11 +441,11 @@ describe("【v2】transcodeForGallery spawn argv 契约（保留音轨：libx264
   }, 30000);
 });
 
-describe("transcodeForAerial spawn argv 契约（2026-09-13 起：scale 1920×1080/hvc1/带音轨 aac/faststart）", () => {
-  it("argv 含 -vf scale=1920:1080 ∧ -tag:v hvc1 ∧ -c:a aac ∧ -movflags +faststart（无 -an）；-c:v ∈ {hevc_videotoolbox, libx265}", async () => {
+describe("transcodeForAerialNative spawn argv 契约（20260928：crop 前置 16:9 + scale 1920×1080/hvc1/带音轨 aac/faststart）", () => {
+  it("argv 含 -vf crop(16:9)+scale=1920:1080 ∧ -tag:v hvc1 ∧ -c:a aac ∧ -movflags +faststart（无 -an）；-c:v ∈ {hevc_videotoolbox, libx265}", async () => {
     const dst = path.join(tmpRoot, "argv-aerial.mov");
     registeredOutputs.set(dst, aerialSrc);
-    await transcodeForAerial(aerialSrc, dst);
+    await transcodeForAerialNative(aerialSrc, dst);
 
     const call = spawnCalls.find((c) => c.args.includes(dst));
     expect(
@@ -437,10 +454,18 @@ describe("transcodeForAerial spawn argv 契约（2026-09-13 起：scale 1920×10
     ).toBeTruthy();
     const args = call?.args ?? [];
     expect(args).toContain(aerialSrc);
-    // 契约逐字：-vf scale=1920:1080:flags=lanczos
+    // 契约逐字：-vf crop 前置（居中裁恰 16:9，绝不拉伸）+ scale=1920:1080 后置 + setsar=1
     const vf = flagValue(args, "-vf");
     expect(vf, "-vf 必须存在").not.toBeNull();
-    expect(vf ?? "", "-vf 必须含 scale=1920:1080").toContain("scale=1920:1080");
+    const vfStr = vf ?? "";
+    expect(vfStr, "-vf 必须含 scale=1920:1080").toContain("scale=1920:1080");
+    expect(vfStr, "-vf 必须含居中 16:9 crop 前置").toContain(
+      "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)'",
+    );
+    expect(vfStr, "-vf 必须 setsar=1（方像素）").toContain("setsar=1");
+    expect(vfStr.indexOf("crop="), "crop 必须先于 scale（场景 3.P2）").toBeLessThan(
+      vfStr.indexOf("scale="),
+    );
     // 契约逐字：-tag:v hvc1
     expect(flagValue(args, "-tag:v"), "-tag:v 必须为 hvc1").toBe("hvc1");
     // 契约逐字（2026-09-13 验收反转）：不再 -an，保留音轨（aac 128k）

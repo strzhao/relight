@@ -4,7 +4,8 @@
  * 设计文档（state.md）对应契约（§契约规约 计算/spawn 契约【v2】逐字）：
  *   - transcodeForGallery 产物 invariant【v2】：容器 mp4 ∧ H.264 ∧ 有音频流（aac 立体声）
  *     ∧ 分辨率 == 源（736×1600，2026-09-25 画布改版）∧ faststart（画廊静音自动播放 + 点击开声）
- *   - transcodeForAerial 产物 invariant（2026-09-13 验收反转）：容器 mov ∧ HEVC（tag hvc1）
+ *   - transcodeForAerialNative 产物 invariant（2026-09-13 验收反转；20260928 单腿条件产出）：
+ *     容器 mov ∧ HEVC（tag hvc1）
  *     ∧ 1920×1080 ∧ **保留音轨**（aac 立体声）∧ moov 在前（faststart）
  *   - §总体架构（v2）步骤 5：横版 HEVC(hvc1) .mov 1920×1080 带音轨 +faststart（Aerial 注入
  *     无声播放不受影响，下载/外放有环境音）；竖版 H.264 mp4 带音轨 +faststart（画廊用）
@@ -15,7 +16,7 @@
  * 2s 短样片（画廊源 736×1600 竖版带立体声音轨；Aerial 源 1280×704 横版带音轨——
  * 带音轨是为了证明音轨真实保留而非静默丢弃）。
  *
- * 红队铁律：不读蓝队实现代码；transcodeForGallery / transcodeForAerial 按契约函数名黑盒
+ * 红队铁律：不读蓝队实现代码；transcodeForGallery / transcodeForAerialNative 按契约函数名黑盒
  *   import 执行；不 skip、硬断言——ffmpeg/ffprobe 不可用一律真红。
  */
 import { spawnSync } from "node:child_process";
@@ -155,7 +156,7 @@ let tmpRoot = "";
 let gallerySrc = "";
 let aerialSrc = "";
 let transcodeForGallery: (src: string, dst: string) => Promise<void>;
-let transcodeForAerial: (src: string, dst: string) => Promise<void>;
+let transcodeForAerialNative: (src: string, dst: string) => Promise<void>;
 
 function makeSrcWithStereoAudio(outPath: string, size: string): void {
   const r = spawnSync(
@@ -233,11 +234,11 @@ beforeAll(async () => {
     "契约函数 transcodeForGallery 未由 lib/wallpaper/video 导出",
   ).toBe("function");
   expect(
-    typeof mod.transcodeForAerial,
-    "契约函数 transcodeForAerial 未由 lib/wallpaper/video 导出",
+    typeof mod.transcodeForAerialNative,
+    "契约函数 transcodeForAerialNative 未由 lib/wallpaper/video 导出",
   ).toBe("function");
   transcodeForGallery = mod.transcodeForGallery as typeof transcodeForGallery;
-  transcodeForAerial = mod.transcodeForAerial as typeof transcodeForAerial;
+  transcodeForAerialNative = mod.transcodeForAerialNative as typeof transcodeForAerialNative;
 }, 60000);
 
 afterAll(() => {
@@ -276,10 +277,10 @@ describe("【v2】transcodeForGallery 产物 invariant：mp4 ∧ H.264 ∧ aac �
   }, 120000);
 });
 
-describe("transcodeForAerial 产物 invariant（2026-09-13 起：mov ∧ hvc1 ∧ 1920×1080 ∧ 带音轨 ∧ faststart）", () => {
+describe("transcodeForAerialNative 产物 invariant（mov ∧ hvc1 ∧ 1920×1080 ∧ 带音轨 ∧ faststart；crop 前置绝不拉伸）", () => {
   it("1280×704 带音轨源 → 产物容器 mov、tag hvc1、1920×1080、1 条 aac 立体声音轨、moov 在前", async () => {
     const dst = path.join(tmpRoot, "2026-09-12_landscape.mov");
-    await transcodeForAerial(aerialSrc, dst);
+    await transcodeForAerialNative(aerialSrc, dst);
 
     expect(fs.existsSync(dst), `Aerial 转码产物不存在: ${dst}`).toBe(true);
     expect(fs.statSync(dst).size).toBeGreaterThan(0);

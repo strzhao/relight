@@ -6,11 +6,15 @@
  *     非法（非 32 倍数）→ exit 2。R4 机器可读验证：dist 产物含 `--width`；
  *     `honeydo video gen … --width 700` → exit 2 且 stderr 含 `--width`（700=21.875×32 非法）。
  *   - C2 relight spawn：`HoneydoVideoOptions` 可选 `width?/height?`；`spawnHoneydoVideo`
- *     仅在传入时追加 `--width`/`--height`；两条腿均传（竖 736×1600 / 横 1280×704）。
- *   - C3 画布常量：`WALLPAPER_VIDEO_PORTRAIT_CANVAS = { width: 736, height: 1600 }`；
- *     R3 假绿陷阱：旧字面量 704×1216 必须从实现（含注释）中全部清除。
- *   - C4 Remotion composition：`wallpaper-overlay-portrait` = width 736 / height 1600；
- *     props 契约 {videoPath,pickDate,title,narrative,captureDateline} 不变。
+ *     仅在传入时追加 `--width`/`--height`；单腿显式传画布（computeNativeCanvas 产出）。
+ *   - C3 画布 SSOT（20260928 单腿原生改版）：`native-canvas.ts` 导出
+ *     `computeNativeCanvas(origW, origH)` + `NATIVE_CANVAS_PIXEL_BUDGET = 1177600` +
+ *     `NATIVE_CANVAS_MIN_SHORT = 704`；固定画布常量
+ *     `WALLPAPER_VIDEO_LANDSCAPE_CANVAS` / `WALLPAPER_VIDEO_PORTRAIT_CANVAS` 必须从
+ *     backend src 全部清除（R3 假绿陷阱：旧字面量 704×1216 不再作为现行画布）。
+ *   - C4 Remotion composition：`calculateMetadata` 从 props `canvasWidth/canvasHeight`
+ *     动态返回 width/height（尺寸参数化）；props 契约（20260928 契约 7 纯超集扩展）
+ *     {videoPath,pickDate,title,narrative,captureDateline,canvasWidth,canvasHeight}。
  *   - C5 DB 列：`daily_picks.motion_prompt` 列名与语义不变，不新增列。
  *   - C7 prompt 目录：`v2/daily/motion-facts/{system,user}.txt` 与 `v2/daily/motion/{system,user}.txt`。
  *   - C8 配置：`config.ai.motionBaseUrl/motionApiKey/motionModel`（env `AI_MOTION_BASE_URL/
@@ -148,29 +152,39 @@ dHoneydo("C1：honeydo CLI 透传 --width/--height（R4 机器可读验证）", 
 // C2/C3：relight spawn 契约字面量 + 旧画布字面量清除（R3 假绿陷阱）
 // ============================================================================
 
-describe("C2/C3：relight 侧画布常量与 spawn 契约字面量", () => {
+describe("C2/C3：relight 侧画布 SSOT（native-canvas.ts）与 spawn 契约字面量", () => {
   const corpus = collectCorpus(BACKEND_SRC);
+  const nativeCanvasSrc = readText(
+    path.join(BACKEND_SRC, "lib/wallpaper/native-canvas.ts"),
+    "lib/wallpaper/native-canvas.ts",
+  );
 
-  it("含新画布常量 WALLPAPER_VIDEO_PORTRAIT_CANVAS 且值落在 736×1600", () => {
-    expect(corpus, "backend src 未声明 WALLPAPER_VIDEO_PORTRAIT_CANVAS").toMatch(
+  it("含画布 SSOT computeNativeCanvas 导出（尺寸计算入口，场景谓词实现绑定）", () => {
+    expect(nativeCanvasSrc).toMatch(/export\s+function\s+computeNativeCanvas/);
+    expect(nativeCanvasSrc).toMatch(/origW:\s*number/);
+    expect(nativeCanvasSrc).toMatch(/origH:\s*number/);
+  });
+
+  it("像素预算 BUDGET=1177600 与短轴下限 MIN_SHORT=704 落在 native-canvas.ts（SSOT 逐字）", () => {
+    expect(nativeCanvasSrc).toMatch(/NATIVE_CANVAS_PIXEL_BUDGET\s*=\s*1_177_600/);
+    expect(nativeCanvasSrc).toMatch(/NATIVE_CANVAS_MIN_SHORT\s*=\s*704/);
+    // 比例 clamp 上界 2.40（design D1 逐字）
+    expect(nativeCanvasSrc).toMatch(/NATIVE_CANVAS_MAX_RATIO\s*=\s*2\.4/);
+  });
+
+  it("固定画布常量已删除（R3 假绿陷阱：20260928 单腿原生，横竖两档画布不再是现行契约）", () => {
+    expect(corpus, "WALLPAPER_VIDEO_LANDSCAPE_CANVAS 残留").not.toMatch(
+      /WALLPAPER_VIDEO_LANDSCAPE_CANVAS/,
+    );
+    expect(corpus, "WALLPAPER_VIDEO_PORTRAIT_CANVAS 残留").not.toMatch(
       /WALLPAPER_VIDEO_PORTRAIT_CANVAS/,
     );
-    // C3 逐字：{ width: 736, height: 1600 }——锚定「定义处」（含类型标注），避免命中 import/引用点
-    const defAnchor = /WALLPAPER_VIDEO_PORTRAIT_CANVAS(\s*:\s*[^=]+)?\s*=\s*\{/;
-    expect(corpus, "未找到 WALLPAPER_VIDEO_PORTRAIT_CANVAS 的定义（= { 形态）").toMatch(defAnchor);
-    const constBlock = regionFrom(corpus, defAnchor, 300);
-    expect(constBlock).toMatch(/736/);
-    expect(constBlock).toMatch(/1600/);
-    // No-op kill：旧值 704/1216 若仍作为竖版画布常量出现，此处即红
-    expect(constBlock).not.toMatch(/704/);
-    expect(constBlock).not.toMatch(/1216/);
+    expect(corpus, "WALLPAPER_VIDEO_PORTRAIT_RES 残留").not.toMatch(/WALLPAPER_VIDEO_PORTRAIT_RES/);
   });
 
   it("旧画布字面量 704×1216 不再被表述为现行画布（R3：实现注释也必须手改）", () => {
     // R3 假绿陷阱的字面量面：只打击「把旧画布当现行」的表述——
-    // 行内仅出现旧值（704+1216）而不同时出现新值（736/1600）= 陈旧声明，红；
-    // 新旧同行的迁移说明（C2 要求的横竖版决策注释）不算残留。
-    // 横版 1280×704 不含 1216，天然不命中。
+    // 行内仅出现旧值（704+1216）= 陈旧声明，红。
     const staleLines: string[] = [];
     const walk = (d: string): void => {
       for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
@@ -182,8 +196,7 @@ describe("C2/C3：relight 侧画布常量与 spawn 契约字面量", () => {
           const src = fs.readFileSync(p, "utf-8");
           src.split("\n").forEach((line, i) => {
             const mentionsOld = line.includes("704") && line.includes("1216");
-            const mentionsNew = line.includes("736") || line.includes("1600");
-            if (mentionsOld && !mentionsNew) {
+            if (mentionsOld) {
               staleLines.push(`${path.relative(REPO_ROOT, p)}:${i + 1}: ${line.trim()}`);
             }
           });
@@ -195,8 +208,17 @@ describe("C2/C3：relight 侧画布常量与 spawn 契约字面量", () => {
     expect(staleLines, `旧竖版画布字面量残留：\n${staleLines.join("\n")}`).toHaveLength(0);
   });
 
+  it("job 层从 native-canvas 引入画布 SSOT（computeNativeCanvas import 锚定）", () => {
+    const job = readText(
+      path.join(BACKEND_SRC, "jobs/wallpaper-video.ts"),
+      "jobs/wallpaper-video.ts",
+    );
+    expect(job).toMatch(/computeNativeCanvas/);
+    expect(job).toMatch(/native-canvas/);
+  });
+
   it("spawn 侧含 --width/--height args 追加与 HoneydoVideoOptions 可选 width?/height?", () => {
-    // C2 逐字：HoneydoVideoOptions 新增可选 width?/height?
+    // C2 逐字：HoneydoVideoOptions 可选 width?/height?
     expect(corpus).toMatch(/HoneydoVideoOptions/);
     const typeBlock = regionFrom(corpus, /HoneydoVideoOptions/, 1600);
     expect(typeBlock, "HoneydoVideoOptions 未声明可选 width?").toMatch(/width\?/);
@@ -205,14 +227,8 @@ describe("C2/C3：relight 侧画布常量与 spawn 契约字面量", () => {
     expect(corpus).toMatch(/spawnHoneydoVideo/);
     expect(corpus).toContain("--width");
     expect(corpus).toContain("--height");
-    // 两条腿均传：竖 736×1600、横 1280×704（1280 与 704 须以横版组合出现）
-    expect(corpus).toMatch(/1280/);
   });
 });
-
-// ============================================================================
-// C4：Remotion composition 尺寸与 props 契约
-// ============================================================================
 
 // overlay 工程在 .autopilot/runtime/ 下（不入库）——CI 无此目录，capability-gate 惯例同前
 const OVERLAY_PRESENT = fs.existsSync(OVERLAY_DIR);
@@ -223,7 +239,7 @@ if (!OVERLAY_PRESENT) {
 }
 const dOverlay = OVERLAY_PRESENT ? describe : describe.skip;
 
-dOverlay("C4：Remotion wallpaper-overlay-portrait composition 契约", () => {
+dOverlay("C4：Remotion comp 尺寸参数化（calculateMetadata + props 画布契约）", () => {
   const overlayCorpus = (() => {
     // describe.skip 仍会执行本收集回调——目录缺失（CI）时直接返回空 corpus 防 ENOENT
     // （2026-09-26 CI 实证：探针 WARN 打了，readdirSync 照样崩）
@@ -244,18 +260,32 @@ dOverlay("C4：Remotion wallpaper-overlay-portrait composition 契约", () => {
     return out.join("\n");
   })();
 
-  it("composition id wallpaper-overlay-portrait 存在且尺寸为 736×1600", () => {
+  it("两个 comp id 存在且挂 calculateMetadata（尺寸参数化，kill 写死）", () => {
+    expect(overlayCorpus).toMatch(/wallpaper-overlay-landscape/);
     expect(overlayCorpus).toMatch(/wallpaper-overlay-portrait/);
-    expect(overlayCorpus).toMatch(/736/);
-    expect(overlayCorpus).toMatch(/1600/);
-    // 旧尺寸清除（同 C3 理由）
+    expect(overlayCorpus).toMatch(/calculateMetadata/);
+    expect(overlayCorpus).toMatch(/canvasWidth/);
+    expect(overlayCorpus).toMatch(/canvasHeight/);
+    // 旧固定档清除：comp 声明不再含历史画布字面量
     expect(overlayCorpus).not.toMatch(/1216/);
   });
 
-  it("props 契约五字段逐字不变：{videoPath,pickDate,title,narrative,captureDateline}", () => {
-    for (const prop of ["videoPath", "pickDate", "title", "narrative", "captureDateline"]) {
+  it("props 契约七字段逐字（20260928 契约 7 纯超集扩展）", () => {
+    for (const prop of [
+      "videoPath",
+      "pickDate",
+      "title",
+      "narrative",
+      "captureDateline",
+      "canvasWidth",
+      "canvasHeight",
+    ]) {
       expect(overlayCorpus, `overlay 工程缺 props 字段 ${prop}`).toContain(prop);
     }
+  });
+
+  it("布局分支按 props 画布比例判定（≥0.9 两栏横版 / <0.9 竖版全屏）", () => {
+    expect(overlayCorpus).toMatch(/0\.9/);
   });
 });
 

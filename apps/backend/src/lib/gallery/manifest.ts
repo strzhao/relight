@@ -59,13 +59,15 @@ export interface ManifestDay {
   /** 竖版手机壁纸 COS URL（1290×2796；composedImagePath 为 null 时留空串） */
   wallpaperPortrait: string;
   /**
-   * 横版壁纸视频 COS URL（Aerial 用，.mov）。
+   * 横版壁纸视频 COS URL（20260928 语义收窄：仅 16:9 兼容日微裁 .mov；历史两腿日为横版 legacy）。
    * 条件展开：仅当 DB 回执列非空时字段存在（null/空串 → JSON 中字段缺省，不输出空串——
    * 冻结场景 4.P2 要求开关关闭时字段不存在）。
    */
   wallpaperVideoLandscape?: string;
-  /** 竖版壁纸视频 COS URL（画廊壁纸卡用，.mp4；条件展开同上）。 */
+  /** 竖版壁纸视频 COS URL（历史 legacy，不再新写；存量行照常展开，画廊 legacy 回退用）。 */
   wallpaperVideoPortrait?: string;
+  /** 单腿原生比例壁纸视频 COS URL（20260928 新增；画廊视频变体优先级 native > portrait > landscape）。 */
+  wallpaperVideoNative?: string;
   photos: ManifestPhoto[];
 }
 
@@ -107,9 +109,14 @@ export function wallpaperVideoLandscapeCosKey(pickDate: string): string {
   return `${config.cos.prefix}/wallpaper-videos/${pickDate}_landscape.mov`;
 }
 
-/** 竖版壁纸视频 key：`relight/wallpaper-videos/{pickDate}_portrait.mp4` */
+/** 竖版壁纸视频 key：`relight/wallpaper-videos/{pickDate}_portrait.mp4`（历史 legacy，不再新写） */
 export function wallpaperVideoPortraitCosKey(pickDate: string): string {
   return `${config.cos.prefix}/wallpaper-videos/${pickDate}_portrait.mp4`;
+}
+
+/** 单腿原生比例壁纸视频 key：`relight/wallpaper-videos/{pickDate}_native.mp4`（20260928 新增） */
+export function wallpaperVideoNativeCosKey(pickDate: string): string {
+  return `${config.cos.prefix}/wallpaper-videos/${pickDate}_native.mp4`;
 }
 
 /** 单张缩略图 key：`relight/photos/{photoId}-thumb.jpg` */
@@ -167,6 +174,7 @@ interface PickRow {
   composedImagePath: string | null;
   wallpaperVideoLandscapeUrl: string | null;
   wallpaperVideoPortraitUrl: string | null;
+  wallpaperVideoNativeUrl: string | null;
 }
 interface EntryRow {
   dailyPickId: string;
@@ -223,7 +231,8 @@ export async function buildManifest(): Promise<Manifest> {
       .prepare(
         `SELECT id, pick_date AS pickDate, title, narrative, composed_image_path AS composedImagePath,
                 wallpaper_video_landscape_url AS wallpaperVideoLandscapeUrl,
-                wallpaper_video_portrait_url AS wallpaperVideoPortraitUrl
+                wallpaper_video_portrait_url AS wallpaperVideoPortraitUrl,
+                wallpaper_video_native_url AS wallpaperVideoNativeUrl
          FROM daily_picks
          ORDER BY pick_date ASC`,
       )
@@ -347,6 +356,10 @@ export async function buildManifest(): Promise<Manifest> {
       }
       if (p.wallpaperVideoPortraitUrl) {
         day.wallpaperVideoPortrait = p.wallpaperVideoPortraitUrl;
+      }
+      // native（20260928）：条件展开语义与既有两字段一致——列空/空串 → 字段缺省
+      if (p.wallpaperVideoNativeUrl) {
+        day.wallpaperVideoNative = p.wallpaperVideoNativeUrl;
       }
       return day;
     });

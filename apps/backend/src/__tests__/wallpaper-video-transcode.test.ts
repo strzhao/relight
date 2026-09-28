@@ -1,18 +1,25 @@
 /**
- * 单测：lib/wallpaper/video.ts — transcodeForAerial / transcodeForGallery /
- * assertVideoSpawnPrerequisites / clampWallpaperVideoSeconds（任务 2 + v2 增量任务 12/14/15）
+ * 单测：lib/wallpaper/video.ts — transcodeForAerialNative / transcodeForGallery /
+ * assertVideoDimensions / assertVideoSpawnPrerequisites / clampWallpaperVideoSeconds
+ * （任务 2 + v2 增量任务 12/14/15；20260928 单腿原生：条件 Aerial crop 链 + 尺寸护栏）
  *
- * 契约（state.md ## 契约规约）：
- *   transcodeForAerial 产物 invariant：容器 mov ∧ HEVC(tag hvc1) ∧ 1920×1080 ∧ 无音频 ∧ faststart
+ * 契约（state.md ## 契约规约 / ## 设计文档 D2）：
+ *   transcodeForAerialNative 产物 invariant：容器 mov ∧ HEVC(tag hvc1) ∧ 1920×1080 ∧
+ *     带音轨 aac 128k ∧ faststart；滤镜链 crop 前置（居中裁恰 16:9）+ scale=1920:1080 后置
+ *     （crop 已保证入 scale 前比例恰 16:9，绝不拉伸）+ setsar=1
  *   transcodeForGallery 产物 invariant【v2】：容器 mp4 ∧ H.264（libx264 crf18）∧
- *     有音频流（aac 128k）∧ faststart（画廊静音自动播放 + 点击开声）
+ *     有音频流（aac 128k）∧ faststart（画廊静音自动播放 + 点击开声）∧ 无 -vf 尺寸透传
+ *   assertVideoDimensions（20260928 尺寸护栏）：ffprobe 断言产物尺寸，不匹配即 throw
+ *     （message 显式含「尺寸断言失败」语义——场景 5.P2 禁静默失败）
+ *   isAerialCompatCanvas：画布长短轴比 ∈ [1.5, 1.9]（闭区间；窗外 mac 静态回退）
  *   hevc_videotoolbox 失败 fallback libx265 -crf 22 -tag:v hvc1
  *   assertVideoSpawnPrerequisites【v2】增查：wallpaper-overlay 工程 / Remotion 运行时 /
  *     overlay 字体（缺失报错，不自动安装）
  *   clampWallpaperVideoSeconds：非有限 → 默认 4（v2 recipes 纪律）
  *
  * 测试策略：mock ../lib/config 注入 fake ffmpeg shell 脚本（记录 argv 后 touch 产物/
- * 退出非零），黑盒断言参数拼装与 fallback 行为。
+ * 退出非零），黑盒断言参数拼装与 fallback 行为；assertVideoDimensions 用真实 ffmpeg 造
+ * 定尺寸小样片 + 真实 ffprobe（护栏本身必须对真实媒体文件判别）。
  */
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -49,10 +56,13 @@ vi.mock("../lib/config", () => ({
   },
 }));
 
+import { config } from "../lib/config";
 import {
+  assertVideoDimensions,
   assertVideoSpawnPrerequisites,
   clampWallpaperVideoSeconds,
-  transcodeForAerial,
+  isAerialCompatCanvas,
+  transcodeForAerialNative,
   transcodeForGallery,
 } from "../lib/wallpaper/video";
 
@@ -120,17 +130,24 @@ afterAll(() => {
   rmSync(holder.tmpDir, { recursive: true, force: true });
 });
 
-describe("transcodeForAerial / transcodeForGallery", () => {
-  it("transcodeForAerial：hevc_videotoolbox + scale=1920:1080 + hvc1 + 带音轨 aac 128k +faststart", async () => {
+describe("transcodeForAerialNative / transcodeForGallery（20260928）", () => {
+  it("transcodeForAerialNative：crop 前置（居中裁 16:9）+ scale=1920:1080 后置 setsar=1 + hvc1 + 带音轨 aac +faststart", async () => {
     const dst = `${holder.tmpDir}/out.mov`;
-    await transcodeForAerial("/tmp/src.mp4", dst);
+    await transcodeForAerialNative("/tmp/src.mp4", dst);
 
     const args = readArgs(1);
     expect(args).toContain("-i");
-    expect(args).toContain("scale=1920:1080:flags=lanczos");
+    // 滤镜链逐字（D2 转码 B）：crop 前置 + 等比 scale 后置 + setsar=1（绝不拉伸）
+    const vfIdx = args.indexOf("-vf");
+    const vf = args[vfIdx + 1] ?? "";
+    expect(vf).toContain("crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)'");
+    expect(vf).toContain("scale=1920:1080:flags=lanczos");
+    expect(vf).toContain("setsar=1");
+    // crop 必须先于 scale（场景 3.P2：crop 前置保证入 scale 前比例恰 16:9）
+    expect(vf.indexOf("crop=")).toBeLessThan(vf.indexOf("scale="));
     expect(args).toContain("hevc_videotoolbox");
     expect(args).toContain("hvc1");
-    // 2026-09-13 验收要求：以后生成的视频带音轨（横版不再 -an）
+    // 2026-09-13 验收要求：以后生成的视频带音轨
     expect(args).not.toContain("-an");
     expect(args).toContain("-c:a");
     expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
@@ -139,14 +156,14 @@ describe("transcodeForAerial / transcodeForGallery", () => {
     expect(args).toContain("+faststart");
   });
 
-  it("transcodeForAerial：hevc_videotoolbox 失败 → fallback libx265 -crf 22 -tag:v hvc1", async () => {
+  it("transcodeForAerialNative：hevc_videotoolbox 失败 → fallback libx265 -crf 22 -tag:v hvc1", async () => {
     // fail-once ffmpeg：第 1 次（hevc_videotoolbox）失败，第 2 次（libx265）成功
     const { config } = await import("../lib/config");
     const saved = (config.video as { ffmpegPath: string }).ffmpegPath;
     (config.video as { ffmpegPath: string }).ffmpegPath = holder.ffmpegFailOncePath;
     try {
       const dst = `${holder.tmpDir}/out-fallback.mov`;
-      await transcodeForAerial("/tmp/src.mp4", dst);
+      await transcodeForAerialNative("/tmp/src.mp4", dst);
 
       const args1 = readArgs(1);
       expect(args1).toContain("hevc_videotoolbox");
@@ -155,12 +172,15 @@ describe("transcodeForAerial / transcodeForGallery", () => {
       expect(args2).toContain("-crf");
       expect(args2[args2.indexOf("-crf") + 1]).toBe("22");
       expect(args2).toContain("hvc1");
+      // fallback 链同样带 crop 前置（窗口内任何硬件路径都不得拉伸）
+      const vf2 = args2[args2.indexOf("-vf") + 1] ?? "";
+      expect(vf2).toContain("crop=");
     } finally {
       (config.video as { ffmpegPath: string }).ffmpegPath = saved;
     }
   });
 
-  it("transcodeForGallery【v2】：libx264 crf18 + aac 128k + faststart（保留音轨）", async () => {
+  it("transcodeForGallery【v2】：libx264 crf18 + aac 128k + faststart（保留音轨）；无 -vf 尺寸透传（原生比例直通）", async () => {
     const dst = `${holder.tmpDir}/out.mp4`;
     await transcodeForGallery("/tmp/src.mp4", dst);
 
@@ -178,6 +198,80 @@ describe("transcodeForAerial / transcodeForGallery", () => {
     expect(args).not.toContain("-an");
     // v2：不再流拷贝（-c:v copy → 重编码）
     expect(args[args.indexOf("-c:v") + 1]).not.toBe("copy");
+    // 20260928：无 -vf（分辨率 == 源画布，画廊消费原生比例）
+    expect(args).not.toContain("-vf");
+  });
+});
+
+describe("isAerialCompatCanvas（20260928 方向性比例窗口 [1.5, 1.9] 闭区间）", () => {
+  it("窗口内（含边界，仅横版画布）→ true", () => {
+    expect(isAerialCompatCanvas({ width: 1500, height: 1000 })).toBe(true); // 1.5 恰边界
+    expect(isAerialCompatCanvas({ width: 1900, height: 1000 })).toBe(true); // 1.9 恰边界
+    expect(isAerialCompatCanvas({ width: 1440, height: 800 })).toBe(true); // 1.8（16:9 档）
+    expect(isAerialCompatCanvas({ width: 1312, height: 864 })).toBe(true); // 1.5185（3:2 档）
+  });
+
+  it("窗外 → false（竖版画布 w/h<1 恒窗外；超宽全景/1:1 也不产 .mov，mac 静态回退）", () => {
+    expect(isAerialCompatCanvas({ width: 1496, height: 1000 })).toBe(false); // 1.496 < 1.5
+    expect(isAerialCompatCanvas({ width: 1912, height: 1000 })).toBe(false); // 1.912 > 1.9
+    expect(isAerialCompatCanvas({ width: 800, height: 1440 })).toBe(false); // 竖版 0.5556（竖裁横砍 69% 画面）
+    expect(isAerialCompatCanvas({ width: 1664, height: 704 })).toBe(false); // 2.3636（超宽兜底档）
+    expect(isAerialCompatCanvas({ width: 1056, height: 1056 })).toBe(false); // 1:1
+  });
+});
+
+describe("assertVideoDimensions（20260928 尺寸护栏，真实 ffmpeg/ffprobe 判别）", () => {
+  // 本组用真实 ffprobe（文件级 config mock 注入的是 fake 路径）——护栏必须对真实媒体判别
+  const videoCfg = config.video as { ffprobePath: string };
+  const savedFfprobe = videoCfg.ffprobePath;
+  videoCfg.ffprobePath = "ffprobe";
+  afterAll(() => {
+    videoCfg.ffprobePath = savedFfprobe;
+  });
+
+  /** ffmpeg 造定尺寸 0.3s 小样片（真实媒体，护栏必须对真实文件判别） */
+  function makeTinyMp4(outPath: string, size: string): void {
+    execFileSync(
+      "ffmpeg",
+      [
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        `testsrc2=size=${size}:rate=12:duration=0.3`,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        outPath,
+      ],
+      { timeout: 30000 },
+    );
+  }
+
+  it("尺寸匹配 → 放行（1920×1080 期望 vs 1920×1080 产物）", async () => {
+    const src = `${holder.tmpDir}/guard-ok.mp4`;
+    makeTinyMp4(src, "1920x1080");
+    await expect(assertVideoDimensions(src, 1920, 1080)).resolves.toBeUndefined();
+  });
+
+  it("尺寸不匹配 → throw 且 message 显式含「尺寸断言失败」与期望/实际值（禁静默失败）", async () => {
+    const src = `${holder.tmpDir}/guard-bad.mp4`;
+    makeTinyMp4(src, "1918x1080");
+    const err = (await assertVideoDimensions(src, 1920, 1080).catch((e) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("尺寸断言失败");
+    expect(err.message).toContain("1920×1080");
+    expect(err.message).toContain("1918×1080");
+  });
+
+  it("文件不存在/非媒体 → throw（ffprobe 探测异常分支同样显式报错）", async () => {
+    const err = (await assertVideoDimensions(`${holder.tmpDir}/no-such.mp4`, 1920, 1080).catch(
+      (e) => e,
+    )) as Error;
+    expect(err.message).toContain("尺寸断言失败");
   });
 });
 
