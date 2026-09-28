@@ -1,19 +1,25 @@
 /**
- * 单测：wallpaper-video job 主流程（任务 4 + v2 增量任务 12/15）
+ * 单测：wallpaper-video job 主流程（任务 4 + v2 增量任务 12/15；20260928 单腿原生比例改版）
  *
- * 契约（state.md ## 后端设计 4 / ## 契约规约；v2 修订）：
+ * 契约（state.md ## 后端设计 4 / ## 契约规约；20260928 D2）：
  *   runWallpaperVideo(pickDate)：
  *     - 开关关 → log skip 返回（零 honeydo 调用）
  *     - 无记录 / hero.isVideo / composedImagePath null → skip
- *     - faces 表取 hero 最大 bbox → preprocess（人脸构图；无脸 → 中心构图回退）
- *     - 每侧串接：spawn 生成 → buildLoop（palindrome）→ renderTextOverlay（Remotion 文字层）
- *       → 转码（横 Aerial hvc1 .mov 无音轨 / 竖 Gallery libx264+aac mp4 带音轨，输入=Remotion 成品）
- *     - COS 上传（video/quicktime 与 video/mp4），回执非空串才写 DB 列
+ *     - sharp 读 hero EXIF 旋转后尺寸 → computeNativeCanvas 单腿原生画布
+ *     - faces 表取 hero 最大 bbox（仅 prompt 分层默认；预裁剪已无人脸窗口）
+ *     - 单腿串接：spawn 生成（-r 720p + --width/--height 画布覆盖）→ buildLoop（palindrome）
+ *       → renderTextOverlay（props 携画布宽高）→ 转码 A（画廊原生 mp4，分辨率==画布）
+ *       → 尺寸护栏 → 转码 B（条件 Aerial：画布 w/h ∈ [1.5,1.9] 才产 16:9 微裁 .mov）
+ *       → COS 上传（native key `_native.mp4` video/mp4；aerial key `_landscape.mov`
+ *         video/quicktime），回执非空串才写 DB 列
  *     - syncDayToGallery 复用
- *   产物路径：{STORAGE_ROOT}/wallpaper-videos/{pickDate}-landscape.mov / {pickDate}-portrait.mp4
+ *   失败语义（契约 8）：任一环节 throw（含尺寸护栏）→ native/landscape 两列均空 → 静态回退
+ *   返回 {native, landscape}
  *
  * 测试策略：mock ../db（真实 drizzle schema 列引用 + stub select/update）、
- * mock ../lib/wallpaper/video、../lib/cos/upload、../lib/gallery/sync、../lib/config。
+ * mock ../lib/wallpaper/video（fs/sharp/ffmpeg 边界：readOrientedDimensions /
+ * assertVideoDimensions 一并 mock）、../lib/cos/upload、../lib/gallery/sync、../lib/config；
+ * computeNativeCanvas 用真实纯函数（native-canvas.ts 无依赖）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,21 +33,20 @@ const state = vi.hoisted(() => ({
   photosTable: {} as object,
   facesTable: {} as object,
   calls: {
+    dims: [] as string[],
     spawn: [] as Record<string, unknown>[],
     buildLoop: [] as { src: string; targetSeconds: number }[],
     renderTextOverlay: [] as { videoPath: string; meta: Record<string, unknown> }[],
-    transcodeAerial: [] as unknown[][],
+    assertDims: [] as { filePath: string; w: number; h: number }[],
+    transcodeAerialNative: [] as unknown[][],
     transcodeGallery: [] as unknown[][],
     upload: [] as { localPath: string; cosKey: string; contentType: string }[],
     syncDay: [] as unknown[],
-    preprocess: [] as {
-      photoPath: string;
-      width: number;
-      height: number;
-      opts: Record<string, unknown>;
-    }[],
+    preprocess: [] as { photoPath: string; width: number; height: number }[],
   },
   uploadReturn: "" as string,
+  /** sharp 读出的 hero 尺寸（mock readOrientedDimensions 返回值，按用例设置） */
+  heroDims: { width: 4000, height: 3000 } as { width: number; height: number },
 }));
 
 vi.mock("../db", async () => {
@@ -111,12 +116,14 @@ vi.mock("../lib/wallpaper/video", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    preprocessHeroFrame: vi.fn(
-      async (photoPath: string, width: number, height: number, opts: Record<string, unknown>) => {
-        state.calls.preprocess.push({ photoPath, width, height, opts });
-        return `/tmp/wv-frame-${width}x${height}.png`;
-      },
-    ),
+    readOrientedDimensions: vi.fn(async (photoPath: string) => {
+      state.calls.dims.push(photoPath);
+      return state.heroDims;
+    }),
+    preprocessHeroFrame: vi.fn(async (photoPath: string, width: number, height: number) => {
+      state.calls.preprocess.push({ photoPath, width, height });
+      return `/tmp/wv-frame-${width}x${height}.png`;
+    }),
     assertVideoSpawnPrerequisites: vi.fn(async () => undefined),
     spawnHoneydoVideo: vi.fn(async (opts: Record<string, unknown>) => {
       state.calls.spawn.push(opts);
@@ -130,8 +137,12 @@ vi.mock("../lib/wallpaper/video", async (importOriginal) => {
       state.calls.renderTextOverlay.push({ videoPath, meta });
       return { overlaidPath: videoPath.replace(/\.mp4$/, "-overlay.mp4") };
     }),
-    transcodeForAerial: vi.fn(async (src: string, dst: string) => {
-      state.calls.transcodeAerial.push([src, dst]);
+    // 尺寸护栏：mock 边界（真实 ffprobe 判别在 transcode 单测覆盖）
+    assertVideoDimensions: vi.fn(async (filePath: string, w: number, h: number) => {
+      state.calls.assertDims.push({ filePath, w, h });
+    }),
+    transcodeForAerialNative: vi.fn(async (src: string, dst: string) => {
+      state.calls.transcodeAerialNative.push([src, dst]);
       const { writeFileSync } = await import("node:fs");
       writeFileSync(dst, "fake-mov");
     }),
@@ -183,10 +194,13 @@ beforeEach(() => {
   state.faceRows = [];
   state.updates = [];
   state.uploadReturn = "";
+  state.heroDims = { width: 4000, height: 3000 };
+  state.calls.dims = [];
   state.calls.spawn = [];
   state.calls.buildLoop = [];
   state.calls.renderTextOverlay = [];
-  state.calls.transcodeAerial = [];
+  state.calls.assertDims = [];
+  state.calls.transcodeAerialNative = [];
   state.calls.transcodeGallery = [];
   state.calls.upload = [];
   state.calls.syncDay = [];
@@ -194,7 +208,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("runWallpaperVideo", () => {
+describe("runWallpaperVideo（20260928 单腿原生）", () => {
   it("开关关 → skip，零 honeydo 调用", async () => {
     const { config } = await import("../lib/config");
     const saved = config.wallpaperVideoEnabled;
@@ -202,7 +216,7 @@ describe("runWallpaperVideo", () => {
     try {
       const logs: string[] = [];
       const res = await runWallpaperVideo("2026-09-12", (m) => logs.push(m));
-      expect(res).toEqual({ landscape: "", portrait: "" });
+      expect(res).toEqual({ native: "", landscape: "" });
       expect(state.calls.spawn).toHaveLength(0);
       expect(logs.join("\n")).toContain("skip");
     } finally {
@@ -212,7 +226,7 @@ describe("runWallpaperVideo", () => {
 
   it("无当日记录 → skip", async () => {
     const res = await runWallpaperVideo("2026-09-12", () => {});
-    expect(res).toEqual({ landscape: "", portrait: "" });
+    expect(res).toEqual({ native: "", landscape: "" });
     expect(state.calls.spawn).toHaveLength(0);
   });
 
@@ -220,7 +234,7 @@ describe("runWallpaperVideo", () => {
     state.pickRows = [PICK];
     state.photoRows = [{ ...PHOTO, mediaType: "video" }];
     const res = await runWallpaperVideo("2026-09-12", () => {});
-    expect(res).toEqual({ landscape: "", portrait: "" });
+    expect(res).toEqual({ native: "", landscape: "" });
     expect(state.calls.spawn).toHaveLength(0);
   });
 
@@ -228,11 +242,11 @@ describe("runWallpaperVideo", () => {
     state.pickRows = [{ ...PICK, composedImagePath: null }];
     state.photoRows = [PHOTO];
     const res = await runWallpaperVideo("2026-09-12", () => {});
-    expect(res).toEqual({ landscape: "", portrait: "" });
+    expect(res).toEqual({ native: "", landscape: "" });
     expect(state.calls.spawn).toHaveLength(0);
   });
 
-  it("happy path（v2）：生成→buildLoop→renderTextOverlay→双转码（输入=Remotion 成品），COS 契约，回执写 DB，syncDayToGallery 复用", async () => {
+  it("happy path（4:3 hero，窗外）：单腿 spawn，画布 1248×928，仅 native 转码/上传/写列，无 .mov", async () => {
     state.pickRows = [PICK];
     state.photoRows = [PHOTO];
     state.faceRows = [{ x: 100, y: 200, w: 400, h: 500 }];
@@ -240,132 +254,176 @@ describe("runWallpaperVideo", () => {
 
     const res = await runWallpaperVideo("2026-09-12", () => {});
 
-    // 人脸构图：preprocess 收到 faces 最大 bbox（两侧共用同一 bbox）
-    expect(state.calls.preprocess).toHaveLength(2);
-    expect(state.calls.preprocess[0]?.opts).toEqual({
-      faceBbox: { x: 100, y: 200, w: 400, h: 500 },
-    });
-    expect(state.calls.preprocess[1]?.opts).toEqual({
-      faceBbox: { x: 100, y: 200, w: 400, h: 500 },
-    });
+    // 单腿：dims 读取 ×1、preprocess ×1（cover 微裁至 1248×928，20260928 三参签名无人脸窗口）
+    expect(state.calls.dims).toHaveLength(1);
+    expect(state.calls.preprocess).toHaveLength(1);
+    expect(state.calls.preprocess[0]?.width).toBe(1248);
+    expect(state.calls.preprocess[0]?.height).toBe(928);
 
-    // 两次 spawn：横（720p）在前，竖（portrait）在后；双锚定同图；seconds 透传 config（4）
-    expect(state.calls.spawn).toHaveLength(2);
+    // spawn ×1：-r 720p + 画布逐轴覆盖（computeNativeCanvas(4000,3000) = 1248×928）
+    expect(state.calls.spawn).toHaveLength(1);
     expect(state.calls.spawn[0]?.res).toBe("720p");
-    expect(state.calls.spawn[1]?.res).toBe("portrait");
     expect(state.calls.spawn[0]?.firstFrame).toBe(state.calls.spawn[0]?.lastFrame);
     expect(state.calls.spawn[0]?.seconds).toBe(4);
-    // 画布逐轴覆盖（C2）：两条腿均显式传 width/height（横 1280×704 与 720p 档等价、竖 736×1600 覆盖 portrait 档）
-    expect(state.calls.spawn[0]?.width).toBe(1280);
-    expect(state.calls.spawn[0]?.height).toBe(704);
-    expect(state.calls.spawn[1]?.width).toBe(736);
-    expect(state.calls.spawn[1]?.height).toBe(1600);
+    expect(state.calls.spawn[0]?.width).toBe(1248);
+    expect(state.calls.spawn[0]?.height).toBe(928);
 
-    // buildLoop：palindrome 目标时长 = config.wallpaperVideoLoopSeconds（8），输入=raw 生成
-    expect(state.calls.buildLoop).toHaveLength(2);
-    expect(String(state.calls.buildLoop[0]?.src)).toMatch(/2026-09-12-landscape-raw\.mp4$/);
+    // buildLoop / renderTextOverlay 各 ×1；meta 携画布宽高（comp 按比例选）
+    expect(state.calls.buildLoop).toHaveLength(1);
+    expect(String(state.calls.buildLoop[0]?.src)).toMatch(/2026-09-12-native-raw\.mp4$/);
     expect(state.calls.buildLoop[0]?.targetSeconds).toBe(8);
-
-    // renderTextOverlay：输入=loop 产物，meta 透传 pickDate/title/narrative/takenAt
-    expect(state.calls.renderTextOverlay).toHaveLength(2);
-    expect(String(state.calls.renderTextOverlay[0]?.videoPath)).toMatch(
-      /2026-09-12-landscape-raw-loop\.mp4$/,
-    );
+    expect(state.calls.renderTextOverlay).toHaveLength(1);
     expect(state.calls.renderTextOverlay[0]?.meta).toEqual({
       pickDate: "2026-09-12",
       title: "巷口的猫",
       narrative: "午后的光落在墙沿。",
       takenAt: "2016-07-18T14:35:53.000Z",
+      canvasWidth: 1248,
+      canvasHeight: 928,
     });
 
-    // 双轨转码输入 = Remotion 成品（*-loop-overlay.mp4）；横 → .mov（aerial），竖 → .mp4（gallery）
-    expect(state.calls.transcodeAerial).toHaveLength(1);
-    expect(String(state.calls.transcodeAerial[0]?.[0])).toMatch(
-      /2026-09-12-landscape-raw-loop-overlay\.mp4$/,
-    );
-    expect(String(state.calls.transcodeAerial[0]?.[1])).toMatch(/2026-09-12-landscape\.mov$/);
+    // 转码 A（画廊原生）×1 + 尺寸护栏断言画布；转码 B（Aerial）不发生（1.34 < 1.5 窗外）
     expect(state.calls.transcodeGallery).toHaveLength(1);
-    expect(String(state.calls.transcodeGallery[0]?.[0])).toMatch(
-      /2026-09-12-portrait-raw-loop-overlay\.mp4$/,
-    );
-    expect(String(state.calls.transcodeGallery[0]?.[1])).toMatch(/2026-09-12-portrait\.mp4$/);
+    expect(String(state.calls.transcodeGallery[0]?.[1])).toMatch(/2026-09-12-native\.mp4$/);
+    expect(state.calls.assertDims).toHaveLength(1);
+    expect(state.calls.assertDims[0]).toEqual({
+      filePath: expect.stringMatching(/2026-09-12-native\.mp4$/),
+      w: 1248,
+      h: 928,
+    });
+    expect(state.calls.transcodeAerialNative).toHaveLength(0);
 
-    // COS 上传契约：key + contentType
-    expect(state.calls.upload).toHaveLength(2);
-    expect(state.calls.upload[0]?.cosKey).toBe("relight/wallpaper-videos/2026-09-12_landscape.mov");
-    expect(state.calls.upload[0]?.contentType).toBe("video/quicktime");
-    expect(state.calls.upload[1]?.cosKey).toBe("relight/wallpaper-videos/2026-09-12_portrait.mp4");
-    expect(state.calls.upload[1]?.contentType).toBe("video/mp4");
+    // COS 上传 ×1：native key + video/mp4；landscape 列不写
+    expect(state.calls.upload).toHaveLength(1);
+    expect(state.calls.upload[0]?.cosKey).toBe("relight/wallpaper-videos/2026-09-12_native.mp4");
+    expect(state.calls.upload[0]?.contentType).toBe("video/mp4");
 
-    // 回执非空 → 写 DB 两列
+    // 回执非空 → 仅写 native 列（一次 UPDATE 合并）
     const written = state.updates.map((u) => u.vals);
-    expect(written.some((v) => "wallpaperVideoLandscapeUrl" in v)).toBe(true);
-    expect(written.some((v) => "wallpaperVideoPortraitUrl" in v)).toBe(true);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.wallpaperVideoNativeUrl).toBe(state.uploadReturn);
+    expect("wallpaperVideoLandscapeUrl" in (written[0] ?? {})).toBe(false);
 
-    // syncDayToGallery 复用
+    // syncDayToGallery 复用；返回 {native, landscape}
     expect(state.calls.syncDay).toHaveLength(1);
-
-    expect(res.landscape).toBe(state.uploadReturn);
-    expect(res.portrait).toBe(state.uploadReturn);
+    expect(res.native).toBe(state.uploadReturn);
+    expect(res.landscape).toBe("");
   });
 
-  it("无 faces 记录 → faceBbox null（中心构图回退），链路照常", async () => {
+  it("happy path（16:9 hero，兼容窗口）：native + aerial 双产物双列", async () => {
+    state.pickRows = [PICK];
+    state.photoRows = [PHOTO];
+    state.heroDims = { width: 3840, height: 2160 }; // 16:9 → 画布 1440×800（w/h=1.8 ∈ [1.5,1.9]）
+    state.uploadReturn = "https://b.cos.ap-shanghai.myqcloud.com/relight/x";
+
+    const res = await runWallpaperVideo("2026-09-12", () => {});
+
+    expect(state.calls.preprocess[0]?.width).toBe(1440);
+    expect(state.calls.preprocess[0]?.height).toBe(800);
+    expect(state.calls.spawn[0]?.width).toBe(1440);
+    expect(state.calls.spawn[0]?.height).toBe(800);
+    // 双转码 + 双护栏（native 画布 + aerial 1920×1080）
+    expect(state.calls.transcodeGallery).toHaveLength(1);
+    expect(state.calls.transcodeAerialNative).toHaveLength(1);
+    expect(String(state.calls.transcodeAerialNative[0]?.[1])).toMatch(/2026-09-12-landscape\.mov$/);
+    expect(state.calls.assertDims).toHaveLength(2);
+    expect(state.calls.assertDims[1]).toEqual({
+      filePath: expect.stringMatching(/2026-09-12-landscape\.mov$/),
+      w: 1920,
+      h: 1080,
+    });
+    // 双上传：native `_native.mp4` + aerial `_landscape.mov`
+    expect(state.calls.upload).toHaveLength(2);
+    expect(state.calls.upload[0]?.cosKey).toBe("relight/wallpaper-videos/2026-09-12_native.mp4");
+    expect(state.calls.upload[1]?.cosKey).toBe("relight/wallpaper-videos/2026-09-12_landscape.mov");
+    expect(state.calls.upload[1]?.contentType).toBe("video/quicktime");
+    // 双列写入（一次 UPDATE 合并两列）
+    const written = state.updates.map((u) => u.vals);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.wallpaperVideoNativeUrl).toBe(state.uploadReturn);
+    expect(written[0]?.wallpaperVideoLandscapeUrl).toBe(state.uploadReturn);
+    expect(res.native).toBe(state.uploadReturn);
+    expect(res.landscape).toBe(state.uploadReturn);
+  });
+
+  it("无 faces 记录 → faceBbox null（风景默认 prompt），链路照常", async () => {
     state.pickRows = [PICK];
     state.photoRows = [PHOTO];
     state.faceRows = [];
     state.uploadReturn = "https://b.cos.ap-shanghai.myqcloud.com/relight/x";
 
     const res = await runWallpaperVideo("2026-09-12", () => {});
-
-    expect(state.calls.preprocess).toHaveLength(2);
-    expect(state.calls.preprocess[0]?.opts).toEqual({ faceBbox: null });
-    expect(res.landscape).toBe(state.uploadReturn);
+    expect(state.calls.spawn).toHaveLength(1);
+    expect(res.native).toBe(state.uploadReturn);
   });
 
-  it("上传回执空串 → 不写 DB 列（但另一侧成功仍写）", async () => {
+  it("上传回执空串 → 不写 DB 列", async () => {
     state.pickRows = [PICK];
     state.photoRows = [PHOTO];
-    // 第一次调用（横）返回空串，第二次（竖）返回 URL —— 模拟横版上传失败
-    const { uploadFile } = await import("../lib/cos/upload");
-    const mockUpload = vi.mocked(uploadFile);
-    let n = 0;
-    mockUpload.mockImplementation(async () => {
-      n += 1;
-      return n === 1 ? "" : "https://b.cos.ap-shanghai.myqcloud.com/relight/x";
-    });
+    state.uploadReturn = ""; // 上传失败语义（空串回执）
 
     const res = await runWallpaperVideo("2026-09-12", () => {});
-    const tables = state.updates.map((u) => ({
-      field: Object.keys(u.vals)[0],
-    }));
-    expect(tables.some((t) => t.field === "wallpaperVideoLandscapeUrl")).toBe(false);
-    expect(tables.some((t) => t.field === "wallpaperVideoPortraitUrl")).toBe(true);
-    expect(res.landscape).toBe("");
+    expect(state.calls.upload).toHaveLength(1);
+    expect(state.updates).toHaveLength(0);
+    expect(res.native).toBe("");
   });
 
-  it("单侧 buildLoop 失败 → 该侧空串旁路，另一侧照常", async () => {
+  it("生成失败（spawn throw）→ 两列均空旁路 log，不向调度层抛（契约 8）", async () => {
     state.pickRows = [PICK];
     state.photoRows = [PHOTO];
     state.uploadReturn = "https://b.cos.ap-shanghai.myqcloud.com/relight/x";
-    const { buildLoop } = await import("../lib/wallpaper/video");
-    vi.mocked(buildLoop).mockImplementationOnce(async () => {
-      throw new Error("buildLoop ffmpeg 拼接失败");
+    const { spawnHoneydoVideo } = await import("../lib/wallpaper/video");
+    vi.mocked(spawnHoneydoVideo).mockImplementationOnce(async () => {
+      throw new Error("honeydo video gen 退出码 1");
     });
 
     const logs: string[] = [];
     const res = await runWallpaperVideo("2026-09-12", (m) => logs.push(m));
+    expect(res).toEqual({ native: "", landscape: "" });
+    expect(state.updates).toHaveLength(0);
+    expect(logs.join("\n")).toContain("native 腿失败");
+  });
 
-    expect(res.landscape).toBe("");
-    expect(res.portrait).toBe(state.uploadReturn);
-    expect(logs.join("\n")).toContain("横版失败");
-    // 横侧失败后竖侧仍完整走完
-    expect(state.calls.renderTextOverlay).toHaveLength(1);
-    expect(String(state.calls.renderTextOverlay[0]?.videoPath)).toMatch(/portrait-raw-loop\.mp4$/);
+  it("尺寸护栏阻断（转码后 assertVideoDimensions throw）→ 两列均空（场景 5：禁静默失败）", async () => {
+    state.pickRows = [PICK];
+    state.photoRows = [PHOTO];
+    state.heroDims = { width: 3840, height: 2160 }; // 兼容窗口：aerial 护栏在 native 列写入前执行
+    state.uploadReturn = "https://b.cos.ap-shanghai.myqcloud.com/relight/x";
+    const { assertVideoDimensions, DimensionAssertError } = await import("../lib/wallpaper/video");
+    const dimMock = vi.mocked(assertVideoDimensions);
+    const prevImpl = dimMock.getMockImplementation();
+    dimMock.mockImplementation(async () => {
+      throw new DimensionAssertError("转码产物尺寸断言失败: 期望 1920×1080，实际 1918×1080");
+    });
+
+    const logs: string[] = [];
+    try {
+      // 设计 D2/红队 SSOT 5.P1：尺寸护栏失败必须传播为 job 失败（rerun CLI exit≠0）
+      let rejected = false;
+      try {
+        await runWallpaperVideo("2026-09-12", (m) => logs.push(m));
+      } catch {
+        rejected = true;
+      }
+      expect(rejected, "尺寸护栏失败必须传播为 job 失败").toBe(true);
+      // 护栏在任一回执列写入之前 → 两列均空（契约 8 / 场景 5.P1）
+      expect(state.updates).toHaveLength(0);
+      expect(state.calls.upload).toHaveLength(0);
+      expect(logs.join("\n")).toContain("尺寸断言失败");
+    } finally {
+      // 恢复工厂默认实现，防泄漏到后续测试（worker 透传等）
+      dimMock.mockImplementation(
+        prevImpl ??
+          (async (filePath: string, w: number, h: number) => {
+            state.calls.assertDims.push({ filePath, w, h });
+          }),
+      );
+    }
   });
 });
 
 describe("getLargestFaceBbox", () => {
-  it("faces 空表 → null（中心构图回退）", async () => {
+  it("faces 空表 → null（风景默认 prompt）", async () => {
     state.faceRows = [];
     await expect(getLargestFaceBbox("photo-1")).resolves.toBeNull();
   });
@@ -382,7 +440,7 @@ describe("getLargestFaceBbox", () => {
 });
 
 describe("wallpaperVideoWorker", () => {
-  it("job.data.pickDate 透传 runWallpaperVideo", async () => {
+  it("job.data.pickDate 透传 runWallpaperVideo（单腿 spawn ×1）", async () => {
     state.pickRows = [PICK];
     state.photoRows = [PHOTO];
     const job = {
@@ -390,6 +448,6 @@ describe("wallpaperVideoWorker", () => {
       log: (m: string) => undefined,
     };
     await wallpaperVideoWorker(job as never);
-    expect(state.calls.spawn).toHaveLength(2);
+    expect(state.calls.spawn).toHaveLength(1);
   });
 });

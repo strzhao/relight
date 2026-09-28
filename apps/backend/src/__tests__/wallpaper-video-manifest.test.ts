@@ -1,12 +1,15 @@
 /**
  * 单测：manifest 视频字段（任务 3）— COS key 函数 + ManifestDay 条件展开
  *
- * 契约（state.md ## 契约规约 数据结构）：
+ * 契约（state.md ## 契约规约 数据结构；20260928 单腿原生）：
  *   COS key：`{config.cos.prefix}/wallpaper-videos/{pickDate}_landscape.mov`、
- *            `{config.cos.prefix}/wallpaper-videos/{pickDate}_portrait.mp4`
- *   ManifestDay 增可选字段 `wallpaperVideoLandscape?` / `wallpaperVideoPortrait?`
+ *            `{config.cos.prefix}/wallpaper-videos/{pickDate}_portrait.mp4`（legacy）、
+ *            `{config.cos.prefix}/wallpaper-videos/{pickDate}_native.mp4`（新）
+ *   ManifestDay 增可选字段 `wallpaperVideoLandscape?` / `wallpaperVideoPortrait?` /
+ *     `wallpaperVideoNative?`（20260928 新增）
  *   条件展开：仅当 DB 回执列非空时字段存在于 JSON（列 null/空串 → 字段缺省，不输出空串——
- *   冻结场景 4.P2 要求开关关闭时字段不存在）。
+ *   冻结场景 4.P2 要求开关关闭时字段不存在）；场景 6.P5：native 列为空 → 无
+ *   wallpaperVideoNative 字段；场景 7.P2：native 优先展开为 native URL。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -38,9 +41,8 @@ vi.mock("../lib/config", () => ({
   },
 }));
 
-const { wallpaperVideoLandscapeCosKey, wallpaperVideoPortraitCosKey } = await import(
-  "../lib/gallery/manifest"
-);
+const { wallpaperVideoLandscapeCosKey, wallpaperVideoPortraitCosKey, wallpaperVideoNativeCosKey } =
+  await import("../lib/gallery/manifest");
 const { buildManifest } = await import("../lib/gallery/manifest");
 
 // ============================================================================
@@ -80,6 +82,7 @@ interface InsertPickOpts {
   composedImagePath?: string | null;
   landscapeUrl?: string | null;
   portraitUrl?: string | null;
+  nativeUrl?: string | null;
 }
 
 function insertPick(opts: InsertPickOpts): void {
@@ -88,14 +91,15 @@ function insertPick(opts: InsertPickOpts): void {
     `INSERT INTO daily_picks (id, photo_id, pick_date, title, narrative, score,
                                composed_image_path, members,
                                wallpaper_video_landscape_url, wallpaper_video_portrait_url,
-                               created_at)
-     VALUES (?, 'photo-0', ?, '标题', '叙述', 0, ?, '[]', ?, ?, ?)`,
+                               wallpaper_video_native_url, created_at)
+     VALUES (?, 'photo-0', ?, '标题', '叙述', 0, ?, '[]', ?, ?, ?, ?)`,
   ).run(
     `pick-${opts.pickDate}`,
     opts.pickDate,
     opts.composedImagePath ?? null,
     opts.landscapeUrl ?? null,
     opts.portraitUrl ?? null,
+    opts.nativeUrl ?? null,
     new Date().toISOString(),
   );
   db.close();
@@ -131,6 +135,12 @@ describe("wallpaperVideo COS key 函数", () => {
   it("portrait key = {prefix}/wallpaper-videos/{pickDate}_portrait.mp4", () => {
     expect(wallpaperVideoPortraitCosKey("2026-09-12")).toBe(
       "relight/wallpaper-videos/2026-09-12_portrait.mp4",
+    );
+  });
+
+  it("native key = {prefix}/wallpaper-videos/{pickDate}_native.mp4（20260928 新增）", () => {
+    expect(wallpaperVideoNativeCosKey("2026-09-12")).toBe(
+      "relight/wallpaper-videos/2026-09-12_native.mp4",
     );
   });
 });

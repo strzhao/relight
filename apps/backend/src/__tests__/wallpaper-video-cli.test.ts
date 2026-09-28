@@ -1,10 +1,11 @@
 /**
  * 单测：wallpaper-video rerun CLI 纯函数（任务 4 契约测试兜底）
  *
- * 契约（state.md ## 契约规约 CLI（rerun）契约）：
+ * 契约（state.md ## 契约规约 CLI（rerun）契约；20260928 单腿原生改版）：
  *   命令：npm run wallpaper-video:rerun -- --pickDate=YYYY-MM-DD
  *   参数 --pickDate（必填，isValidYmd 校验）
- *   末行 JSON {pickDate, landscape: <url|"">, portrait: <url|"">}
+ *   末行 JSON {pickDate, native: <url|"">, landscape: <url|"">}
+ *   （native=单腿原生 mp4 回执；landscape=16:9 兼容 .mov 回执，仅兼容日非空）
  */
 import { describe, expect, it } from "vitest";
 import { formatResultLine, isValidYmd, parsePickDateArg } from "../cli/wallpaper-video";
@@ -40,22 +41,22 @@ describe("isValidYmd", () => {
 });
 
 describe("formatResultLine", () => {
-  it("末行 JSON 契约：成功", () => {
+  it("末行 JSON 契约：成功（兼容日 native + landscape 双回执）", () => {
     const line = formatResultLine(
       "2026-09-12",
+      "https://b.cos.ap-shanghai.myqcloud.com/relight/wallpaper-videos/2026-09-12_native.mp4",
       "https://b.cos.ap-shanghai.myqcloud.com/relight/wallpaper-videos/2026-09-12_landscape.mov",
-      "https://b.cos.ap-shanghai.myqcloud.com/relight/wallpaper-videos/2026-09-12_portrait.mp4",
     );
     const parsed = JSON.parse(line) as Record<string, string>;
     expect(parsed.pickDate).toBe("2026-09-12");
+    expect(parsed.native).toContain("_native.mp4");
     expect(parsed.landscape).toContain("_landscape.mov");
-    expect(parsed.portrait).toContain("_portrait.mp4");
-    expect(Object.keys(parsed).sort()).toEqual(["landscape", "pickDate", "portrait"]);
+    expect(Object.keys(parsed).sort()).toEqual(["landscape", "native", "pickDate"]);
   });
 
   it("末行 JSON 契约：失败为空串（非 null/缺省）", () => {
     const parsed = JSON.parse(formatResultLine("2026-09-12", "", "")) as Record<string, string>;
+    expect(parsed.native).toBe("");
     expect(parsed.landscape).toBe("");
-    expect(parsed.portrait).toBe("");
   });
 });

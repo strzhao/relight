@@ -1,9 +1,13 @@
 /**
  * 单测：lib/wallpaper/video.ts — renderTextOverlay + assertVideoSpawnPrerequisites
- * （v2 增量任务 14：Remotion 文字层）
+ * （v2 增量任务 14：Remotion 文字层；20260928 单腿原生：props 扩展 + comp 按画布比例选）
  *
- * 契约（state.md ## 契约规约 计算/spawn 契约）：
- *   renderTextOverlay(videoPath, meta: {pickDate,title,narrative,takenAt?}) → {overlaidPath}
+ * 契约（state.md ## 契约规约 计算/spawn 契约；20260928 契约 7 props 纯超集扩展）：
+ *   renderTextOverlay(videoPath, meta: {pickDate,title,narrative,takenAt?,canvasWidth,canvasHeight})
+ *     → {overlaidPath}
+ *   comp 选择按 meta.canvasWidth/canvasHeight 比例（≥0.9 → landscape 两栏 / <0.9 → portrait
+ *     全屏），不再按输入视频探测尺寸；props 透传 canvasWidth/canvasHeight（Root.tsx
+ *     calculateMetadata 动态定 comp 尺寸）
  *   spawn `npx remotion render`（cwd=wallpaper-overlay 工程、npx 绝对路径、
  *     AbortController 600s 超时、stdout tail 留证）
  *   错误枚举 OverlayRenderError：工程缺失 / Remotion 运行时缺失（不自动安装）/
@@ -179,6 +183,9 @@ const META = {
   title: "巷口的猫",
   narrative: "午后的光落在墙沿。",
   takenAt: "2016-07-18T14:35:53.000Z",
+  // 20260928：生成画布（704×1216 竖版样片对应的画布档；比例 0.579 <0.9 → portrait comp）
+  canvasWidth: 704,
+  canvasHeight: 1216,
 };
 
 describe("renderTextOverlay（mock spawn）", () => {
@@ -197,7 +204,8 @@ describe("renderTextOverlay（mock spawn）", () => {
     // 竖版输入 → portrait composition
     expect(args[3]).toBe("wallpaper-overlay-portrait");
     expect(args[4]).toMatch(/input-portrait-overlay\.mp4$/);
-    // props 契约：{videoPath, pickDate, title, narrative, captureDateline}
+    // props 契约（20260928 契约 7 纯超集扩展）：{videoPath, pickDate, title, narrative,
+    // captureDateline, canvasWidth, canvasHeight}
     const propsIdx = args.indexOf("--props");
     const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
     expect(props).toEqual({
@@ -206,6 +214,8 @@ describe("renderTextOverlay（mock spawn）", () => {
       title: META.title,
       narrative: META.narrative,
       captureDateline: buildCaptureDateline(META.takenAt),
+      canvasWidth: 704,
+      canvasHeight: 1216,
     });
     // frames = ceil(duration × fps)（0.5s × 24fps = 12 帧 → 0-11）
     const framesIdx = args.indexOf("--frames");
@@ -224,10 +234,29 @@ describe("renderTextOverlay（mock spawn）", () => {
     expect(res.overlaidPath).toMatch(/input-portrait-overlay\.mp4$/);
   });
 
-  it("横版输入 → landscape composition", async () => {
-    await renderTextOverlay(`${holder.tmpDir}/input-landscape.mp4`, META);
+  it("画布比例 ≥0.9 → landscape composition（20260928：按 canvas props 而非输入视频探测）", async () => {
+    await renderTextOverlay(`${holder.tmpDir}/input-landscape.mp4`, {
+      ...META,
+      canvasWidth: 1440,
+      canvasHeight: 800,
+    });
     const args = holder.spawnCalls[0]?.args ?? [];
     expect(args[3]).toBe("wallpaper-overlay-landscape");
+  });
+
+  it("comp 选择只看画布比例：竖版画布 + 横版视频输入 → 仍 portrait comp（kill 输入探测 No-op）", async () => {
+    await renderTextOverlay(`${holder.tmpDir}/input-landscape.mp4`, {
+      ...META,
+      canvasWidth: 800,
+      canvasHeight: 1440,
+    });
+    const args = holder.spawnCalls[0]?.args ?? [];
+    expect(args[3]).toBe("wallpaper-overlay-portrait");
+    // props 携带的是画布（非输入视频）尺寸
+    const propsIdx = args.indexOf("--props");
+    const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
+    expect(props.canvasWidth).toBe(800);
+    expect(props.canvasHeight).toBe(1440);
   });
 
   it("takenAt 缺失 → props.captureDateline 为 null（footer 不渲染契约）", async () => {

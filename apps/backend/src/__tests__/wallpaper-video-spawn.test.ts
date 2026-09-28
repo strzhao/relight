@@ -1,11 +1,12 @@
 /**
  * 单测：lib/wallpaper/video.ts — spawnHoneydoVideo + preprocessHeroFrame（任务 2）
  *
- * 契约（state.md ## 契约规约 计算/spawn 契约）：
+ * 契约（state.md ## 契约规约 计算/spawn 契约；20260928 单腿原生比例）：
  *   spawnHoneydoVideo({cliPath, prompt, firstFrame, lastFrame, outPath, seconds, res, timeoutMs})
  *     → {outPath: string, duration: number, stdout: string}
  *   错误枚举 HoneydoSpawnError（非零退出 / JSON 解析失败 / 产物文件不存在 / 超时 abort，
  *     message 含 stdout tail ≤2000 字符与超时毫秒数）
+ *   preprocessHeroFrame(photoPath, width, height)（20260928 三参：去人脸窗口，统一中心 cover 微裁）
  *
  * 测试策略（照 video-claude-runner 惯例）：spawn stub 用真实 fake shell 脚本，
  * 不 mock child_process——更黑盒、更接近真实 spawn 路径。
@@ -200,20 +201,20 @@ describe("preprocessHeroFrame", () => {
     expect(meta.format).toBe("png");
   });
 
-  it("竖版：300×400 源图 cover 裁剪到 704×1216", async () => {
+  it("竖版：300×400 源图 cover 裁剪到 928×1248（20260928 原生画布档）", async () => {
     const src = path.join(dir, "portrait-src.png");
     await sharp({
       create: { width: 300, height: 400, channels: 3, background: "#cc2288" },
     })
       .png()
       .toFile(src);
-    const out = await preprocessHeroFrame(src, 704, 1216);
+    const out = await preprocessHeroFrame(src, 928, 1248);
     const meta = await sharp(out).metadata();
-    expect(meta.width).toBe(704);
-    expect(meta.height).toBe(1216);
+    expect(meta.width).toBe(928);
+    expect(meta.height).toBe(1248);
   });
 
-  // ---- v2 增量任务 12：人脸构图裁剪 ----
+  // ---- 20260928 单腿原生：人脸窗口已去除（统一中心 cover 微裁） ----
 
   /** 源图底色 bg，在 (fx,fy) 画 faceW×faceH 红色方块（模拟人脸），返回路径 */
   async function makeSource(
@@ -256,62 +257,37 @@ describe("preprocessHeroFrame", () => {
     return p.r > 150 && p.g < 90 && p.b < 90;
   }
 
-  it("人脸构图：小脸靠左上 → 窗口缩放至脸高≈画布高 1/4 且中心对齐人脸", async () => {
-    // 4000×3000 源，脸 300×300 @(200,200)：推导窗口 winH=1200（=4×脸高，脸高映射恰 704/4=176）
-    // 窗口 2182×1200 中心对齐脸心 (350,350) → clamp 到 (0,0)
-    const src = await makeSource("face-small-tl.png", 4000, 3000, "#2288cc", 200, 200, 300, 300);
-    const out = await preprocessHeroFrame(src, 1280, 704, {
-      faceBbox: { x: 200, y: 200, w: 300, h: 300 },
-    });
+  it("20260928 去人脸窗口：偏脸源图统一中心 cover 微裁（不向脸重构图）", async () => {
+    // 2000×1000 源，脸 300×300 @(1500,400)（偏右）。中心 cover 窗口宽 = 1000×(1280/704) = 1818，
+    // 画布中心 = 图中心 (1000,500) → 窗口 (91..1909)；脸 (1500..1800) 落窗口右半
+    const src = await makeSource(
+      "native-center-crop.png",
+      2000,
+      1000,
+      "#2288cc",
+      1500,
+      400,
+      300,
+      300,
+    );
+    const out = await preprocessHeroFrame(src, 1280, 704);
     const meta = await sharp(out).metadata();
     expect(meta.width).toBe(1280);
     expect(meta.height).toBe(704);
-    // 脸方块落在窗口 (0,0,2182,1200) 内 (200..500,200..500) → 画布缩放 0.5866 → (117..293)
-    expect(isRed(await pixelAt(out, 200, 200))).toBe(true);
-    expect(isRed(await pixelAt(out, 640, 352))).toBe(false);
+    // 脸方块画布区域 ≈ (1500-91)×0.704=993 .. (1800-91)×0.704=1203，纵向 282..493
+    expect(isRed(await pixelAt(out, 1100, 387))).toBe(true);
+    // 画布左缘区域为底色（无人脸拉近/窗口偏移的证据）
+    expect(isRed(await pixelAt(out, 100, 387))).toBe(false);
   });
 
-  it("人脸构图：脸在整图已 ≥1/4 → 全幅窗口按脸心取位（不放大）", async () => {
-    // 2000×1000 源，脸 300×300 @(1500,400)：脸高占全幅 30% → 窗口=全幅 cover（winH=1000）
-    // winW=1818，脸心 1650 超右界 → 窗口右对齐；脸在画布右半
-    const src = await makeSource("face-big-right.png", 2000, 1000, "#2288cc", 1500, 400, 300, 300);
-    const out = await preprocessHeroFrame(src, 1280, 704, {
-      faceBbox: { x: 1500, y: 400, w: 300, h: 300 },
-    });
-    // 脸方块画布区域约 (928..1139, 282..493)
-    expect(isRed(await pixelAt(out, 1030, 387))).toBe(true);
-    expect(isRed(await pixelAt(out, 300, 387))).toBe(false);
-  });
-
-  it("人脸构图：竖版画布 704×1216 同样生效（脸高 ≥1216/4=304）", async () => {
-    // 3000×4000 源，脸 400×400 @(200,200)：winH=min(max(min(4032? no: fullH=min(4000,3000/0.579)=4000? → capped=min(4000,1600)=1600; minWin=min(1216,4000)=1216 → winH=1600
-    // 窗口 1600×1600? winW=1600*0.579=927 → 中心 (400,400) → left/top=0
-    const src = await makeSource("face-portrait.png", 3000, 4000, "#2288cc", 200, 200, 400, 400);
-    const out = await preprocessHeroFrame(src, 704, 1216, {
-      faceBbox: { x: 200, y: 200, w: 400, h: 400 },
-    });
+  it("20260928 签名收窄：preprocessHeroFrame 仅三参（faceBbox 构图选项已删除）", async () => {
+    const src = await makeSource("native-signature.png", 4000, 3000, "#2288cc", 200, 200, 300, 300);
+    // 不传任何构图选项——cover 中心裁剪
+    const out = await preprocessHeroFrame(src, 1248, 928);
     const meta = await sharp(out).metadata();
-    expect(meta.width).toBe(704);
-    expect(meta.height).toBe(1216);
-    // 脸方块在窗口 (0,0,927,1600) 内 (200..600,200..600) → 缩放 1216/1600=0.76 → (152..456,152..456)
-    expect(isRed(await pixelAt(out, 300, 300))).toBe(true);
-    expect(isRed(await pixelAt(out, 352, 900))).toBe(false);
-  });
-
-  it("faceBbox 缺省/退化 → 回退中心构图（现状行为）", async () => {
-    const src = await makeSource("face-degenerate.png", 4000, 3000, "#2288cc", 200, 200, 300, 300);
-    // 缺省
-    const out1 = await preprocessHeroFrame(src, 1280, 704);
-    const meta1 = await sharp(out1).metadata();
-    expect(meta1.width).toBe(1280);
-    expect(meta1.height).toBe(704);
-    // 退化 bbox（w=0）→ 同样走中心构图（脸不被拉近中心：画布中心为底色）
-    const out2 = await preprocessHeroFrame(src, 1280, 704, {
-      faceBbox: { x: 200, y: 200, w: 0, h: 300 },
-    });
-    const meta2 = await sharp(out2).metadata();
-    expect(meta2.width).toBe(1280);
-    expect(meta2.height).toBe(704);
-    expect(isRed(await pixelAt(out2, 640, 352))).toBe(false);
+    expect(meta.width).toBe(1248);
+    expect(meta.height).toBe(928);
+    // 4000×3000 → 1248×928（比例同为 4:3）→ 无裁切纯缩放：左上角仍底色（脸在 (200,200) 缩到 (62,62) 附近）
+    expect(isRed(await pixelAt(out, 63, 63))).toBe(true);
   });
 });

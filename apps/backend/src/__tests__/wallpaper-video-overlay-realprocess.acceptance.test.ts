@@ -11,11 +11,11 @@
  *
  * 验收点（round 2 编排器）：真实渲染冒烟放独立 real-process 文件 + 超小输入（2s 样片）。
  *   mock 面（错误枚举 / 调用形态）见 wallpaper-video-overlay.acceptance.test.ts。
- *   输入用生产画布 1280×704（边界值【v2】横版画布，honeydo 720p 母版形态）× 2s——
- *   超小体现在时长（24fps × 2s = 48 帧）；分辨率必须用生产画布：
- *   实测实现按 1280×704 固定画布渲染（喂 256p 样片产出仍 1280×704，同分辨率 invariant
- *   对非生产画布输入不成立——已作为观察项报告 QA；生产链路母版恒为 1280×704，
- *   invariant 在生产包络内成立）。
+ *   输入用 1280×704（honeydo 720p 母版形态）× 2s——超小体现在时长（24fps × 2s = 48 帧）。
+ *   【20260928 单腿原生参数化】comp 尺寸经 props.canvasWidth/canvasHeight + Root.tsx
+ *   calculateMetadata 动态化：传画布 1280×704 → 产出 1280×704（同分辨率 invariant 回归
+ *   「输入==画布==产出」）；另以非默认 4:3 档画布（1248×928，computeNativeCanvas(4,3) 参考档）
+ *   真实渲染一例，断言产出 == 参数化 W×H（kill 尺寸写死 No-op，场景 9.P1 形态）。
  *
  * 环境前提（§后端设计 §1【v2】——文字层工程是 v2 交付物的一部分）：
  *   {config.videoWorkspacePath}/wallpaper-overlay 工程必须存在；缺失即真红（禁宽容跳过）。
@@ -51,7 +51,14 @@ let tmpRoot = "";
 let inputVideo = "";
 let renderTextOverlay: (
   videoPath: string,
-  meta: { pickDate: string; title: string; narrative: string },
+  meta: {
+    pickDate: string;
+    title: string;
+    narrative: string;
+    takenAt?: string | null;
+    canvasWidth: number;
+    canvasHeight: number;
+  },
 ) => Promise<{ overlaidPath: string }>;
 
 interface ProbeResult {
@@ -184,6 +191,9 @@ dOverlay("【v2】renderTextOverlay 产物 invariant（真实 Remotion 渲染，
       pickDate: "2026-09-12",
       title: "金色黄昏",
       narrative: "五年前的今天，你在海边捕捉到了这张温暖的照片。夕阳染成金橙色，海浪轻抚沙滩。",
+      // 20260928：生成画布透传（== 输入分辨率；calculateMetadata 按此定 comp 尺寸）
+      canvasWidth: 1280,
+      canvasHeight: 704,
     });
 
     // 返回契约 + 产物存在
@@ -198,13 +208,14 @@ dOverlay("【v2】renderTextOverlay 产物 invariant（真实 Remotion 渲染，
     const head = fs.readFileSync(res.overlaidPath).subarray(0, 64).toString("latin1");
     expect(head, "成品必须是 mp4 封装（文件头含 ftyp）").toContain("ftyp");
 
-    // 契约（2026-09-13 v3 修订）：横版画布升 1920×1080（Aerial 原生 16:9），
-    // 输入 1280×704(20:11) 在两栏画布内按 contain 重排版 → 成品 1920×1080；
-    // 帧率仍与输入同源。
+    // 契约（20260928 单腿原生参数化）：comp 尺寸 == props 画布（1280×704 == 输入分辨率）——
+    // 同分辨率 invariant 回归「输入==画布==产出」；帧率仍与输入同源。
     const inProbe = probeVideo(inputVideo);
     const outProbe = probeVideo(res.overlaidPath);
-    expect(outProbe.width, "横版成品宽度必须 1920（两栏画布）").toBe(1920);
-    expect(outProbe.height, "横版成品高度必须 1080").toBe(1080);
+    expect(outProbe.width, "成品宽度必须 == props 画布 1280（calculateMetadata 参数化）").toBe(
+      1280,
+    );
+    expect(outProbe.height, "成品高度必须 == props 画布 704").toBe(704);
     expect(
       outProbe.rFrameRate,
       `成品帧率 ${outProbe.rFrameRate} ≠ 输入帧率 ${inProbe.rFrameRate}`,
@@ -214,11 +225,28 @@ dOverlay("【v2】renderTextOverlay 产物 invariant（真实 Remotion 渲染，
     const inFrame = firstFrameRaw(inputVideo);
     const outFrame = firstFrameRaw(res.overlaidPath);
     expect(outFrame.length, "成品首帧 raw 尺寸与画布不一致（分辨率/像素格式漂移）").toBe(
-      1920 * 1080 * 3,
+      1280 * 704 * 3,
     );
     expect(
       inFrame.equals(outFrame),
       "成品首帧与输入首帧逐像素相同——文字层不存在（首帧像素差异必须 >0）",
     ).toBe(false);
+  }, 900000);
+
+  it("场景 9.P1 形态：非默认 4:3 档画布（1248×928）真实渲染 → 产物尺寸 == 参数化 W×H（kill 尺寸写死）", async () => {
+    const res = await renderTextOverlay(inputVideo, {
+      pickDate: "2026-09-12",
+      title: "金色黄昏",
+      narrative: "五年前的今天，你在海边捕捉到了这张温暖的照片。",
+      // computeNativeCanvas(4,3) 参考档：非 16:9、非历史默认档
+      canvasWidth: 1248,
+      canvasHeight: 928,
+    });
+    expect(fs.existsSync(res.overlaidPath), `叠字成品不存在: ${res.overlaidPath}`).toBe(true);
+    const outProbe = probeVideo(res.overlaidPath);
+    expect(outProbe.width, "产物宽度必须 == 参数化画布 1248").toBe(1248);
+    expect(outProbe.height, "产物高度必须 == 参数化画布 928").toBe(928);
+    const head = fs.readFileSync(res.overlaidPath).subarray(0, 64).toString("latin1");
+    expect(head).toContain("ftyp");
   }, 900000);
 });

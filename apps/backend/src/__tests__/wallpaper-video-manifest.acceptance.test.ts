@@ -91,6 +91,8 @@ import { buildManifest } from "../lib/gallery/manifest";
 const LANDSCAPE_URL = `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${TEST_COS.prefix}/wallpaper-videos/2026-09-12_landscape.mov`;
 /** COS key：{prefix}/wallpaper-videos/{pickDate}_portrait.mp4 → 公网 URL（回执形态） */
 const PORTRAIT_URL = `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${TEST_COS.prefix}/wallpaper-videos/2026-09-12_portrait.mp4`;
+/** COS key：{prefix}/wallpaper-videos/{pickDate}_native.mp4 → 公网 URL（20260928 单腿原生，回执形态） */
+const NATIVE_URL = `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${TEST_COS.prefix}/wallpaper-videos/2026-09-12_native.mp4`;
 
 // ============================================================================
 // 临时 DB fixture
@@ -131,6 +133,9 @@ function ensureWallpaperVideoColumns(sqlite: Database.Database): void {
   if (!cols.includes("wallpaper_video_portrait_url")) {
     sqlite.exec("ALTER TABLE daily_picks ADD COLUMN wallpaper_video_portrait_url TEXT");
   }
+  if (!cols.includes("wallpaper_video_native_url")) {
+    sqlite.exec("ALTER TABLE daily_picks ADD COLUMN wallpaper_video_native_url TEXT");
+  }
 }
 
 interface SeedPick {
@@ -138,6 +143,7 @@ interface SeedPick {
   composedImagePath: string | null;
   landscapeUrl: string | null;
   portraitUrl: string | null;
+  nativeUrl?: string | null;
 }
 
 function seedDailyPick(sqlite: Database.Database, p: SeedPick): void {
@@ -151,8 +157,8 @@ function seedDailyPick(sqlite: Database.Database, p: SeedPick): void {
     .prepare(
       `INSERT INTO daily_picks
          (id, photo_id, pick_date, title, narrative, score, composed_image_path, members, created_at,
-          wallpaper_video_landscape_url, wallpaper_video_portrait_url)
-       VALUES (?, ?, ?, ?, ?, 8.5, ?, '[]', '2026-09-12T06:00:00.000Z', ?, ?)`,
+          wallpaper_video_landscape_url, wallpaper_video_portrait_url, wallpaper_video_native_url)
+       VALUES (?, ?, ?, ?, ?, 8.5, ?, '[]', '2026-09-12T06:00:00.000Z', ?, ?, ?)`,
     )
     .run(
       `pick-${p.pickDate}`,
@@ -163,6 +169,7 @@ function seedDailyPick(sqlite: Database.Database, p: SeedPick): void {
       p.composedImagePath,
       p.landscapeUrl,
       p.portraitUrl,
+      p.nativeUrl ?? null,
     );
 }
 
@@ -185,6 +192,7 @@ interface ManifestDayShape {
   wallpaperPortrait: string;
   wallpaperVideoLandscape?: string;
   wallpaperVideoPortrait?: string;
+  wallpaperVideoNative?: string;
 }
 
 function findDay(days: ManifestDayShape[], pickDate: string): ManifestDayShape {
@@ -330,5 +338,60 @@ describe("manifest 视频字段条件展开（场景 1.P2 / 4.P2 代码化，§�
     // 新视频字段仍缺省
     expect("wallpaperVideoLandscape" in day).toBe(false);
     expect("wallpaperVideoPortrait" in day).toBe(false);
+  });
+});
+
+// ============================================================================
+// 20260928 单腿原生：wallpaperVideoNative 条件展开（场景 6.P5 / 7.P2 代码化）
+// ============================================================================
+
+describe("manifest wallpaperVideoNative 条件展开（20260928 场景 6.P5 / 7.P2）", () => {
+  beforeEach(() => {
+    mockCosPutObject.mockClear();
+    mockCosSliceUploadFile.mockClear();
+  });
+
+  it("native 列非空 → wallpaperVideoNative 展开为 native URL（非 legacy URL，场景 7.P2）", async () => {
+    const env = createTestEnv();
+    const sqlite = openDb(env.dbPath);
+    seedDailyPick(sqlite, {
+      pickDate: "2026-09-12",
+      composedImagePath: "daily-composed/2026-09-12.jpg",
+      landscapeUrl: LANDSCAPE_URL,
+      portraitUrl: PORTRAIT_URL,
+      nativeUrl: NATIVE_URL,
+    });
+    sqlite.close();
+    process.env.DATABASE_PATH = env.dbPath;
+
+    const manifest = { days: await buildManifestDays() };
+    const day = findDay(manifest.days, "2026-09-12");
+    expect("wallpaperVideoNative" in day).toBe(true);
+    expect(day.wallpaperVideoNative).toBe(NATIVE_URL);
+    expect((day.wallpaperVideoNative as string).endsWith("_native.mp4")).toBe(true);
+    expect(day.wallpaperVideoNative).not.toBe(LANDSCAPE_URL);
+    expect(day.wallpaperVideoNative).not.toBe(PORTRAIT_URL);
+  });
+
+  it("native 列为空（legacy-only 日）→ 无 wallpaperVideoNative 字段；landscape/portrait 照常展开（场景 6.P2/6.P5）", async () => {
+    const env = createTestEnv();
+    const sqlite = openDb(env.dbPath);
+    seedDailyPick(sqlite, {
+      pickDate: "2026-09-11",
+      composedImagePath: "daily-composed/2026-09-11.jpg",
+      landscapeUrl: LANDSCAPE_URL,
+      portraitUrl: PORTRAIT_URL,
+      nativeUrl: null,
+    });
+    sqlite.close();
+    process.env.DATABASE_PATH = env.dbPath;
+
+    const manifest = { days: await buildManifestDays() };
+    const day = findDay(manifest.days, "2026-09-11");
+    // 场景 6.P5：native 列空 → 字段缺省（JSON 键不存在，非空串）
+    expect(Object.prototype.hasOwnProperty.call(day, "wallpaperVideoNative")).toBe(false);
+    // 场景 6.P2：历史日 legacy 两字段照常展开非空
+    expect(day.wallpaperVideoLandscape).toBe(LANDSCAPE_URL);
+    expect(day.wallpaperVideoPortrait).toBe(PORTRAIT_URL);
   });
 });

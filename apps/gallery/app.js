@@ -1230,7 +1230,15 @@
     return unit;
   }
 
-  /** wallpaper 卡（智能拉通 cover/contain + 右下动作栏，S6/S7；动态视频壁纸：wallpaperVideoPortrait 非空 → video 变体） */
+  /** 壁纸视频变体 URL 优先级（20260928 单腿原生）：native > portrait(legacy) > landscape(legacy 16:9)；
+   *  历史日无 native → 原行为回退，三字段皆空 → 静态卡 */
+  function wallpaperVideoUrl(day) {
+    return (
+      day.wallpaperVideoNative || day.wallpaperVideoPortrait || day.wallpaperVideoLandscape || ""
+    );
+  }
+
+  /** wallpaper 卡（智能拉通 cover/contain + 右下动作栏，S6/S7；动态视频壁纸：视频变体 URL 非空 → video 变体） */
   function renderWallpaperCard(day, dayIndex) {
     const unit = el(
       "section",
@@ -1249,7 +1257,7 @@
     );
 
     // 视频变体门（truthiness 判空：undefined 与 "" 均走静态分支——回退不变式）
-    const videoUrl = day.wallpaperVideoPortrait;
+    const videoUrl = wallpaperVideoUrl(day);
     if (videoUrl) {
       renderWallpaperVideoInto(unit, day, videoUrl);
     } else {
@@ -1275,7 +1283,7 @@
     const menuItems = [];
     // forceStatic：video error 降级重渲时 day 数据层仍是动态日，但单元已回退静态——
     // rail 必须按静态矩阵重建（主钮=保存壁纸、菜单仅电脑版），否则降级卡残留 mp4 入口
-    const isDynamic = !forceStatic && Boolean(day.wallpaperVideoPortrait);
+    const isDynamic = !forceStatic && Boolean(wallpaperVideoUrl(day));
     if (isDynamic) {
       // 主钮·保存动态壁纸视频：300s 超时 + 进度回报（大文件弱网余量，同 video 卡下载）
       const videoDl = createDownloadButton({
@@ -1284,7 +1292,7 @@
         variant: "primary",
         ariaLabel: "保存动态壁纸视频",
       });
-      bindDownloadClick(videoDl, day.wallpaperVideoPortrait, `拾光动态壁纸-${day.pickDate}.mp4`, {
+      bindDownloadClick(videoDl, wallpaperVideoUrl(day), `拾光动态壁纸-${day.pickDate}.mp4`, {
         timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS,
         withProgress: true,
       });

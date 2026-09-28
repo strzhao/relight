@@ -1,12 +1,12 @@
 /**
- * 壁纸视频生成模块（动态视频壁纸，state.md ## 后端设计 3 / ## 契约规约 计算/spawn 契约；v2 增量任务 12-15）
+ * 壁纸视频生成模块（动态视频壁纸，state.md ## 后端设计 3 / ## 契约规约 计算/spawn 契约；
+ * 20260928 单腿原生比例改版：固定横竖两腿 → 单腿原生画布，画布 SSOT 在 lib/wallpaper/native-canvas.ts）
  *
- *   preprocessHeroFrame(photoPath, width, height, opts) → tmp png 绝对路径
- *     sharp cover 裁剪+resize 到目标画布比例（横 1280×704 / 竖 736×1600，32 倍数约束）。
- *     v2 人脸构图裁剪：opts.faceBbox（faces 表最大 bbox）→「脸占画布高度 ≥1/4」推 crop
- *     窗口（中心对齐人脸）；缺失/退化 → 回退现状中心构图。
+ *   preprocessHeroFrame(photoPath, width, height) → tmp png 绝对路径
+ *     sharp cover 微裁+resize 到目标画布（32 倍数约束，画布由 computeNativeCanvas 按原图比例算出）。
+ *     原生比例下构图已忠实，预裁仅做比例对齐与预算缩放（20260928 去除 v2 人脸窗口裁剪）。
  *     honeydo first-frame 引擎直接 LANCZOS 拉伸到画布——调用方必须先按画布比例 cover-crop，
- *     否则非 16:9 源图会被拉变形。
+ *     否则源图会被拉变形（预裁比例 == 画布比例时拉伸无感）。
  *
  *   spawnHoneydoVideo({cliPath, prompt, firstFrame, lastFrame, outPath, seconds, res, timeoutMs})
  *     → {outPath, duration, stdout}
@@ -19,15 +19,21 @@
  *     palindrome 拼接（split/reverse/concat，forward+reverse 交替；音轨 areverse 同构）
  *     至 ≥targetSeconds ∧ 偶数段；错误枚举 LoopBuildError（ffmpeg 失败 / 拼接后时长 < targetSeconds-1）。
  *
- *   renderTextOverlay(videoPath, meta, opts) → {overlaidPath}（v2 增量任务 14）
+ *   renderTextOverlay(videoPath, meta, opts) → {overlaidPath}（v2 增量任务 14；20260928 props 扩展）
+ *     meta 增 canvasWidth/canvasHeight（生成画布，透传 Remotion props + calculateMetadata 动态尺寸）；
+ *     comp 选择按画布比例（≥0.9 横版两栏 / <0.9 竖版全屏），不再按输入视频探测尺寸。
  *     spawn `npx remotion render`（cwd=videoWorkspacePath/wallpaper-overlay 工程、npx 绝对路径、
  *     AbortController 900s 超时（v2.1）、stdout tail 留证）；错误枚举 OverlayRenderError
  *     （工程/Remotion 运行时缺失不自动安装 / 非零退出 / 产物缺失 / 超时）。
  *
- *   transcodeForAerial(src, dst)：HEVC(hvc1) .mov 1920×1080 无音轨 +faststart（Aerial 用，
- *     v2 输入=Remotion 成品）。hevc_videotoolbox 失败 fallback libx265。超时 600s。
+ *   transcodeForAerialNative(src, dst)（20260928 单腿条件 Aerial）：画布比例 ∈ [1.5,1.9] 才产出——
+ *     ffmpeg 居中裁到 16:9 → scale=1920:1080:flags=lanczos,setsar=1（crop 前置保证入 scale 前
+ *     比例恰 16:9，绝不拉伸）→ HEVC(hvc1) .mov 带音轨 aac 128k +faststart。
+ *     hevc_videotoolbox 失败 fallback libx265。超时 600s。
  *   transcodeForGallery(src, dst)（v2）：H.264 mp4 重编码保留音轨（libx264 crf18 + aac 128k
- *     +faststart，画廊静音自动播放+点击开声）。超时 120s。
+ *     +faststart，无 -vf 尺寸透传——分辨率 == 源画布），画廊消费原生比例。超时 120s。
+ *   assertVideoDimensions(filePath, expectedWidth, expectedHeight)（20260928 尺寸护栏）：
+ *     ffprobe 断言转码产物尺寸，不匹配即 throw（job 失败 → 当日回退静态，fail-safe，禁静默失败）。
  *
  *   assertVideoSpawnPrerequisites(photoPath)：honeydo bin、ffmpeg、原图路径 +
  *     wallpaper-overlay 工程/Remotion 运行时/字体 存在校验（缺失报错，不自动安装）。
@@ -42,19 +48,27 @@ import { convertHeicToJpeg, isHeicBuffer } from "../heic";
 import { buildCaptureDateline } from "./capture";
 
 // ============================================================================
-// 画布与档位常量（honeydo 32 倍数约束：720p=1280×704；竖版经 --width/--height
-// 逐轴覆盖 portrait 档 → 736×1600，比例 0.46 与静态竖版壁纸 1290×2796 对齐，
-// 画廊手机端 cover 裁切从 ~20% 降到 <0.5%）
+// 档位与兼容窗口常量（20260928 单腿原生：画布 SSOT 在 native-canvas.ts；
+// -r 档位保留 720p 保 stdout 回执语义，画布由 --width/--height 显式覆盖）
 // ============================================================================
 
-/** 横版生成画布（honeydo res 档 720p；--width/--height 显式传同值） */
-export const WALLPAPER_VIDEO_LANDSCAPE_CANVAS = { width: 1280, height: 704 } as const;
-/** 竖版生成画布（portrait 档 + --width/--height 逐轴覆盖；736=23×32、1600=50×32） */
-export const WALLPAPER_VIDEO_PORTRAIT_CANVAS = { width: 736, height: 1600 } as const;
-/** honeydo res 档位：横版 */
-export const WALLPAPER_VIDEO_LANDSCAPE_RES = "720p";
-/** honeydo res 档位：竖版 */
-export const WALLPAPER_VIDEO_PORTRAIT_RES = "portrait";
+/** honeydo res 档位（契约：-r 保留保 stdout 回执语义；画布两轴经 --width/--height 显式覆盖） */
+export const WALLPAPER_VIDEO_RES = "720p";
+
+/** Aerial 兼容窗口（画布长短轴比 ∈ [1.5, 1.9] 才产出 16:9 微裁 .mov；窗外 mac 当日走静态回退） */
+export const AERIAL_COMPAT_RATIO_MIN = 1.5;
+export const AERIAL_COMPAT_RATIO_MAX = 1.9;
+
+/**
+ * 画布是否落在 Aerial 兼容窗口：**方向性比例** canvasWidth/canvasHeight ∈ [1.5, 1.9]
+ * （与 D2 overlay comp 选择的 ratio 定义同源——竖版画布 w/h < 1 恒窗外，绝不产 16:9 微裁
+ * .mov：竖裁横会砍掉 ~69% 画面，T_crop 纪律只对横版画布成立）。
+ */
+export function isAerialCompatCanvas(canvas: { width: number; height: number }): boolean {
+  if (canvas.height <= 0) return false;
+  const ratio = canvas.width / canvas.height;
+  return ratio >= AERIAL_COMPAT_RATIO_MIN && ratio <= AERIAL_COMPAT_RATIO_MAX;
+}
 
 // ============================================================================
 // HoneydoSpawnError
@@ -77,10 +91,11 @@ function stdoutTail(stdout: string): string {
 }
 
 // ============================================================================
-// preprocessHeroFrame（v2：人脸构图裁剪）
+// preprocessHeroFrame（20260928：比例对齐 cover 微裁，去除人脸窗口）
 // ============================================================================
 
-/** 人脸 bbox（EXIF 旋转后原图像素坐标——detect-faces 主流程 rotate 后检测，同空间） */
+/** 人脸 bbox（EXIF 旋转后原图像素坐标——detect-faces 主流程 rotate 后检测，同空间）。
+ *  20260928 起仅供 prompt 分层默认（有无人脸）使用，不再参与预裁剪构图。 */
 export interface FaceBbox {
   x: number;
   y: number;
@@ -88,60 +103,13 @@ export interface FaceBbox {
   h: number;
 }
 
-export interface PreprocessHeroFrameOptions {
-  /** hero 照片 faces 表最大 bbox（面积最大）；null/缺省 → 回退现状中心构图（契约） */
-  faceBbox?: FaceBbox | null;
-}
-
 /**
- * 「脸占画布 ≥1/4」的裁剪窗口推导（recipes 纪律：人脸占比 ≥1/4）。
+ * hero 原图预裁剪：sharp cover 微裁+resize 到目标画布（width×height），产 tmp png。
  *
- * 口径：脸 bbox 高度映射到画布后 ≥ 画布高度的 1/4（横竖版同为「脸高占画幅高 ≥1/4」）。
- * 缩放关系 face_canvas_h = fh × canvasH / winH ⟹ 约束 ⟺ 窗口高 winH ≤ 4 × fh。
- * 窗口高 = clamp(4×fh, 下限=画布高（防输入图超分放大，画质优先）, 上限=全幅 cover 窗口高
- * （脸在整图已 ≥1/4 时不再放大）)；窗口宽 = 窗口高 × 画布比例；中心对齐人脸中心，clamp 图内。
- *
- * @returns 裁剪窗口 {left, top, width, height}；无法按人脸构图时返回 null（中心构图回退）
- */
-function computeFaceCropWindow(
-  imgW: number,
-  imgH: number,
-  canvasW: number,
-  canvasH: number,
-  face: FaceBbox,
-): { left: number; top: number; width: number; height: number } | null {
-  // bbox 合法性：先 clamp 进图内，退化（宽/高 ≤0）则放弃人脸构图
-  const fx = Math.min(Math.max(face.x, 0), imgW - 1);
-  const fy = Math.min(Math.max(face.y, 0), imgH - 1);
-  const fw = Math.min(face.w, imgW - fx);
-  const fh = Math.min(face.h, imgH - fy);
-  if (!(fw > 0 && fh > 0)) return null;
-
-  const ratio = canvasW / canvasH;
-  // 全幅 cover 窗口高（保持画布比例的最大窗口）
-  const fullH = Math.min(imgH, imgW / ratio);
-  // 下限：窗口高 ≥ 画布高 → 缩放系数 ≤1，不超分放大（v2 画质优先）
-  const minWinH = Math.min(canvasH, fullH);
-  const winH = Math.min(Math.max(Math.min(fullH, 4 * fh), minWinH), imgH);
-  const winW = Math.min(Math.round(winH * ratio), imgW);
-  const winHr = Math.round(winH);
-
-  // 窗口中心对齐人脸中心，clamp 到图内
-  const cx = fx + fw / 2;
-  const cy = fy + fh / 2;
-  const left = Math.min(Math.max(Math.round(cx - winW / 2), 0), imgW - winW);
-  const top = Math.min(Math.max(Math.round(cy - winHr / 2), 0), imgH - winHr);
-  return { left, top, width: winW, height: winHr };
-}
-
-/**
- * hero 原图预裁剪：sharp cover 裁剪+resize 到目标画布（width×height），产 tmp png。
- *
- * HEIC 源先经 convertHeicToJpeg 解码（复用 lib/heic，与 composer 同源）；
- * .rotate() 按 EXIF 方向摆正后再裁剪（faces bbox 与 detect-faces 同为 rotate 后空间）。
- *
- * v2 人脸构图裁剪：opts.faceBbox 非空 → 按「脸占画布 ≥1/4」推 crop 窗口（中心对齐人脸）；
- * 缺失/退化 → 回退现状中心构图（契约）。
+ * 20260928 单腿原生比例：画布由 computeNativeCanvas 按原图比例算出，预裁仅做
+ * 「比例对齐 + 预算缩放」（cover 微裁量 ≤ 32 取整容差级），**去除 v2 人脸窗口裁剪**——
+ * 原生比例下构图已忠实，不再为脸重构图。HEIC 源先经 convertHeicToJpeg 解码（复用
+ * lib/heic，与 composer 同源）；.rotate() 按 EXIF 方向摆正后再裁剪。
  *
  * @returns tmp png 绝对路径（调用方负责清理）
  */
@@ -149,35 +117,15 @@ export async function preprocessHeroFrame(
   photoPath: string,
   width: number,
   height: number,
-  opts: PreprocessHeroFrameOptions = {},
 ): Promise<string> {
   let buf = await import("node:fs/promises").then((m) => m.readFile(photoPath));
   if (isHeicBuffer(buf)) {
-    buf = await convertHeicToJpeg(buf, { quality: 90 }); // 不预缩：faces bbox 是旋转后原图像素坐标，预缩会错配（v2.1 修复）
+    buf = await convertHeicToJpeg(buf, { quality: 90 });
   }
   const outPath = path.join(
     tmpdir(),
     `wallpaper-video-frame-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`,
   );
-
-  if (opts.faceBbox) {
-    // 人脸构图：先 rotate 摆正拿真实尺寸，再按窗口 extract → resize（两步避免模糊语义）
-    const rotated = await sharp(buf).rotate().toBuffer();
-    const meta = await sharp(rotated).metadata();
-    const imgW = meta.width ?? 0;
-    const imgH = meta.height ?? 0;
-    const win =
-      imgW > 0 && imgH > 0 ? computeFaceCropWindow(imgW, imgH, width, height, opts.faceBbox) : null;
-    if (win) {
-      await sharp(rotated)
-        .extract(win)
-        .resize(width, height, { fit: "cover" })
-        .png()
-        .toFile(outPath);
-      return outPath;
-    }
-    // bbox 退化 → 落入中心构图回退
-  }
 
   await sharp(buf)
     .rotate()
@@ -190,6 +138,27 @@ export async function preprocessHeroFrame(
 // ============================================================================
 // spawnHoneydoVideo
 // ============================================================================
+
+/**
+ * 读 hero 原图 **EXIF 旋转后**有效尺寸（与 preprocessHeroFrame 的 .rotate() 同空间）——
+ * computeNativeCanvas 的朝向判定必须基于旋转后尺寸，否则带 EXIF 旋转的竖拍照片会算错朝向。
+ * HEIC 源先经 convertHeicToJpeg 解码（与 preprocessHeroFrame 同源）。
+ * orientation 5-8（90°/270° 旋转）时宽高互换。
+ */
+export async function readOrientedDimensions(
+  photoPath: string,
+): Promise<{ width: number; height: number }> {
+  let buf = await import("node:fs/promises").then((m) => m.readFile(photoPath));
+  if (isHeicBuffer(buf)) {
+    buf = await convertHeicToJpeg(buf, { quality: 90 });
+  }
+  const meta = await sharp(buf).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  const o = meta.orientation ?? 1;
+  const swapped = o >= 5 && o <= 8;
+  return { width: swapped ? h : w, height: swapped ? w : h };
+}
 
 export interface HoneydoVideoOptions {
   /** honeydo CLI 绝对路径（config.honeydoCliPath） */
@@ -404,19 +373,24 @@ function spawnFfmpeg(args: string[], timeoutMs: number): Promise<void> {
 }
 
 /**
- * Aerial 用转码：HEVC(hvc1) .mov 1920×1080 **带音轨**（aac 128k，2026-09-13 验收要求
- * 以后生成的视频带音轨；Aerial 注入无声播放不受影响，下载/外放场景有环境音）+faststart。
+ * Aerial 用条件转码（20260928 单腿原生）：HEVC(hvc1) .mov 1920×1080 **带音轨**
+ * （aac 128k，2026-09-13 验收要求以后生成的视频带音轨）+faststart。
+ *
+ * 滤镜链 = **crop 前置 + scale 后置**：先把源居中裁到恰 16:9（`crop=min(iw,ih*16/9):min(ih,iw*9/16)`
+ * 横竖超宽窄高统一处理），再 `scale=1920:1080:flags=lanczos,setsar=1` 等比放大——
+ * crop 已保证入 scale 前比例恰 16:9，故 scale 无非等比形变（**绝不拉伸**）。
+ * 调用方须先以 isAerialCompatCanvas 把关（画布比例 ∈ [1.5,1.9]，最坏裁切占比 ≤0.15）。
  *
  * hevc_videotoolbox 失败（非本机硬件编码器/旧系统）→ fallback libx265 -crf 22。
  * 超时 600s。
  */
-export async function transcodeForAerial(src: string, dst: string): Promise<void> {
+export async function transcodeForAerialNative(src: string, dst: string): Promise<void> {
   const common = [
     "-y",
     "-i",
     src,
     "-vf",
-    "scale=1920:1080:flags=lanczos",
+    "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)',scale=1920:1080:flags=lanczos,setsar=1",
     "-c:a",
     "aac",
     "-b:a",
@@ -433,6 +407,39 @@ export async function transcodeForAerial(src: string, dst: string): Promise<void
     await spawnFfmpeg(
       [...common, "-c:v", "libx265", "-crf", "22", "-tag:v", "hvc1", dst],
       AERIAL_TRANSCODE_TIMEOUT_MS,
+    );
+  }
+}
+
+/**
+ * 尺寸护栏（20260928 补洞）：ffprobe 断言转码产物尺寸，不匹配即 throw。
+ * 场景 5 契约：禁静默失败——message 显式含「尺寸断言失败」语义与期望/实际值；
+ * job 失败 → 当日回执列均空 → 画廊静态卡 + mac 静态壁纸（fail-safe）。
+ */
+/**
+ * 尺寸护栏专用错误类。设计 D2：护栏失败必须传播为 job 失败（worker 标记失败 / rerun CLI exit≠0）；
+ * 其余失败（spawn/上传/DB）走既有旁路容错（契约 8，runWallpaperVideo 吞掉返回空列）。
+ */
+export class DimensionAssertError extends Error {}
+
+export async function assertVideoDimensions(
+  filePath: string,
+  expectedWidth: number,
+  expectedHeight: number,
+): Promise<void> {
+  let probe: ProbeResult;
+  try {
+    probe = await probeVideoFile(filePath);
+  } catch (e) {
+    throw new DimensionAssertError(
+      `转码产物尺寸断言失败（ffprobe 探测异常）: ${filePath} 期望 ${expectedWidth}×${expectedHeight}，` +
+        `探测错误: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (probe.width !== expectedWidth || probe.height !== expectedHeight) {
+    throw new DimensionAssertError(
+      `转码产物尺寸断言失败: ${filePath} 期望 ${expectedWidth}×${expectedHeight}，` +
+        `实际 ${probe.width}×${probe.height}（禁静默失败——错尺寸产物不得入库/上传）`,
     );
   }
 }
@@ -653,6 +660,10 @@ export interface TextOverlayMeta {
   narrative: string;
   /** hero 照片拍摄时刻 ISO（footer「拍摄于 …· N 年前」同源 web/静态壁纸）；null/缺省 → footer 不渲染 */
   takenAt?: string | null;
+  /** 生成画布宽（20260928 单腿原生：透传 Remotion props + calculateMetadata 动态 comp 尺寸） */
+  canvasWidth: number;
+  /** 生成画布高（同上） */
+  canvasHeight: number;
 }
 
 /**
@@ -703,7 +714,8 @@ function resolveNpxPath(): string {
  * stdout/stderr tail 留证）。
  *
  * 输入视频拷入工程 public/（staticFile 服务范围），渲染完成即清理；
- * composition 按输入分辨率选（宽>高 → landscape，否则 portrait）；
+ * composition 按生成画布比例选（canvasWidth/canvasHeight ≥0.9 → landscape 两栏，
+ * 否则 portrait 全屏；画布经 props 透传，Root.tsx calculateMetadata 动态定 comp 尺寸）；
  * --frames=0-N 约束渲染时长 = 输入时长（ffprobe 探测，帧率同源）。
  *
  * 错误枚举 OverlayRenderError：工程/Remotion 运行时缺失（不自动安装）/
@@ -751,8 +763,10 @@ export async function renderTextOverlay(
       `renderTextOverlay ffprobe 探测失败: ${e instanceof Error ? e.message : String(e)} (${videoPath})`,
     );
   }
-  const compId =
-    probe.width > probe.height ? "wallpaper-overlay-landscape" : "wallpaper-overlay-portrait";
+  // comp 选择（20260928 单腿原生）：按生成画布比例判定（≥0.9 横版两栏 / <0.9 竖版全屏），
+  // 不再按输入视频探测尺寸——输入视频本就是该画布的 loop 产物（比例一致）
+  const canvasRatio = meta.canvasHeight > 0 ? meta.canvasWidth / meta.canvasHeight : 0;
+  const compId = canvasRatio >= 0.9 ? "wallpaper-overlay-landscape" : "wallpaper-overlay-portrait";
   const frames = Math.max(1, Math.ceil(probe.duration * probe.fps));
 
   // 输入视频拷入工程 public/（渲染完成即清理）
@@ -765,12 +779,16 @@ export async function renderTextOverlay(
     path.dirname(absVideoPath),
     `${path.basename(absVideoPath).replace(/\.mp4$/i, "")}-overlay.mp4`,
   );
+  // props 契约（20260928 契约 7 纯超集扩展）：{videoPath, pickDate, title, narrative,
+  // captureDateline, canvasWidth, canvasHeight}
   const props = {
     videoPath: OVERLAY_PUBLIC_INPUT,
     pickDate: meta.pickDate,
     title: meta.title,
     narrative: meta.narrative,
     captureDateline: buildCaptureDateline(meta.takenAt),
+    canvasWidth: meta.canvasWidth,
+    canvasHeight: meta.canvasHeight,
   };
   const args = [
     "remotion",
