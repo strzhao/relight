@@ -40,10 +40,22 @@ export const dailyPushQueue = new Queue("daily-push", {
   prefix: config.bullmqPrefix,
 });
 
-/** 每日视频生成 Queue（每天北京时间 10:00：有主题才做，无候选空完成） */
+/** 每日视频生成 Queue（每天北京时间 10:00：有主题才做，无候选空完成）。
+ *  显式 defaultJobOptions { attempts: 1 } 覆盖全局 attempts:3——job 内部已实现
+ *  「拒做顺延下一个候选」循环（isSkillRejection 分流），BullMQ 层重试只会整段
+ *  重跑 discovery + 已成功主题，与循环语义冲突；spawn 被拒时 worker 正常
+ *  return，attempts:3 本就不触发（此项是把语义显式化，防未来误改）。 */
 export const dailyVideoQueue = new Queue("daily-video", {
   connection,
-  defaultJobOptions,
+  defaultJobOptions: { attempts: 1 },
+  prefix: config.bullmqPrefix,
+});
+
+/** AI 策展人 Queue（每周一北京 09:20：读库摘要提名候选主题入池，旁路容错）。
+ *  纯文本 claude -p（~2-10min），失败下周再来，重试无意义。 */
+export const curatorVideoQueue = new Queue("curator-video", {
+  connection,
+  defaultJobOptions: { attempts: 1 },
   prefix: config.bullmqPrefix,
 });
 

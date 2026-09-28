@@ -118,6 +118,12 @@ function createFixtureDB(): FixtureDB {
       created_at TEXT NOT NULL,
       UNIQUE(theme_kind, theme_key)
     );
+    CREATE TABLE IF NOT EXISTS video_theme_pool (
+      id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+      why TEXT, arc TEXT, confidence TEXT NOT NULL, photo_ids TEXT, selection_hint TEXT,
+      status TEXT NOT NULL DEFAULT 'active', video_id TEXT,
+      proposed_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(kind, title)
+    );
     CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at);
 
     CREATE TABLE IF NOT EXISTS video_usages (

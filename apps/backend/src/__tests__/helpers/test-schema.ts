@@ -224,7 +224,7 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
     -- 视频表（与 db/schema.ts videos 表同步）
     CREATE TABLE IF NOT EXISTS videos (
       id TEXT PRIMARY KEY,
-      theme_kind TEXT NOT NULL CHECK (theme_kind IN ('trip', 'person')),
+      theme_kind TEXT NOT NULL CHECK (theme_kind IN ('trip', 'person', 'curator')),
       theme_key TEXT NOT NULL,
       title TEXT NOT NULL,
       output_path TEXT NOT NULL,
@@ -248,5 +248,12 @@ export function setupTestSchema(sqlite: Database.Database, opts: SetupOptions = 
     );
     CREATE INDEX IF NOT EXISTS idx_video_usages_photo ON video_usages(photo_id);
     CREATE INDEX IF NOT EXISTS idx_video_usages_theme ON video_usages(theme_kind, theme_key);
+    CREATE TABLE IF NOT EXISTS video_theme_pool (
+      id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+      why TEXT, arc TEXT, confidence TEXT NOT NULL, photo_ids TEXT, selection_hint TEXT,
+      status TEXT NOT NULL DEFAULT 'active', video_id TEXT,
+      proposed_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(kind, title)
+    );
+
   `);
 }

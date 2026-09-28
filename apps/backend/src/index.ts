@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import {
   createApp,
+  registerCuratorVideoRepeatableJob,
   registerDailyPushRepeatableJob,
   registerDailyRepeatableJob,
   registerDailyVideoRepeatableJob,
@@ -31,6 +32,13 @@ registerDailyVideoRepeatableJob().catch((err) => {
 registerScanRepeatableJob().catch((err) => {
   console.error("[relight] 注册扫描定时任务失败:", err);
 });
+
+// 注册 AI 策展人定时任务（每周一北京 09:20，提名候选主题入池）
+if (config.curatorVideoEnabled) {
+  registerCuratorVideoRepeatableJob().catch((err) => {
+    console.error("[relight] 注册 AI 策展人定时任务失败:", err);
+  });
+}
 
 // 启动能力检测（fail-soft，不阻塞进程）
 Promise.all([

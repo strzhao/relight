@@ -4,17 +4,18 @@ import path from "node:path";
  * daily-video Worker：每天北京时间 10:00 自动生成「照片→叙事短片」视频。
  *
  * 流程（设计文档架构）：
- * 1. discoverVideoCandidates() 主题发现（旅行 + 人物成长线）
+ * 1. discoverVideoCandidates() 主题发现（旅行 + 人物成长线），返回完整候选列表（新鲜度降序）
  *    - 无候选 → 空完成（不推送，场景 THEME-DISCOVERY-NO-CANDIDATE-SKIP）
- * 2. 选 1 个候选（新鲜度最高）→ runVideoGeneration（spawn claude -p）
- *    - 失败 → 写 failed 行 → 不推送（场景 NO-PUSH-ON-NO-VIDEO / FAILURE-NO-DEGRADE）
- * 3. 成功 → 事务写 videos（completed）+ videoUsages（去重行）
- * 4. 推送企业微信（标题 + 视频链接，场景 WECOM-PUSH-ON-NEW-VIDEO；封面不再推群——首帧文字卡不好看）
+ * 2. 按序顺延消费候选（2026-09-28 起，替换原「只取 [0]、一拒烧一天」）：
+ *    - skill 拒做（exit 2 / mp4 产物缺失，1~13min 级）→ 写 failed 行（自动进 7 天冷却）→ 顺延下一个
+ *    - 非拒做失败（超时 45min / spawn 前置缺失 / 崩溃）→ 写 failed 行后当天中止（不再烧时间）
+ *    - 成功 → 事务写 videos（completed）+ videoUsages（去重行）→ 结束
+ * 3. 推送企业微信（标题 + 视频链接，场景 WECOM-PUSH-ON-NEW-VIDEO；封面不再推群——首帧文字卡不好看）
  *
- * 时序：daily-selection 0:00 / scan 2:00 之后，push 10:00 之前，避开 CPU/GPU 竞争。
+ * 时序：daily-selection 3:00 / scan 2:00 之后，push 10:00 之前，避开 CPU/GPU 竞争。
  */
 import type { Job } from "bullmq";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { config } from "../lib/config";
 import { WECOM_WEBHOOK_REGEX, getDailyPushSettings } from "../lib/push/wechat";
@@ -46,6 +47,51 @@ function videoCoverPath(themeKind: string, themeKey: string): string {
 }
 
 /**
+ * skill 拒做判定：exit 2（协议化拒做，stderr 带拒绝理由）或 exit 0 无产物
+ * （查证后决定不出片）。这两类是 skill 的主动决策、成本仅 1~13 分钟，可顺延
+ * 下一个候选；其余（超时 45min / spawn 前置缺失 / 其他退出码崩溃）属于基础
+ * 设施失败，顺延只会连环烧时间，当天中止。
+ *
+ * 字面量与 claude-runner.ts 的 err 文案强耦合：
+ *   - `claude -p 退出码 ${exitCode}…`（exit 2 = 拒做协议）
+ *   - `mp4 产物缺失: …`（exit 0 无产物）
+ */
+export function isSkillRejection(err: string | undefined): boolean {
+  if (!err) return false;
+  return err.includes("退出码 2") || err.includes("mp4 产物缺失");
+}
+
+/** 候选池硬候选转消费候选所需的统一形状（discovery 候选 + 池候选同构消费） */
+interface ConsumptionCandidate {
+  themeKind: "trip" | "person" | "curator";
+  themeKey: string;
+  titleHint: string;
+  photoIds: string[];
+  personId?: string;
+  toYear: number;
+  arcHint?: string;
+  /** 非空 = 来自 AI 策展候选池（成功/拒做/中止时回写池状态） */
+  poolId?: string;
+}
+
+/** 池状态回写（curator 候选专用；discovery 候选无 poolId 直接跳过） */
+function updatePoolStatus(
+  poolId: string | undefined,
+  status: "done" | "rejected" | "expired",
+  videoId?: string | null,
+): void {
+  if (!poolId) return;
+  db.update(schema.videoThemePool)
+    .set({
+      status,
+      ...(videoId !== undefined ? { videoId: videoId ?? null } : {}),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.videoThemePool.id, poolId))
+    .run();
+}
+
+/**
  * daily-video Worker。
  *
  * @param job BullMQ Job。job.data 可含 { skipPush?: boolean }（测试用）。
@@ -54,102 +100,127 @@ export async function dailyVideoWorker(job: Job): Promise<void> {
   const skipPush = (job.data as { skipPush?: boolean } | undefined)?.skipPush === true;
   job.log("[daily-video] start");
 
-  // 1. 主题发现
-  const candidates = await discoverVideoCandidates();
+  // 1. 候选序列 = AI 策展池硬候选（proposedAt 降序，≤3）+ 手写 discovery 兜底（新鲜度降序）。
+  //    池硬候选 = status=active 且选片名单 ≥12 张（软候选挂起待 skill 扩选，消费侧跳过）。
+  const poolRows = await db
+    .select()
+    .from(schema.videoThemePool)
+    .where(eq(schema.videoThemePool.status, "active"))
+    .orderBy(desc(schema.videoThemePool.proposedAt))
+    .limit(3);
+  const poolCandidates: ConsumptionCandidate[] = poolRows
+    .filter((r) => (r.photoIds?.length ?? 0) >= 12)
+    .map((r) => ({
+      themeKind: "curator" as const,
+      themeKey: `curator-${r.id.slice(0, 8)}`,
+      titleHint: r.title,
+      photoIds: r.photoIds ?? [],
+      toYear: new Date().getFullYear(),
+      arcHint: r.arc ?? undefined,
+      poolId: r.id,
+    }));
+
+  const discovered = await discoverVideoCandidates();
+  const candidates: ConsumptionCandidate[] = [...poolCandidates, ...discovered];
   if (candidates.length === 0) {
     console.log("[daily-video] skipped reason=no_candidate");
     job.log("[daily-video] skipped reason=no_candidate");
     return;
   }
-  // 选新鲜度最高的 1 个（已降序排序）
-  const candidate = candidates[0];
-  if (!candidate) {
-    console.log("[daily-video] skipped reason=no_candidate_after_sort");
-    job.log("[daily-video] skipped reason=no_candidate_after_sort");
-    return;
+  if (poolCandidates.length > 0) {
+    job.log(
+      `[daily-video] pool candidates=${poolCandidates.length} discovery=${discovered.length}`,
+    );
   }
-  job.log(
-    `[daily-video] picked theme=${candidate.themeKind}/${candidate.themeKey} (${candidate.titleHint}) photos=${candidate.photoIds.length}`,
-  );
 
-  // 2. 准备产物路径 + 确保目录存在
+  // 2. 确保目录存在（循环外一次）
   await mkdir(videoCacheDir(), { recursive: true });
-  const outputPath = videoOutputPath(candidate.themeKind, candidate.themeKey);
-  const metaPath = videoMetaPath(candidate.themeKey);
-  const coverPath = videoCoverPath(candidate.themeKind, candidate.themeKey);
 
-  // 3. spawn claude -p 生成视频
-  const theme: VideoTheme = {
-    themeKind: candidate.themeKind,
-    themeKey: candidate.themeKey,
-    titleHint: candidate.titleHint,
-    photoIds: candidate.photoIds,
-    personId: candidate.personId,
-    toYear: candidate.toYear,
-  };
-  const result = await runVideoGeneration(theme, outputPath, metaPath);
-
-  // 4. 事务写库（成功 completed / 失败 failed，均落 videos 行）
-  let videoId: string | null = null;
   let pushed = false;
-  const now = new Date().toISOString();
-
-  if (result.ok) {
-    const durationSec = await probeDurationSafe(outputPath, result.meta?.durationSec ?? 0);
-    const photoIds = result.meta?.photoIds ?? candidate.photoIds;
-    // 封面生成：mp4 成功后用 ffmpeg 抽首帧（skill 不产封面，worker 自给）
-    await ensureCoverFromVideo(outputPath, coverPath, job);
-    videoId = await writeCompletedVideo(
-      {
-        themeKind: candidate.themeKind,
-        themeKey: candidate.themeKey,
-        title: result.meta?.title ?? candidate.titleHint,
-        outputPath,
-        coverPath,
-        durationSec,
-        photoIds,
-      },
-      now,
+  for (const candidate of candidates) {
+    job.log(
+      `[daily-video] trying theme=${candidate.themeKind}/${candidate.themeKey} (${candidate.titleHint}) photos=${candidate.photoIds.length}`,
     );
-    console.log(
-      `[daily-video] success theme=${candidate.themeKey} videoId=${videoId} duration=${durationSec}s`,
-    );
-    job.log(`[daily-video] success videoId=${videoId}`);
 
-    // 4.5 画廊同步（上传 mp4 + 封面 + 刷 manifest 推 VPS）——独立 try/catch 旁路，
-    // 失败不阻塞视频推送（画廊是旁路，容错契约 §契约规约）。
-    try {
-      const { syncVideoToGallery } = await import("../lib/gallery/sync");
-      await syncVideoToGallery(
+    // 准备产物路径
+    const outputPath = videoOutputPath(candidate.themeKind, candidate.themeKey);
+    const metaPath = videoMetaPath(candidate.themeKey);
+    const coverPath = videoCoverPath(candidate.themeKind, candidate.themeKey);
+
+    // spawn claude -p 生成视频
+    const theme: VideoTheme = {
+      themeKind: candidate.themeKind,
+      themeKey: candidate.themeKey,
+      titleHint: candidate.titleHint,
+      photoIds: candidate.photoIds,
+      personId: candidate.personId,
+      toYear: candidate.toYear,
+      arcHint: candidate.arcHint,
+    };
+    const result = await runVideoGeneration(theme, outputPath, metaPath);
+    const now = new Date().toISOString();
+
+    if (result.ok) {
+      // 事务写库（completed）+ videoUsages（去重行）
+      const durationSec = await probeDurationSafe(outputPath, result.meta?.durationSec ?? 0);
+      const photoIds = result.meta?.photoIds ?? candidate.photoIds;
+      // 封面生成：mp4 成功后用 ffmpeg 抽首帧（skill 不产封面，worker 自给）
+      await ensureCoverFromVideo(outputPath, coverPath, job);
+      const videoId = await writeCompletedVideo(
         {
+          themeKind: candidate.themeKind,
           themeKey: candidate.themeKey,
-          mp4Path: outputPath,
+          title: result.meta?.title ?? candidate.titleHint,
+          outputPath,
           coverPath,
+          durationSec,
+          photoIds,
         },
-        (m: string) => job.log(m),
+        now,
       );
-    } catch (galleryErr) {
-      job.log(
-        `[gallery] 视频画廊同步失败（不阻塞推送）: ${
-          galleryErr instanceof Error ? galleryErr.message : String(galleryErr)
-        }`,
+      console.log(
+        `[daily-video] success theme=${candidate.themeKey} videoId=${videoId} duration=${durationSec}s`,
       );
+      job.log(`[daily-video] success videoId=${videoId}`);
+      updatePoolStatus(candidate.poolId, "done", videoId);
+
+      // 画廊同步（上传 mp4 + 封面 + 刷 manifest 推 VPS）——独立 try/catch 旁路，
+      // 失败不阻塞视频推送（画廊是旁路，容错契约 §契约规约）。
+      try {
+        const { syncVideoToGallery } = await import("../lib/gallery/sync");
+        await syncVideoToGallery(
+          {
+            themeKey: candidate.themeKey,
+            mp4Path: outputPath,
+            coverPath,
+          },
+          (m: string) => job.log(m),
+        );
+      } catch (galleryErr) {
+        job.log(
+          `[gallery] 视频画廊同步失败（不阻塞推送）: ${
+            galleryErr instanceof Error ? galleryErr.message : String(galleryErr)
+          }`,
+        );
+      }
+
+      // 推送（除非 skipPush）。标题优先 skill 写出的真实标题（meta.title）——
+      // vietnam-2026 事故：titleHint 按 GPS 围栏误标「越南 · 2026」，推送让家人完全没认出是海南行
+      if (!skipPush) {
+        pushed = await pushVideoNotification(
+          videoId,
+          candidate.themeKey,
+          result.meta?.title ?? candidate.titleHint,
+          coverPath,
+          job,
+        );
+      }
+      job.log(`[daily-video] done pushed=${pushed}`);
+      return;
     }
 
-    // 5. 推送（除非 skipPush）。标题优先 skill 写出的真实标题（meta.title）——
-    // vietnam-2026 事故：titleHint 按 GPS 围栏误标「越南 · 2026」，推送让家人完全没认出是海南行
-    if (!skipPush) {
-      pushed = await pushVideoNotification(
-        videoId,
-        candidate.themeKey,
-        result.meta?.title ?? candidate.titleHint,
-        coverPath,
-        job,
-      );
-    }
-  } else {
-    // 失败：写 failed 行（不降级、不重试渲染）
-    videoId = await writeFailedVideo(
+    // 失败：写 failed 行（不降级；幂等 UPDATE 刷新冷却起点，discovery 侧自动跳过）
+    const videoId = await writeFailedVideo(
       {
         themeKind: candidate.themeKind,
         themeKey: candidate.themeKey,
@@ -161,17 +232,26 @@ export async function dailyVideoWorker(job: Job): Promise<void> {
       now,
     );
     console.log(
-      `[daily-video] failed theme=${candidate.themeKey} videoId=${videoId} err=${result.err}`,
+      `[daily-video] candidate failed theme=${candidate.themeKey} videoId=${videoId} err=${result.err}`,
     );
-    job.log(`[daily-video] failed reason=spawn_error err=${result.err}`);
-    // 失败不推送（场景 NO-PUSH-ON-NO-VIDEO）
+
+    if (!isSkillRejection(result.err)) {
+      // 非拒做失败（超时 45min / 前置缺失 / 崩溃）：顺延只会连环烧时间，当天中止。
+      // 池候选标 expired——毒候选不挡明天的名额，等周更策展重提时复位 active。
+      updatePoolStatus(candidate.poolId, "expired");
+      job.log(`[daily-video] abort reason=non_rejection_failure err=${result.err}`);
+      break;
+    }
+    // skill 拒做（1~13min 级）：顺延下一个候选；池候选同步置 rejected
+    updatePoolStatus(candidate.poolId, "rejected");
+    job.log(`[daily-video] next reason=rejection theme=${candidate.themeKey} videoId=${videoId}`);
   }
 
   job.log(`[daily-video] done pushed=${pushed}`);
 }
 
 export interface CompletedVideoInput {
-  themeKind: "trip" | "person";
+  themeKind: "trip" | "person" | "curator";
   themeKey: string;
   title: string;
   outputPath: string;
@@ -242,7 +322,7 @@ export async function writeCompletedVideo(
 }
 
 interface FailedVideoInput {
-  themeKind: "trip" | "person";
+  themeKind: "trip" | "person" | "curator";
   themeKey: string;
   title: string;
   outputPath: string;

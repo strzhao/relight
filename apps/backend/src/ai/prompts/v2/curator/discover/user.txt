@@ -1,0 +1,11 @@
+下面是本周的照片库结构化摘要 JSON（generated_at 为快照日期）：
+
+- library：总量 / 按年分布 / 近 24 个月逐月分布（峰值月份常是未成片的旅行或事件）
+- completed_videos：已完成短片（去重清单，themeKey + 标题）
+- person_lines：既有流程已覆盖的人物线（不要单独重复提名）
+- place_clusters：GPS 地点簇（≥15 张 ≥2 天；candidates 为美学降序 ≤40 张的选片候选池）
+- recurring_dates：跨年重复日期（同月日 ≥12 张跨 ≥3 年；candidates 为 ±2 个月窗口的选片候选池）
+- tag_distribution：标签分布 + 每标签 3 张高美学样本
+- top_aesthetic_photos：全库美学 top 单张
+
+请在摘要之后立即输出 JSON 数组（无其他文字）。

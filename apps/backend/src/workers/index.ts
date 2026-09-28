@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db, schema } from "../db";
 import { analyzePhotoWorker } from "../jobs/analyze-photo";
+import { curatorVideoWorker } from "../jobs/curator-video";
 import { dailyPushWorker } from "../jobs/daily-push";
 import { dailySelectionWorker } from "../jobs/daily-selection";
 import { dailyVideoWorker } from "../jobs/daily-video";
@@ -77,6 +78,12 @@ const dailyPushWorkerInstance = new Worker("daily-push", dailyPushWorker, {
 
 // 每日视频生成 Worker — 每天 10:00 触发（有主题才做，spawn claude -p 渲染）
 const dailyVideoWorkerInstance = new Worker("daily-video", dailyVideoWorker, {
+  connection,
+  prefix: config.bullmqPrefix,
+});
+
+// AI 策展人 Worker — 每周一 09:20 触发（读库摘要提名候选主题入池，纯文本 spawn）
+const curatorVideoWorkerInstance = new Worker("curator-video", curatorVideoWorker, {
   connection,
   prefix: config.bullmqPrefix,
 });
@@ -158,6 +165,7 @@ async function shutdown(signal: string): Promise<void> {
       detectFacesWorkerInstance.close(false),
       dailyPushWorkerInstance.close(false),
       dailyVideoWorkerInstance.close(false),
+      curatorVideoWorkerInstance.close(false),
       wallpaperVideoWorkerInstance.close(false),
       analyzeEvents.close(),
     ]);

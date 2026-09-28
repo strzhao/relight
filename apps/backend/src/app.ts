@@ -3,7 +3,13 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { db, schema } from "./db";
-import { dailyPushQueue, dailyQueue, dailyVideoQueue, scanQueue } from "./jobs/queues";
+import {
+  curatorVideoQueue,
+  dailyPushQueue,
+  dailyQueue,
+  dailyVideoQueue,
+  scanQueue,
+} from "./jobs/queues";
 import { AppError } from "./lib/errors";
 import { localhostOnly, localhostOnlyStrict } from "./lib/middleware/localhost-only";
 import {
@@ -85,6 +91,25 @@ export async function registerDailyVideoRepeatableJob(): Promise<void> {
     {
       repeat: { pattern: "0 10 * * *", tz: "Asia/Shanghai" },
       jobId: "daily-video-cron",
+    },
+  );
+}
+
+/** 注册 AI 策展人重复任务（每周一北京 09:20：错开 daily-video 10:00 与精选 3:00；
+ *  纯文本 claude -p 提名候选主题入池，旁路容错，失败下周再来） */
+export async function registerCuratorVideoRepeatableJob(): Promise<void> {
+  await pruneStaleRepeatables(
+    curatorVideoQueue,
+    "curator-video-cron",
+    "20 9 * * 1",
+    "Asia/Shanghai",
+  );
+  await curatorVideoQueue.add(
+    "curator-video-cron",
+    {},
+    {
+      repeat: { pattern: "20 9 * * 1", tz: "Asia/Shanghai" },
+      jobId: "curator-video-cron",
     },
   );
 }

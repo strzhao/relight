@@ -31,15 +31,17 @@ function spawnTimeoutMs(): number {
   return Number.isFinite(v) && v > 0 ? v : DEFAULT_SPAWN_TIMEOUT_MS;
 }
 
-/** 主题描述（trip 传 photoIds / person 传 personId+截止年） */
+/** 主题描述（trip/curator 传 photoIds / person 传 personId+截止年） */
 export interface VideoTheme {
-  themeKind: "trip" | "person";
+  themeKind: "trip" | "person" | "curator";
   themeKey: string;
   titleHint: string;
-  /** trip：photoId 列表；person：personId（单元素） */
+  /** trip/curator：photoId 列表；person：personId（单元素） */
   photoIds: string[];
   personId?: string;
   toYear: number;
+  /** curator 专属：策展人给的预期叙事弧线（拼进 prompt 供 skill 参考选片/叙事） */
+  arcHint?: string;
 }
 
 /** spawn 产物元数据（skill 写的 json：title/durationSec/photoIds） */
@@ -81,7 +83,9 @@ function buildPrompt(theme: VideoTheme, outputPath: string, metaPath: string): s
   const material =
     theme.themeKind === "trip"
       ? `素材池（${theme.photoIds.length} 张 photoId，按美学降序）：${theme.photoIds.join(" ")}。你按旅行丰富度自主选最终片数（≥20 张，素材多就做完整 vlog，不限上限；别只取 top 也别全硬塞）`
-      : `素材：personId=${theme.personId} 截止年=${theme.toYear}`;
+      : theme.themeKind === "curator"
+        ? `素材池（${theme.photoIds.length} 张 photoId，按美学降序）：${theme.photoIds.join(" ")}。这是 AI 策展人提名的主题${theme.arcHint ? `，预期叙事弧线：${theme.arcHint}` : ""}。你按素材丰富度自主选最终片数（≥20 张；剔除同日连拍近似帧，保持时间叙事连贯）`
+        : `素材：personId=${theme.personId} 截止年=${theme.toYear}`;
   return [
     "用 memory-video skill 生成视频，非交互自动化模式。",
     `主题：${theme.themeKind} / ${theme.themeKey}（${theme.titleHint}）`,

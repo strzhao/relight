@@ -303,8 +303,8 @@ export const videos = sqliteTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    /** 主题类型：旅行 / 人物成长线 */
-    themeKind: text("theme_kind", { enum: ["trip", "person"] }).notNull(),
+    /** 主题类型：旅行 / 人物成长线 / AI 策展（候选池提案，themeKey=curator-<poolId8>） */
+    themeKind: text("theme_kind", { enum: ["trip", "person", "curator"] }).notNull(),
     /** 主题指纹：trip=`<regionSlug>-<year>` / person=`<personId>-<toYear>` */
     themeKey: text("theme_key").notNull(),
     title: text("title").notNull(),
@@ -339,6 +339,48 @@ export const videoUsages = sqliteTable(
   (t) => ({
     idx_video_usages_photo: index("idx_video_usages_photo").on(t.photoId),
     idx_video_usages_theme: index("idx_video_usages_theme").on(t.themeKind, t.themeKey),
+  }),
+);
+
+/**
+ * AI 策展候选池（curator-video 每周提案入池，daily-video 消费）。
+ *
+ * 供给模型（2026-09-28 策展层）：手写 discovery（trip 围栏 + person 簇）保留为兜底
+ * 信号源；AI 策展人每周读库摘要提名「有叙事弧线的主题」入池——主题类型开放
+ * （recurring_event / place_revisit / relationship / …），不再限于 trip/person 两类。
+ * 硬候选（photo_ids ≥12 就绪）可直接 spawn；软候选（仅 selection_hint）挂 active
+ * 待后续 skill 扩选，消费侧跳过。
+ */
+export const videoThemePool = sqliteTable(
+  "video_theme_pool",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /** 提案类型（开放枚举）：recurring_event / trip / place_revisit / relationship / person / other */
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    /** 一句话：为什么是现在值得做 */
+    why: text("why"),
+    /** 预期叙事弧线一句话 */
+    arc: text("arc"),
+    confidence: text("confidence", { enum: ["high", "medium", "low"] }).notNull(),
+    /** 策展人给出的选片名单（硬候选 ≥12 张可直接 spawn；样本集 <12 视为软候选） */
+    photoIds: text("photo_ids", { mode: "json" }).$type<string[]>(),
+    /** 选片标准（软候选的补充说明，skill 扩选时用） */
+    selectionHint: text("selection_hint"),
+    status: text("status", { enum: ["active", "producing", "done", "rejected", "expired"] })
+      .notNull()
+      .default("active"),
+    /** 成片回链（status=done 时指向 videos.id） */
+    videoId: text("video_id"),
+    proposedAt: text("proposed_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    // 幂等锚：同 kind+title 视为同一提案（周更重提 = UPDATE 刷新，不重复入池）
+    uniqProposal: unique().on(t.kind, t.title),
+    idx_pool_status: index("idx_video_theme_pool_status").on(t.status),
   }),
 );
 

@@ -149,6 +149,13 @@ export const config = {
    *  30 分钟硬编码线被 SIGTERM，finalize 未执行）；cron 每天 10:00，45 分钟完成可接受。
    *  env VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */
   videoSpawnTimeoutMs: Number.parseInt(process.env.VIDEO_SPAWN_TIMEOUT_MS ?? "2700000", 10),
+  /** AI 策展人总开关（每周一 09:20 读库摘要提名候选主题入 video_theme_pool）。
+   *  默认开——策展是轻量文本 claude -p（~2-10min，无 GPU 渲染），只增候选不改既有链路。
+   *  env CURATOR_VIDEO=false 关闭。 */
+  curatorVideoEnabled: (process.env.CURATOR_VIDEO ?? "true") !== "false",
+  /** 策展人 spawn claude -p 超时（ms）。纯文本提案远快于视频渲染，默认 15 分钟。
+   *  env CURATOR_TIMEOUT_MS 覆盖。 */
+  curatorTimeoutMs: Number.parseInt(process.env.CURATOR_TIMEOUT_MS ?? "900000", 10),
   /** 动态视频壁纸总开关（每日精选后对 hero 照片做微动化，产出横竖两条无音轨壁纸视频）。
    *  默认关——关闭时全链路维持既有静态链路（零 honeydo 调用、manifest 不含视频字段）。
    *  env DAILY_WALLPAPER_VIDEO 覆盖（沿 DAILY_* 惯例，范本 dailyRecentSourceEnabled）。 */
