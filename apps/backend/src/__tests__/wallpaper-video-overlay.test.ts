@@ -1,13 +1,13 @@
 /**
  * 单测：lib/wallpaper/video.ts — renderTextOverlay + assertVideoSpawnPrerequisites
- * （v2 增量任务 14：Remotion 文字层；20260928 单腿原生：props 扩展 + comp 按画布比例选）
+ * （v2 增量任务 14：Remotion 文字层；20261009 排版解耦：comp 按 variant 显式选、尺寸恒定）
  *
- * 契约（state.md ## 契约规约 计算/spawn 契约；20260928 契约 7 props 纯超集扩展）：
- *   renderTextOverlay(videoPath, meta: {pickDate,title,narrative,takenAt?,canvasWidth,canvasHeight})
- *     → {overlaidPath}
- *   comp 选择按 meta.canvasWidth/canvasHeight 比例（≥0.9 → landscape 两栏 / <0.9 → portrait
- *     全屏），不再按输入视频探测尺寸；props 透传 canvasWidth/canvasHeight（Root.tsx
- *     calculateMetadata 动态定 comp 尺寸）
+ * 契约（state.md ## 契约规约 计算/spawn 契约；20261009 契约修订）：
+ *   renderTextOverlay(videoPath, meta: {pickDate,title,narrative,takenAt?,canvasWidth,canvasHeight},
+ *     variant: "landscape" | "portrait", opts?: {timeoutMs?})
+ *     → {overlaidPath}（命名 `-overlay-{variant}.mp4`）
+ *   comp 选择只看 variant（landscape=16:9 卡 1920×1080 / portrait=竖版卡 1290×2796，尺寸恒定在
+ *     Root.tsx）；props 透传 canvasWidth/canvasHeight（存档排查）+ variant（comp 内分支同源）
  *   spawn `npx remotion render`（cwd=wallpaper-overlay 工程、npx 绝对路径、
  *     AbortController 600s 超时、stdout tail 留证）
  *   错误枚举 OverlayRenderError：工程缺失 / Remotion 运行时缺失（不自动安装）/
@@ -172,6 +172,10 @@ beforeEach(() => {
   rmSync(OVERLAY_PUBLIC_INPUT, { force: true });
   rmSync(`${holder.tmpDir}/input-portrait-loop-overlay.mp4`, { force: true });
   rmSync(`${holder.tmpDir}/input-portrait-overlay.mp4`, { force: true });
+  rmSync(`${holder.tmpDir}/input-portrait-overlay-portrait.mp4`, { force: true });
+  rmSync(`${holder.tmpDir}/input-portrait-overlay-landscape.mp4`, { force: true });
+  rmSync(`${holder.tmpDir}/input-landscape-overlay-landscape.mp4`, { force: true });
+  rmSync(`${holder.tmpDir}/input-landscape-overlay-portrait.mp4`, { force: true });
 });
 
 afterAll(() => {
@@ -190,7 +194,7 @@ const META = {
 
 describe("renderTextOverlay（mock spawn）", () => {
   it("参数拼装：npx 绝对路径 + remotion render src/index.ts <compId> + --props/--frames + cwd=工程目录", async () => {
-    const res = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META);
+    const res = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META, "portrait");
 
     expect(holder.spawnCalls).toHaveLength(1);
     const call = holder.spawnCalls[0];
@@ -201,11 +205,11 @@ describe("renderTextOverlay（mock spawn）", () => {
     expect(args[0]).toBe("remotion");
     expect(args[1]).toBe("render");
     expect(args[2]).toBe("src/index.ts");
-    // 竖版输入 → portrait composition
+    // variant=portrait → portrait composition
     expect(args[3]).toBe("wallpaper-overlay-portrait");
-    expect(args[4]).toMatch(/input-portrait-overlay\.mp4$/);
-    // props 契约（20260928 契约 7 纯超集扩展）：{videoPath, pickDate, title, narrative,
-    // captureDateline, canvasWidth, canvasHeight}
+    expect(args[4]).toMatch(/input-portrait-overlay-portrait\.mp4$/);
+    // props 契约（20261009 契约修订）：{videoPath, pickDate, title, narrative,
+    // captureDateline, canvasWidth, canvasHeight, variant}
     const propsIdx = args.indexOf("--props");
     const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
     expect(props).toEqual({
@@ -216,6 +220,7 @@ describe("renderTextOverlay（mock spawn）", () => {
       captureDateline: buildCaptureDateline(META.takenAt),
       canvasWidth: 704,
       canvasHeight: 1216,
+      variant: "portrait",
     });
     // frames = ceil(duration × fps)（0.5s × 24fps = 12 帧 → 0-11）
     const framesIdx = args.indexOf("--frames");
@@ -230,40 +235,43 @@ describe("renderTextOverlay（mock spawn）", () => {
       ),
     );
 
-    // 返回值 overlaidPath = 输入同目录 -overlay.mp4
-    expect(res.overlaidPath).toMatch(/input-portrait-overlay\.mp4$/);
+    // 返回值 overlaidPath = 输入同目录 -overlay-{variant}.mp4
+    expect(res.overlaidPath).toMatch(/input-portrait-overlay-portrait\.mp4$/);
   });
 
-  it("画布比例 ≥0.9 → landscape composition（20260928：按 canvas props 而非输入视频探测）", async () => {
-    await renderTextOverlay(`${holder.tmpDir}/input-landscape.mp4`, {
-      ...META,
-      canvasWidth: 1440,
-      canvasHeight: 800,
-    });
+  it("variant=landscape → landscape composition（20261009：按 variant 而非画布比例/输入视频探测）", async () => {
+    const res = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META, "landscape");
     const args = holder.spawnCalls[0]?.args ?? [];
     expect(args[3]).toBe("wallpaper-overlay-landscape");
+    expect(res.overlaidPath).toMatch(/input-portrait-overlay-landscape\.mp4$/);
   });
 
-  it("comp 选择只看画布比例：竖版画布 + 横版视频输入 → 仍 portrait comp（kill 输入探测 No-op）", async () => {
-    await renderTextOverlay(`${holder.tmpDir}/input-landscape.mp4`, {
-      ...META,
-      canvasWidth: 800,
-      canvasHeight: 1440,
-    });
+  it("comp 选择只看 variant：竖版画布 + 横版视频输入 + variant=portrait → 仍 portrait comp（kill 输入探测 No-op）", async () => {
+    await renderTextOverlay(
+      `${holder.tmpDir}/input-landscape.mp4`,
+      {
+        ...META,
+        canvasWidth: 800,
+        canvasHeight: 1440,
+      },
+      "portrait",
+    );
     const args = holder.spawnCalls[0]?.args ?? [];
     expect(args[3]).toBe("wallpaper-overlay-portrait");
-    // props 携带的是画布（非输入视频）尺寸
+    // props 携带的是画布（非输入视频）尺寸 + variant
     const propsIdx = args.indexOf("--props");
     const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
     expect(props.canvasWidth).toBe(800);
     expect(props.canvasHeight).toBe(1440);
+    expect(props.variant).toBe("portrait");
   });
 
   it("takenAt 缺失 → props.captureDateline 为 null（footer 不渲染契约）", async () => {
-    await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, {
-      ...META,
-      takenAt: null,
-    });
+    await renderTextOverlay(
+      `${holder.tmpDir}/input-portrait.mp4`,
+      { ...META, takenAt: null },
+      "portrait",
+    );
     const args = holder.spawnCalls[0]?.args ?? [];
     const propsIdx = args.indexOf("--props");
     const props = JSON.parse(args[propsIdx + 1] ?? "{}") as Record<string, unknown>;
@@ -271,7 +279,7 @@ describe("renderTextOverlay（mock spawn）", () => {
   });
 
   it("渲染期把输入拷入工程 public/，完成即清理", async () => {
-    const res = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META);
+    const res = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META, "portrait");
     // spawn 时刻输入已就位（fake spawn 内记录）
     expect(holder.sawPublicInput).toBe(true);
     // 结束后清理
@@ -281,9 +289,11 @@ describe("renderTextOverlay（mock spawn）", () => {
 
   it("remotion 非零退出 → OverlayRenderError，message 含 stdout tail", async () => {
     behavior.mode = "nonzero";
-    const err = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META).catch(
-      (e) => e,
-    );
+    const err = await renderTextOverlay(
+      `${holder.tmpDir}/input-portrait.mp4`,
+      META,
+      "portrait",
+    ).catch((e) => e);
     expect(err).toBeInstanceOf(OverlayRenderError);
     expect(err.message).toContain("退出码 1");
     expect(err.message).toContain("remotion-progress-line");
@@ -291,16 +301,18 @@ describe("renderTextOverlay（mock spawn）", () => {
 
   it("产物缺失（退出码 0 但未产文件）→ OverlayRenderError", async () => {
     behavior.mode = "no-product";
-    const err = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META).catch(
-      (e) => e,
-    );
+    const err = await renderTextOverlay(
+      `${holder.tmpDir}/input-portrait.mp4`,
+      META,
+      "portrait",
+    ).catch((e) => e);
     expect(err).toBeInstanceOf(OverlayRenderError);
     expect(err.message).toContain("产物文件不存在");
   });
 
   it("超时 → OverlayRenderError，message 含超时毫秒数与 stdout tail", async () => {
     behavior.mode = "timeout";
-    const err = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META, {
+    const err = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META, "portrait", {
       timeoutMs: 300,
     }).catch((e) => e);
     expect(err).toBeInstanceOf(OverlayRenderError);
@@ -313,9 +325,11 @@ describe("renderTextOverlay（mock spawn）", () => {
     const saved = config.videoWorkspacePath;
     (config as { videoWorkspacePath: string }).videoWorkspacePath = `${holder.tmpDir}/no-workspace`;
     try {
-      const err = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META).catch(
-        (e) => e,
-      );
+      const err = await renderTextOverlay(
+        `${holder.tmpDir}/input-portrait.mp4`,
+        META,
+        "portrait",
+      ).catch((e) => e);
       expect(err).toBeInstanceOf(OverlayRenderError);
       expect(err.message).toContain("wallpaper-overlay 工程缺失");
     } finally {
@@ -331,9 +345,11 @@ describe("renderTextOverlay（mock spawn）", () => {
     writeFileSync(`${ws}/wallpaper-overlay/src/index.ts`, "// entry\n");
     try {
       (config as { videoWorkspacePath: string }).videoWorkspacePath = ws;
-      const err = await renderTextOverlay(`${holder.tmpDir}/input-portrait.mp4`, META).catch(
-        (e) => e,
-      );
+      const err = await renderTextOverlay(
+        `${holder.tmpDir}/input-portrait.mp4`,
+        META,
+        "portrait",
+      ).catch((e) => e);
       expect(err).toBeInstanceOf(OverlayRenderError);
       expect(err.message).toContain("Remotion 运行时缺失");
       expect(err.message).toContain("不自动安装");

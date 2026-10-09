@@ -1320,6 +1320,25 @@
       bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
       railChildren.push(portraitDl.btn);
     }
+    // 竖版动态壁纸视频非空才收进菜单（20261009 排版解耦：portrait 卡 = 手机全屏动态壁纸，
+    // 与主钮「保存视频」（16:9 卡）互补；缺直链不渲染死链控件）
+    if (day.wallpaperVideoPortrait) {
+      const portraitVideoDl = createDownloadButton({
+        role: "wallpaper-download-video-portrait",
+        label: "保存竖版视频",
+        ariaLabel: "保存竖版动态壁纸视频（手机全屏）",
+      });
+      bindDownloadClick(
+        portraitVideoDl,
+        day.wallpaperVideoPortrait,
+        `拾光动态壁纸-${day.pickDate}-竖版.mp4`,
+        {
+          timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS,
+          withProgress: true,
+        },
+      );
+      menuItems.push(portraitVideoDl.btn);
+    }
     // 横版直链非空才收进菜单（缺直链不渲染死链控件——场景 11.P2 契约不变）
     if (day.wallpaperLandscape) {
       const landscapeDl = createDownloadButton({

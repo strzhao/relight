@@ -200,13 +200,16 @@ export const dailyPicks = sqliteTable("daily_picks", {
     .$type<{ photoId: string; caption: string }[]>()
     .notNull()
     .default(sql`'[]'`),
-  /** 横版壁纸视频 COS URL（20260928 语义收窄为「16:9 适配版」.mov；null = 未生成/开关关闭/
-   *  画布比例不在 [1.5,1.9] 兼容窗口——mac App 拿空列走静态壁纸回退）。
+  /** 横版壁纸视频 COS URL（16:9 Aerial HEVC .mov，mac App 302 消费；20261009 排版解耦起
+   *  源恒为 16:9 卡 → 恒产出，不再依赖画布比例窗口；null = 未生成/开关关闭/上传失败）。
    *  值 = COS 上传回执 URL（非约定 key 拼接，死链教训）；回执空串不写列。 */
   wallpaperVideoLandscapeUrl: text("wallpaper_video_landscape_url"),
-  /** 竖版壁纸视频 COS URL（历史 legacy 两腿产物；20260928 起不再新写，存量行保留）。 */
+  /** 竖版壁纸视频 COS URL（20261009 排版解耦起恢复新写：竖版全屏卡 1290×2796 mp4，
+   *  对齐手机静态壁纸 B 方案；20260928~20261008 存量行为 legacy 两腿产物）。 */
   wallpaperVideoPortraitUrl: text("wallpaper_video_portrait_url"),
-  /** 单腿原生比例壁纸视频 COS URL（20260928 新增；画廊消费优先级 native > portrait > landscape）。 */
+  /** 16:9 排版卡壁纸视频 COS URL（画廊消费优先级 native > portrait > landscape；
+   *  20261009 排版解耦起 = 16:9 杂志卡 1920×1080，布局对齐 mac 静态壁纸；
+   *  20260928~20261008 存量行为原生比例卡）。 */
   wallpaperVideoNativeUrl: text("wallpaper_video_native_url"),
   /** hero 照片的微动视频运动描述（narrate AI 生成，2026-09-13；null → 壁纸视频按有无人脸分层默认 prompt） */
   motionPrompt: text("motion_prompt"),

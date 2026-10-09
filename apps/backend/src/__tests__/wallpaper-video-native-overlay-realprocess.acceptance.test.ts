@@ -1,14 +1,16 @@
 /**
- * 验收测试（红队，real-process，capability-gate）：renderTextOverlay 画布参数化真渲染
+ * 验收测试（红队，real-process，capability-gate）：renderTextOverlay 排版档恒定真渲染
  *
- * 设计文档（state.md §设计文档 D3 / §验收场景）对应谓词：
- *   - 场景 9.P1 [real-process]：以非历史默认画布（4:3 档 1248×928）触发 `npx remotion render`
- *     → 产物尺寸 == 参数化 W×H（kill 尺寸写死 No-op：若实现仍写死 1280×704/736×1600，
- *     产物不会是 1248×928 → 红）
+ * 设计文档（state.md §设计文档 D3 / §验收场景）对应谓词（20261009 排版解耦改版）：
+ *   - 场景 9.P1 [real-process]：以 4:3 档生成画布输入（1248×928）触发 `npx remotion render`
+ *     → 产物尺寸 == variant 排版档恒定值（landscape 1920×1080 / portrait 1290×2796）。
+ *     kill 20260928 画布参数化回归（若 comp 尺寸重新跟随 props.canvasWidth/canvasHeight，
+ *     产物会变成 1248×928 → 红）；同时 kill 输入分辨率透传（产物不随输入 1248×928）。
  *
- * 设计契约（D3 逐字）：Root.tsx 两个 comp 增加 calculateMetadata，从新增 props
- *   canvasWidth/canvasHeight 返回动态 width/height（Remotion v4 支持）；
- *   WallpaperOverlay.tsx 布局分支统一按 props 比例判定（≥0.9 两栏横版 / <0.9 竖版全屏）。
+ * 设计契约（20261009 逐字）：Root.tsx 两 comp 尺寸恒定 1920×1080 / 1290×2796
+ *   （calculateMetadata 参数化已移除）；WallpaperOverlay.tsx 布局分支按 props.variant
+ *   显式判定（缺省回退画布比例 ≥0.9，Studio 预览兼容）；输入 loop 任意原生比例由
+ *   comp 内 contain（landscape）/cover（portrait）适配。
  *
  * 环境前提（惯例沿 wallpaper-video-overlay-realprocess.acceptance.test.ts）：
  *   {config.videoWorkspacePath}/wallpaper-overlay 工程存在——CI 必然缺失 → capability-gate
@@ -56,6 +58,7 @@ let renderTextOverlay: (
     canvasWidth?: number;
     canvasHeight?: number;
   },
+  variant: "landscape" | "portrait",
 ) => Promise<{ overlaidPath: string }>;
 
 interface ProbeResult {
@@ -95,7 +98,7 @@ beforeAll(async () => {
 
   tmpRoot = fs.mkdtempSync(path.join(os.homedir(), ".relight-test-wvnosreal-"));
 
-  // 4:3 档画布母版 1248×928（D1 参考输出；非历史默认 1280×704 / 736×1600）× 2s
+  // 4:3 档画布母版 1248×928（D1 参考输出；非排版档 1920×1080/1290×2796）× 2s
   inputVideo = path.join(tmpRoot, "input-1248x928.mp4");
   const r = spawnSync(
     "ffmpeg",
@@ -130,16 +133,20 @@ afterAll(() => {
   if (tmpRoot) fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-dOverlay("场景 9.P1 [real-process]：4:3 档画布（1248×928）真渲染 → 产物尺寸 == 参数化 W×H", () => {
-  it("renderTextOverlay(canvasWidth=1248, canvasHeight=928) → 产物 1248×928 mp4（尺寸写死即红）", async () => {
-    const res = await renderTextOverlay(inputVideo, {
-      pickDate: "2026-09-20",
-      title: "金色黄昏",
-      narrative: "五年前的今天，你在海边捕捉到了这张温暖的照片。夕阳将天空染成金橙色。",
-      captureDateline: "拍摄于 2021-05-05 18:30 · 5 年前",
-      canvasWidth: 1248,
-      canvasHeight: 928,
-    });
+dOverlay("场景 9.P1 [real-process]：4:3 档输入真渲染 → 产物尺寸 == variant 排版档恒定值", () => {
+  it("renderTextOverlay(…, 'landscape') → 产物恒 1920×1080 mp4（画布参数化/输入透传回归即红）", async () => {
+    const res = await renderTextOverlay(
+      inputVideo,
+      {
+        pickDate: "2026-09-20",
+        title: "金色黄昏",
+        narrative: "五年前的今天，你在海边捕捉到了这张温暖的照片。夕阳将天空染成金橙色。",
+        captureDateline: "拍摄于 2021-05-05 18:30 · 5 年前",
+        canvasWidth: 1248,
+        canvasHeight: 928,
+      },
+      "landscape",
+    );
 
     expect(res.overlaidPath, "必须产出 overlaidPath").toBeTruthy();
     expect(fs.existsSync(res.overlaidPath), `产物不存在: ${res.overlaidPath}`).toBe(true);
@@ -147,12 +154,39 @@ dOverlay("场景 9.P1 [real-process]：4:3 档画布（1248×928）真渲染 →
     const meta = probeVideo(res.overlaidPath);
     writeArtifact("s9p1", JSON.stringify({ overlaidPath: res.overlaidPath, ...meta }, null, 2));
 
-    // 谓词字面量：产物尺寸 == 参数化 W×H
-    expect(meta.width, `产物宽必须 1248（参数化画布），实际 ${meta.width}`).toBe(1248);
-    expect(meta.height, `产物高必须 928（参数化画布），实际 ${meta.height}`).toBe(928);
-    // 历史默认尺寸写死的直杀断言
-    expect(`${meta.width}x${meta.height}`).not.toBe("1280x704");
-    expect(`${meta.width}x${meta.height}`).not.toBe("736x1600");
+    // 谓词字面量：产物尺寸 == landscape 排版档（与输入 1248×928 / 生成画布解耦）
+    expect(meta.width, `产物宽必须恒 1920（排版档），实际 ${meta.width}`).toBe(1920);
+    expect(meta.height, `产物高必须恒 1080（排版档），实际 ${meta.height}`).toBe(1080);
+    // 历史回归直杀断言：产物不得跟随输入/生成画布（1248×928）
+    expect(`${meta.width}x${meta.height}`).not.toBe("1248x928");
+    expect(meta.formatName).toContain("mp4");
+  }, 900000);
+
+  it("renderTextOverlay(…, 'portrait') → 产物恒 1290×2796 mp4（竖版排版档）", async () => {
+    const res = await renderTextOverlay(
+      inputVideo,
+      {
+        pickDate: "2026-09-20",
+        title: "金色黄昏",
+        narrative: "五年前的今天，你在海边捕捉到了这张温暖的照片。夕阳将天空染成金橙色。",
+        captureDateline: "拍摄于 2021-05-05 18:30 · 5 年前",
+        canvasWidth: 1248,
+        canvasHeight: 928,
+      },
+      "portrait",
+    );
+
+    expect(res.overlaidPath, "必须产出 overlaidPath").toBeTruthy();
+    expect(fs.existsSync(res.overlaidPath), `产物不存在: ${res.overlaidPath}`).toBe(true);
+
+    const meta = probeVideo(res.overlaidPath);
+    writeArtifact(
+      "s9p1-portrait",
+      JSON.stringify({ overlaidPath: res.overlaidPath, ...meta }, null, 2),
+    );
+
+    expect(meta.width, `产物宽必须恒 1290（竖版排版档），实际 ${meta.width}`).toBe(1290);
+    expect(meta.height, `产物高必须恒 2796（竖版排版档），实际 ${meta.height}`).toBe(2796);
     expect(meta.formatName).toContain("mp4");
   }, 900000);
 });

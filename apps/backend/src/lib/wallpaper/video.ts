@@ -660,11 +660,14 @@ export interface TextOverlayMeta {
   narrative: string;
   /** hero 照片拍摄时刻 ISO（footer「拍摄于 …· N 年前」同源 web/静态壁纸）；null/缺省 → footer 不渲染 */
   takenAt?: string | null;
-  /** 生成画布宽（20260928 单腿原生：透传 Remotion props + calculateMetadata 动态 comp 尺寸） */
+  /** 生成画布宽（20261009 起仅存档透传 props 供排查，不参与 comp 尺寸/分支） */
   canvasWidth: number;
   /** 生成画布高（同上） */
   canvasHeight: number;
 }
+
+/** 排版卡变体（20261009 排版解耦）：landscape=16:9 杂志卡 1920×1080 / portrait=竖版全屏卡 1290×2796 */
+export type TextOverlayVariant = "landscape" | "portrait";
 
 /**
  * footer 拍摄时刻 dateline（lib/wallpaper/capture.ts 同源封装：
@@ -709,23 +712,27 @@ function resolveNpxPath(): string {
 }
 
 /**
- * Remotion 文字层合成（v2 增量任务 14）：spawn `npx remotion render`
+ * Remotion 文字层合成（v2 增量任务 14；20261009 排版解耦）：spawn `npx remotion render`
  * （cwd=wallpaper-overlay 工程、npx 绝对路径解析、AbortController 600s 超时、
  * stdout/stderr tail 留证）。
  *
  * 输入视频拷入工程 public/（staticFile 服务范围），渲染完成即清理；
- * composition 按生成画布比例选（canvasWidth/canvasHeight ≥0.9 → landscape 两栏，
- * 否则 portrait 全屏；画布经 props 透传，Root.tsx calculateMetadata 动态定 comp 尺寸）；
+ * composition 按 variant 选（landscape=16:9 杂志卡 1920×1080 / portrait=竖版全屏卡
+ * 1290×2796——comp 尺寸固定在 Root.tsx，与生成画布解耦；输入 loop 为任意原生比例，
+ * comp 内 contain/cover 适配）；props.variant 显式透传（comp 内分支同源）；
  * --frames=0-N 约束渲染时长 = 输入时长（ffprobe 探测，帧率同源）。
  *
  * 错误枚举 OverlayRenderError：工程/Remotion 运行时缺失（不自动安装）/
  * ffprobe 失败 / remotion 非零退出 / 产物缺失 / 超时。
  *
+ * @param variant 排版卡变体（同一天两张卡各渲染一次：landscape → 画廊主视频 + Aerial
+ *   源；portrait → 手机竖版动态壁纸）
  * @param opts.timeoutMs 测试注入（默认契约 600s）
  */
 export async function renderTextOverlay(
   videoPath: string,
   meta: TextOverlayMeta,
+  variant: TextOverlayVariant,
   opts: { timeoutMs?: number } = {},
 ): Promise<{ overlaidPath: string }> {
   const timeoutMs = opts.timeoutMs ?? OVERLAY_RENDER_TIMEOUT_MS;
@@ -763,10 +770,11 @@ export async function renderTextOverlay(
       `renderTextOverlay ffprobe 探测失败: ${e instanceof Error ? e.message : String(e)} (${videoPath})`,
     );
   }
-  // comp 选择（20260928 单腿原生）：按生成画布比例判定（≥0.9 横版两栏 / <0.9 竖版全屏），
-  // 不再按输入视频探测尺寸——输入视频本就是该画布的 loop 产物（比例一致）
-  const canvasRatio = meta.canvasHeight > 0 ? meta.canvasWidth / meta.canvasHeight : 0;
-  const compId = canvasRatio >= 0.9 ? "wallpaper-overlay-landscape" : "wallpaper-overlay-portrait";
+  // comp 选择（20261009 排版解耦）：按 variant 显式选卡——landscape=16:9 杂志卡
+  // （恒 1920×1080）/ portrait=竖版全屏卡（恒 1290×2796），comp 尺寸固定在
+  // Root.tsx（不再跟随生成画布）；输入 loop 为任意原生比例，由 comp 内 contain/cover 适配
+  const compId =
+    variant === "landscape" ? "wallpaper-overlay-landscape" : "wallpaper-overlay-portrait";
   const frames = Math.max(1, Math.ceil(probe.duration * probe.fps));
 
   // 输入视频拷入工程 public/（渲染完成即清理）
@@ -777,10 +785,10 @@ export async function renderTextOverlay(
 
   const overlaidPath = path.join(
     path.dirname(absVideoPath),
-    `${path.basename(absVideoPath).replace(/\.mp4$/i, "")}-overlay.mp4`,
+    `${path.basename(absVideoPath).replace(/\.mp4$/i, "")}-overlay-${variant}.mp4`,
   );
-  // props 契约（20260928 契约 7 纯超集扩展）：{videoPath, pickDate, title, narrative,
-  // captureDateline, canvasWidth, canvasHeight}
+  // props 契约（20261009 契约修订）：{videoPath, pickDate, title, narrative,
+  // captureDateline, canvasWidth, canvasHeight, variant}
   const props = {
     videoPath: OVERLAY_PUBLIC_INPUT,
     pickDate: meta.pickDate,
@@ -789,6 +797,7 @@ export async function renderTextOverlay(
     captureDateline: buildCaptureDateline(meta.takenAt),
     canvasWidth: meta.canvasWidth,
     canvasHeight: meta.canvasHeight,
+    variant,
   };
   const args = [
     "remotion",

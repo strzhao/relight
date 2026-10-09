@@ -1,29 +1,32 @@
 /**
  * 验收测试（红队）：单腿原生壁纸视频 — job 行为契约（mock spawn 面，无 GPU）
  *
- * 设计文档（state.md §设计文档 D2 / §验收场景）对应谓词：
+ * 设计文档（state.md §设计文档 D2 / §验收场景；20261009 排版解耦改版）对应谓词：
  *   - 场景 1.P2 [det-machine]（job 级代码化）：生成画布跟随原图比例 —— job 以
  *     computeNativeCanvas(hero 原图 dims) 的画布调 preprocessHeroFrame，并把 W/H 透传
  *     spawnHoneydoVideo（契约 6：spawn argv --width W --height H 两轴显式覆盖档位）
  *   - 场景 1.P3 [det-machine]（job 级代码化）：画布像素 ≤ 1177600 && ≥ /2
  *   - 场景 1.P4 [det-machine]：DB 当日行 wallpaper_video_native_url != ""
- *     && wallpaper_video_landscape_url == "" && wallpaper_video_portrait_url == ""
- *     （DB 列「空」在本套件惯例为 NULL——与既有 wallpaper-video-job 验收同语义）
+ *     && wallpaper_video_landscape_url != "" && wallpaper_video_portrait_url != ""
+ *     （20261009 排版解耦：双卡渲染 + Aerial 恒产出 → 三列全非空；DB 列「空」在本套件
+ *     惯例为 NULL——与既有 wallpaper-video-job 验收同语义）
  *   - 场景 3.P3 [det-machine]（COS HEAD 前置）：护栏通过后 wallpaper_video_landscape_url
- *     != ""（兼容日；真实 COS HEAD 200 落 realprocess 文件）
- *   - 场景 4.P1 [det-machine]（job 级代码化）：非兼容日产物零 .mov —— transcodeForAerial
- *     调用次数 == 0 且无 _landscape.mov 上传
- *   - 场景 4.P4 [det-machine]：非兼容日 wallpaper_video_landscape_url == ""（未上传）
+ *     != ""（真实 COS HEAD 200 落 realprocess 文件）
+ *   - 场景 4.P1 [det-machine]（job 级代码化）：双卡渲染 renderTextOverlay ×2 +
+ *     gallery 转码 ×2 + transcodeForAerial 恒 ×1（原「非兼容日零 .mov」语义废止）
+ *   - 场景 4.P4 [det-machine]：三件套 key 全上传（_native.mp4/_portrait.mp4/_landscape.mov）
  *   - 场景 5.P1 [real-process→job 级代码化]：注入错尺寸转码产物 → 护栏阻断：
  *     job 失败（runWallpaperVideo reject → rerun CLI exit != 0 的进程级前提）且回执列空
  *   - 场景 5.P2 [det-machine]：失败日志显式含尺寸断言语义（禁静默失败）
  *   - 场景 5.P3 [det-machine]：对照组正确尺寸 → 护栏放行、回执写库（kill 永远拒绝 No-op）
- *   - 场景 7 [det-machine DB 侧]：兼容日 native 与 landscape 并存（302 路由 302→landscape、
+ *   - 场景 7 [det-machine DB 侧]：native/portrait/landscape 三列并存（302 路由 302→landscape、
  *     manifest 取 native 的断言落 route/manifest 两个验收文件）
  *
- * 设计契约（D2 逐字）：produceNativeSide 单腿——单腿 = 全程恰 1 次 honeydo spawn（kill
- *   双腿 No-op）；转码A（画廊原生，沿用 transcodeForGallery）恒发生；转码B（条件 Aerial）
- *   仅画布 ratio ∈ [1.5, 1.9] 发生；legacy 竖腿删除 → _portrait.mp4 不再新写（契约 2）。
+ * 设计契约（D2 逐字 + 20261009 排版解耦）：produceNativeSide 单腿——单腿 = 全程恰 1 次
+ *   honeydo spawn（kill 双腿 No-op）；renderTextOverlay 双卡 ×2（landscape 16:9 卡 /
+ *   portrait 竖版卡，排版档尺寸恒定）；转码三件套：16:9 卡 transcodeForGallery（断言
+ *   1920×1080）+ 竖版卡 transcodeForGallery（断言 1290×2796）+ Aerial transcodeForAerial
+ *   （输入=16:9 卡，恒产出，断言 1920×1080）。
  *
  * // CONTRACT_AMBIGUOUS: 尺寸护栏的实现位置（job 级 post-transcode probe vs 转码函数内部）
  * // 契约未声明导出名——本文件按 D2「每条转码产物 probe 断言尺寸，不匹配即 throw」在 job
@@ -71,7 +74,9 @@ const holder = vi.hoisted(() => ({
   /** spawn mock 产物登记表：`${width}x${height}` → 源 mp4 路径 */
   productByCanvas: new Map<string, string>(),
   loopPath: "/tmp/relight-none/loop-master.mp4",
-  overlaidPath: "/tmp/relight-none/overlaid.mp4",
+  /** renderTextOverlay mock 产物（20261009 双卡：按 variant 落排版档尺寸真实 mp4） */
+  landscapeCardPath: "/tmp/relight-none/card-1920x1080.mp4",
+  portraitCardPath: "/tmp/relight-none/card-1290x2796.mp4",
   /** transcodeForGallery 产物模式：pass=复制源 / badsz=落错尺寸文件 */
   galleryMode: "pass" as "pass" | "badsz",
   /** transcodeForAerial 产物模式：pass=落 1920×1080 / badsz=落 1918×1080 */
@@ -225,14 +230,17 @@ function nativeKey(pickDate: string): string {
 function landscapeKey(pickDate: string): string {
   return `${PREFIX}/wallpaper-videos/${pickDate}_landscape.mov`;
 }
+function portraitKey(pickDate: string): string {
+  return `${PREFIX}/wallpaper-videos/${pickDate}_portrait.mp4`;
+}
 function receiptFor(cosKey: string): string {
   if (holder.receiptMode === "empty") return "";
   return `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${cosKey}`;
 }
 
-/** 兼容日：hero 3000×2000（3:2，画布 ratio 1312/864≈1.5185 ∈ [1.5, 1.9] → 出 .mov） */
+/** 3:2 hero（画布 1312×864；20261009 起画布比例不再影响产物形态） */
 const PICK_COMPAT = "2026-09-20";
-/** 非兼容日：hero 2000×2000（1:1，画布 ratio 1.0 < 1.5 → 无 .mov，mac 静态回退） */
+/** 1:1 hero（画布 1056×1056；20261009 起画布比例不再影响产物形态） */
 const PICK_SQUARE = "2026-09-21";
 
 // ============================================================================
@@ -377,12 +385,18 @@ function wireMocks(): void {
     fs.copyFileSync(src, holder.loopPath);
     return { loopPath: holder.loopPath, segments: 2 };
   });
-  mockRenderTextOverlay.mockImplementation(async (videoPath: string, _meta: unknown) => {
-    pipelineSeq.push("overlay");
-    fs.mkdirSync(path.dirname(holder.overlaidPath), { recursive: true });
-    fs.copyFileSync(videoPath, holder.overlaidPath);
-    return { overlaidPath: holder.overlaidPath };
-  });
+  // renderTextOverlay（20261009 双卡契约：(videoPath, meta, variant) → {overlaidPath}）——
+  // 按 variant 从排版档 fixture 拷贝出独立产物路径（job 成功后会清理 overlaidPath 视为
+  // 中间产物——直接返回 fixture 路径会被首轮跑完删除，后续用例 ENOENT）
+  mockRenderTextOverlay.mockImplementation(
+    async (_videoPath: string, _meta: unknown, variant: string) => {
+      pipelineSeq.push(`overlay:${variant}`);
+      const fixture = variant === "landscape" ? holder.landscapeCardPath : holder.portraitCardPath;
+      const out = path.join(path.dirname(fixture), `overlay-out-${variant}.mp4`);
+      fs.copyFileSync(fixture, out);
+      return { overlaidPath: out };
+    },
+  );
   mockTranscodeForGallery.mockImplementation((src: string, dst: string) => {
     pipelineSeq.push("gallery");
     fs.mkdirSync(path.dirname(dst), { recursive: true });
@@ -485,7 +499,11 @@ beforeAll(async () => {
   makeTinyMp4(holder.aerialBadPath, "1918x1080");
   makeTinyMp4(holder.galleryBadPath, "1310x864");
   holder.loopPath = path.join(tmpRoot, "loop-master.mp4");
-  holder.overlaidPath = path.join(tmpRoot, "overlaid.mp4");
+  // 双卡渲染 mock 产物（20261009 排版档真实尺寸——真实 ffprobe 护栏的校验对象）
+  holder.landscapeCardPath = path.join(tmpRoot, "card-1920x1080.mp4");
+  holder.portraitCardPath = path.join(tmpRoot, "card-1290x2796.mp4");
+  makeTinyMp4(holder.landscapeCardPath, "1920x1080");
+  makeTinyMp4(holder.portraitCardPath, "1290x2796");
   holder.videoWorkspacePath = path.join(tmpRoot, "video-workspace");
 
   // Remotion 运行时脚手架（job 前置 fs access 校验；渲染本身被 mock——
@@ -543,30 +561,27 @@ afterAll(() => {
 });
 
 // ============================================================================
-// 场景 1.P4 + 4.P1/P4：非兼容日（1:1 hero）——单腿原生，无 .mov
+// 场景 1.P4 + 4.P1/P4：1:1 hero——单腿原生 + 双卡 + 恒 Aerial（20261009 排版解耦：
+// 原「非兼容日无 .mov」分支语义废止，1:1 画布日同样产出三件套）
 // ============================================================================
 
-dJob("场景 1.P4/4.P1/4.P4：非兼容日（画布 ratio<1.5）单腿原生——无 .mov、回执仅 native", () => {
-  it("恰 1 次 spawn（kill 双腿 No-op）+ transcodeForAerial 零调用 + 仅 native key 上传", async () => {
+dJob("场景 1.P4/4.P1/4.P4：1:1 hero（1056² 画布）单腿原生——双卡渲染 + 三件套产物", () => {
+  it("恰 1 次 spawn（kill 双腿 No-op）+ gallery 双卡转码 ×2 + aerial 恒产出 ×1 + 三 key 上传", async () => {
     await runWallpaperVideo(PICK_SQUARE);
 
     // 场景 1.P1 的 job 级代码化：单腿 = 全程恰 1 次 honeydo spawn
     expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
-    // 场景 4.P1 的 job 级代码化：非兼容日零 Aerial 转码（产物目录无 1920×1080 .mov 的因）
-    expect(mockTranscodeForAerial).toHaveBeenCalledTimes(0);
-    expect(mockTranscodeForGallery).toHaveBeenCalledTimes(1);
+    // 20261009 排版解耦：双卡渲染 ×2 + gallery 转码 ×2 + Aerial 恒产出 ×1
+    expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
+    expect(mockTranscodeForGallery).toHaveBeenCalledTimes(2);
+    expect(mockTranscodeForAerial).toHaveBeenCalledTimes(1);
 
     const uploads = uploadCalls();
-    expect(uploads.length, "非兼容日仅 1 次（native）上传").toBe(1);
-    expect(uploads[0]?.cosKey).toBe(nativeKey(PICK_SQUARE));
-    expect(
-      uploads.some((u) => u.cosKey.includes("_landscape.mov")),
-      "非兼容日不得上传 _landscape.mov",
-    ).toBe(false);
-    expect(
-      uploads.some((u) => u.cosKey.includes("_portrait.mp4")),
-      "legacy 竖腿已删除——不得再上传 _portrait.mp4（契约 2）",
-    ).toBe(false);
+    const keys = uploads.map((u) => u.cosKey);
+    expect(keys, "三件套上传（native + portrait + landscape.mov）").toHaveLength(3);
+    expect(keys).toContain(nativeKey(PICK_SQUARE));
+    expect(keys).toContain(portraitKey(PICK_SQUARE));
+    expect(keys).toContain(landscapeKey(PICK_SQUARE));
   });
 
   it("画布跟随原图：preprocess 按 computeNativeCanvas(2000,2000) 画布、spawn 显式携带 W/H（契约 6）", async () => {
@@ -589,45 +604,47 @@ dJob("场景 1.P4/4.P1/4.P4：非兼容日（画布 ratio<1.5）单腿原生—�
     expect(sp.height, "spawn.opts.height 必须 == 画布高").toBe(canvas.height);
   });
 
-  it("场景 1.P4 [det-machine]：DB 行 native != 空 && landscape == 空 && portrait == 空", async () => {
+  it("场景 1.P4 [det-machine]：DB 行 native/portrait/landscape 三列全部非空", async () => {
     await runWallpaperVideo(PICK_SQUARE);
 
     const row = getPickRow(PICK_SQUARE);
     expect(row.wallpaper_video_native_url, "native 回执列必须非空（回执 URL 逐字）").toBe(
       receiptFor(nativeKey(PICK_SQUARE)),
     );
-    expect(row.wallpaper_video_landscape_url, "非兼容日 landscape 列必须为空").toBeNull();
-    expect(row.wallpaper_video_portrait_url, "portrait 列必须为空（legacy 不再新写）").toBeNull();
+    expect(row.wallpaper_video_landscape_url, "Aerial 恒产出 → landscape 列非空").toBe(
+      receiptFor(landscapeKey(PICK_SQUARE)),
+    );
+    expect(row.wallpaper_video_portrait_url, "竖版卡复活 → portrait 列非空").toBe(
+      receiptFor(portraitKey(PICK_SQUARE)),
+    );
     expect(mockSyncDayToGallery).toHaveBeenCalledTimes(1);
     expect(mockSyncDayToGallery.mock.calls[0]?.[0]).toBe(PICK_SQUARE);
   });
 });
 
 // ============================================================================
-// 场景 3.P3（DB 侧）+ 场景 7 DB 共存：兼容日（3:2 hero，ratio ∈ [1.5,1.9]）
+// 场景 3.P3（DB 侧）+ 场景 7 DB 共存：3:2 hero（原「兼容窗口」语义废止，行为与 1:1 一致）
 // ============================================================================
 
-dJob("场景 3.P3 DB 侧 / 7：兼容日——native 与 landscape 并存、portrait 恒空", () => {
-  it("transcodeForAerial 恰 1 次（输入=文字成品）+ native/_landscape.mov 双 key 上传", async () => {
+dJob("场景 3.P3 DB 侧 / 7：3:2 hero——native/portrait/landscape 三列并存", () => {
+  it("transcodeForAerial 恰 1 次（输入=16:9 卡）+ 三 key 上传", async () => {
     await runWallpaperVideo(PICK_COMPAT);
 
     expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
-    expect(mockTranscodeForGallery).toHaveBeenCalledTimes(1);
-    expect(
-      mockTranscodeForAerial,
-      "兼容日（3:2 画布 ratio≈1.52 ∈ [1.5,1.9]）必须产出 Aerial",
-    ).toHaveBeenCalledTimes(1);
-    // v2 契约沿承：transcodeForAerial 输入 = Remotion 合成后的最终成品
-    expect(mockTranscodeForAerial.mock.calls[0]?.[0]).toBe(holder.overlaidPath);
+    expect(mockTranscodeForGallery).toHaveBeenCalledTimes(2);
+    expect(mockTranscodeForAerial).toHaveBeenCalledTimes(1);
+    // 20261009 契约：transcodeForAerial 输入 = 16:9 卡（{pickDate}-native.mp4），非 overlay 中间产物
+    expect(String(mockTranscodeForAerial.mock.calls[0]?.[0])).toMatch(/2026-09-20-native\.mp4$/);
 
     const uploads = uploadCalls();
     const keys = uploads.map((u) => u.cosKey);
-    expect(keys, "兼容日恰 2 次上传（native + _landscape.mov）").toHaveLength(2);
+    expect(keys, "三件套上传").toHaveLength(3);
     expect(keys).toContain(nativeKey(PICK_COMPAT));
+    expect(keys).toContain(portraitKey(PICK_COMPAT));
     expect(keys).toContain(landscapeKey(PICK_COMPAT));
   });
 
-  it("护栏通过后 DB：native != 空 且 wallpaper_video_landscape_url != 空（场景 3.P3 前置）且 portrait 空", async () => {
+  it("护栏通过后 DB：native/portrait/landscape 三列全部非空", async () => {
     await runWallpaperVideo(PICK_COMPAT);
 
     const row = getPickRow(PICK_COMPAT);
@@ -636,7 +653,7 @@ dJob("场景 3.P3 DB 侧 / 7：兼容日——native 与 landscape 并存、port
       row.wallpaper_video_landscape_url,
       "场景 3.P3：护栏通过后 landscape 列必须非空（真实 COS HEAD 落 realprocess 文件）",
     ).toBe(receiptFor(landscapeKey(PICK_COMPAT)));
-    expect(row.wallpaper_video_portrait_url).toBeNull();
+    expect(row.wallpaper_video_portrait_url).toBe(receiptFor(portraitKey(PICK_COMPAT)));
   });
 
   it("D2 画布联动：preprocess 画布 == computeNativeCanvas(3000,2000)（=1312×864，D1 参考输出）", async () => {

@@ -109,12 +109,15 @@ export function wallpaperVideoLandscapeCosKey(pickDate: string): string {
   return `${config.cos.prefix}/wallpaper-videos/${pickDate}_landscape.mov`;
 }
 
-/** 竖版壁纸视频 key：`relight/wallpaper-videos/{pickDate}_portrait.mp4`（历史 legacy，不再新写） */
+/** 竖版壁纸视频 key：`relight/wallpaper-videos/{pickDate}_portrait.mp4`
+ *  （20261009 排版解耦起恢复新写：竖版全屏卡 1290×2796，对齐手机静态壁纸 B 方案） */
 export function wallpaperVideoPortraitCosKey(pickDate: string): string {
   return `${config.cos.prefix}/wallpaper-videos/${pickDate}_portrait.mp4`;
 }
 
-/** 单腿原生比例壁纸视频 key：`relight/wallpaper-videos/{pickDate}_native.mp4`（20260928 新增） */
+/** 16:9 排版卡壁纸视频 key：`relight/wallpaper-videos/{pickDate}_native.mp4`（20260928 新增；
+ *  20261009 排版解耦起语义 = 画廊主播放视频——16:9 杂志卡 1920×1080，布局对齐 mac 静态壁纸；
+ *  key 名保留 native 沿用历史约定） */
 export function wallpaperVideoNativeCosKey(pickDate: string): string {
   return `${config.cos.prefix}/wallpaper-videos/${pickDate}_native.mp4`;
 }

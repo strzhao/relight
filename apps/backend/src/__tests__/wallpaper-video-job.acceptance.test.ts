@@ -241,8 +241,10 @@ import { buildManifest } from "../lib/gallery/manifest";
 const PICK_DATE = "2026-09-12";
 const NATIVE_KEY = `${TEST_COS.prefix}/wallpaper-videos/${PICK_DATE}_native.mp4`;
 const LANDSCAPE_KEY = `${TEST_COS.prefix}/wallpaper-videos/${PICK_DATE}_landscape.mov`;
+const PORTRAIT_KEY = `${TEST_COS.prefix}/wallpaper-videos/${PICK_DATE}_portrait.mp4`;
 const NATIVE_URL = `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${NATIVE_KEY}`;
 const LANDSCAPE_URL = `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${LANDSCAPE_KEY}`;
+const PORTRAIT_URL = `https://${TEST_COS.bucket}.cos.${TEST_COS.region}.myqcloud.com/${PORTRAIT_KEY}`;
 
 // ============================================================================
 // 临时环境 + fixture
@@ -729,56 +731,62 @@ dJob("COS 回执契约：uploadFile 回执空串 → DB 列不被写入、manife
 // 成功路径：回执非空 → 写 DB 列 → syncDayToGallery → manifest 暴露视频字段
 // ============================================================================
 
-dJob("成功路径（窗外 4:3）：native 列写入回执 URL、landscape 列不产出（场景 1.P4 / 4.P4）", () => {
-  it("DB native 列 == 回执 URL 逐字（_native.mp4），窗外日 landscape 列 null，syncDayToGallery 以 pickDate 调用", async () => {
-    holder.enabled = true;
-    holder.receiptMode = "url";
-    holder.heroDims = { width: 4000, height: 3000 }; // 4:3 → 1248×928，w/h=1.345 <1.5 窗外
-    seedTodayPick();
+dJob(
+  "成功路径（4:3 hero）：native/portrait/landscape 三列写入（20261009 排版解耦，无窗外概念）",
+  () => {
+    it("DB 三列 == 回执 URL 逐字（_native.mp4/_portrait.mp4/_landscape.mov），syncDayToGallery 以 pickDate 调用", async () => {
+      holder.enabled = true;
+      holder.receiptMode = "url";
+      holder.heroDims = { width: 4000, height: 3000 }; // 4:3 → 1248×928 画布
+      seedTodayPick();
 
-    await runWallpaperVideo(PICK_DATE);
+      await runWallpaperVideo(PICK_DATE);
 
-    const row = getPickRow();
-    expect(row.wallpaper_video_native_url).toBe(NATIVE_URL);
-    // 场景 4.P4：窗外日 landscape 列空 → mac App 拿空列走静态回退
-    expect(row.wallpaper_video_landscape_url).toBeNull();
+      const row = getPickRow();
+      expect(row.wallpaper_video_native_url).toBe(NATIVE_URL);
+      // 20261009 排版解耦：Aerial 源恒为 16:9 卡 → landscape 列恒产出（原窗外日为空的语义废止）
+      expect(row.wallpaper_video_landscape_url).toBe(LANDSCAPE_URL);
+      // 竖版卡复活：portrait 列恢复新写
+      expect(row.wallpaper_video_portrait_url).toBe(PORTRAIT_URL);
 
-    expect(mockSyncDayToGallery).toHaveBeenCalledTimes(1);
-    expect(mockSyncDayToGallery.mock.calls[0]?.[0]).toBe(PICK_DATE);
-  });
+      expect(mockSyncDayToGallery).toHaveBeenCalledTimes(1);
+      expect(mockSyncDayToGallery.mock.calls[0]?.[0]).toBe(PICK_DATE);
+    });
 
-  it("单腿编排：spawn ×1 → buildLoop ×1 → renderTextOverlay ×1 → gallery 转码 ×1；仅 native 上传一次；manifest 只展开 native 字段", async () => {
-    holder.enabled = true;
-    holder.heroDims = { width: 4000, height: 3000 };
-    seedTodayPick();
+    it("单腿编排：spawn ×1 → buildLoop ×1 → renderTextOverlay ×2 → gallery 转码 ×2 + aerial ×1；三 key 上传；manifest 三字段展开", async () => {
+      holder.enabled = true;
+      holder.heroDims = { width: 4000, height: 3000 };
+      seedTodayPick();
 
-    await runWallpaperVideo(PICK_DATE);
+      await runWallpaperVideo(PICK_DATE);
 
-    // 单腿 ×1（20260928：不再有横竖两腿）
-    expect(mockReadOrientedDimensions).toHaveBeenCalledTimes(1);
-    expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(1);
-    expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
-    expect(mockBuildLoop).toHaveBeenCalledTimes(1);
-    expect(mockRenderTextOverlay).toHaveBeenCalledTimes(1);
-    expect(mockTranscodeForGallery).toHaveBeenCalledTimes(1);
-    expect(mockTranscodeForAerialNative).toHaveBeenCalledTimes(0);
-    expect(uploadCallCount()).toBe(1);
+      // 单腿 ×1（20260928：不再有横竖两腿）；双卡渲染 ×2（20261009）
+      expect(mockReadOrientedDimensions).toHaveBeenCalledTimes(1);
+      expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(1);
+      expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
+      expect(mockBuildLoop).toHaveBeenCalledTimes(1);
+      expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
+      expect(mockTranscodeForGallery).toHaveBeenCalledTimes(2);
+      expect(mockTranscodeForAerialNative).toHaveBeenCalledTimes(1);
+      expect(uploadCallCount()).toBe(3);
 
-    const days = await buildManifestDays();
-    const day = days.find((d) => d.pickDate === PICK_DATE) as ManifestDayShape;
-    // 场景 7.P2：native 展开为 native URL（非 legacy）
-    expect("wallpaperVideoNative" in day).toBe(true);
-    expect(day.wallpaperVideoNative).toBe(NATIVE_URL);
-    expect((day.wallpaperVideoNative as string).endsWith("_native.mp4")).toBe(true);
-    expect(day.wallpaperVideoNative).toContain("myqcloud.com");
-    // 窗外日 legacy 字段缺省
-    expect("wallpaperVideoLandscape" in day).toBe(false);
-    expect("wallpaperVideoPortrait" in day).toBe(false);
-  });
-});
+      const days = await buildManifestDays();
+      const day = days.find((d) => d.pickDate === PICK_DATE) as ManifestDayShape;
+      // 三字段全部条件展开
+      expect("wallpaperVideoNative" in day).toBe(true);
+      expect(day.wallpaperVideoNative).toBe(NATIVE_URL);
+      expect((day.wallpaperVideoNative as string).endsWith("_native.mp4")).toBe(true);
+      expect(day.wallpaperVideoNative).toContain("myqcloud.com");
+      expect("wallpaperVideoLandscape" in day).toBe(true);
+      expect(day.wallpaperVideoLandscape).toBe(LANDSCAPE_URL);
+      expect("wallpaperVideoPortrait" in day).toBe(true);
+      expect(day.wallpaperVideoPortrait).toBe(PORTRAIT_URL);
+    });
+  },
+);
 
-dJob("成功路径（窗内 16:9）：native + landscape 双列写入（16:9 微裁 .mov 语义收窄）", () => {
-  it("hero 16:9 → 画布 1440×800（w/h=1.8 窗内）→ aerial 转码 ×1 + landscape 列写入 legacy key", async () => {
+dJob("成功路径（16:9 hero）：排版解耦后画布比例不影响产物形态（同三列）", () => {
+  it("hero 16:9 → 画布 1440×800 → 同样三转码 + 三列写入（原窗内/窗外分支语义废止）", async () => {
     holder.enabled = true;
     holder.heroDims = { width: 3840, height: 2160 };
     seedTodayPick();
@@ -786,16 +794,18 @@ dJob("成功路径（窗内 16:9）：native + landscape 双列写入（16:9 微
     await runWallpaperVideo(PICK_DATE);
 
     expect(mockTranscodeForAerialNative).toHaveBeenCalledTimes(1);
-    expect(uploadCallCount()).toBe(2);
+    expect(uploadCallCount()).toBe(3);
 
     const row = getPickRow();
     expect(row.wallpaper_video_native_url).toBe(NATIVE_URL);
     expect(row.wallpaper_video_landscape_url).toBe(LANDSCAPE_URL);
+    expect(row.wallpaper_video_portrait_url).toBe(PORTRAIT_URL);
 
     const days = await buildManifestDays();
     const day = days.find((d) => d.pickDate === PICK_DATE) as ManifestDayShape;
     expect(day.wallpaperVideoNative).toBe(NATIVE_URL);
     expect(day.wallpaperVideoLandscape).toBe(LANDSCAPE_URL);
+    expect(day.wallpaperVideoPortrait).toBe(PORTRAIT_URL);
     expect((day.wallpaperVideoLandscape as string).endsWith("_landscape.mov")).toBe(true);
   });
 });
@@ -805,24 +815,24 @@ dJob("成功路径（窗内 16:9）：native + landscape 双列写入（16:9 微
 // ============================================================================
 
 dJob(
-  "job 串接顺序（D2 单腿逐字）：preprocess → spawn → buildLoop → renderTextOverlay → gallery 转码 → aerial 转码（窗内）",
+  "job 串接顺序（D2 单腿逐字 + 20261009 双卡）：preprocess → spawn → buildLoop → overlay ×2 → gallery 转码 ×2 → aerial 转码",
   () => {
     it("调用顺序逐字 + 画布由 computeNativeCanvas 派生 + config 时长/loop 参数透传（非默认值证明 wiring）", async () => {
       holder.enabled = true;
       // 非默认值：证明 job 读取 config 并透传（若 job 硬编码 4/8，此处即红）
       holder.seconds = 5;
       holder.loopSeconds = 9;
-      holder.heroDims = { width: 3840, height: 2160 }; // 窗内（含 aerial 腿的完整顺序）
+      holder.heroDims = { width: 3840, height: 2160 }; // 画布 1440×800
       seedTodayPick();
 
       await runWallpaperVideo(PICK_DATE);
 
-      // 次数（单腿：preprocess/spawn/buildLoop/overlay 各 ×1；双转码各 ×1）
+      // 次数（单腿：preprocess/spawn/buildLoop 各 ×1；overlay 双卡 ×2；gallery 双卡转码 ×2；aerial ×1）
       expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(1);
       expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
       expect(mockBuildLoop).toHaveBeenCalledTimes(1);
-      expect(mockRenderTextOverlay).toHaveBeenCalledTimes(1);
-      expect(mockTranscodeForGallery).toHaveBeenCalledTimes(1);
+      expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
+      expect(mockTranscodeForGallery).toHaveBeenCalledTimes(2);
       expect(mockTranscodeForAerialNative).toHaveBeenCalledTimes(1);
 
       // 参数透传：spawnHoneydoVideo.opts.seconds === config.wallpaperVideoSeconds；
@@ -848,12 +858,13 @@ dJob(
       expect(mockPreprocessHeroFrame.mock.calls[0]?.[1]).toBe(1440);
       expect(mockPreprocessHeroFrame.mock.calls[0]?.[2]).toBe(800);
 
-      // 顺序（D2 逐字，单腿内 preprocess → spawn → buildLoop → overlay → 转码）
+      // 顺序（D2 逐字 + 20261009 双卡：preprocess → spawn → buildLoop → overlay×2 → gallery×2 → aerial）
       const seq = pipelineSeq;
       expect(seq[0], "首事件必须是 preprocess（预裁剪先于生成）").toBe("preprocess");
       const spawnIdx = seq.indexOf("spawn");
       const buildIdx = seq.indexOf("buildLoop", spawnIdx);
       const overlayIdx = seq.indexOf("overlay", buildIdx);
+      const overlay2Idx = seq.indexOf("overlay", overlayIdx + 1);
       const galleryIdx = seq.indexOf("gallery", overlayIdx);
       const aerialIdx = seq.indexOf("aerial", galleryIdx);
       expect(spawnIdx, "spawn 在 preprocess 后").toBeGreaterThan(0);
@@ -862,16 +873,19 @@ dJob(
         "spawn 之后必须先 buildLoop（palindrome）再 renderTextOverlay",
       ).toBeGreaterThan(spawnIdx);
       expect(overlayIdx, "buildLoop 之后必须 renderTextOverlay").toBeGreaterThan(buildIdx);
-      expect(galleryIdx, "overlay 之后必须 gallery 原生转码（转码 A）").toBeGreaterThan(overlayIdx);
-      expect(aerialIdx, "gallery 之后才 aerial 条件转码（转码 B）").toBeGreaterThan(galleryIdx);
+      expect(overlay2Idx, "双卡渲染：overlay 必须连续两次").toBeGreaterThan(overlayIdx);
+      expect(galleryIdx, "overlay 之后必须 gallery 卡转码").toBeGreaterThan(overlay2Idx);
+      expect(aerialIdx, "gallery 之后才 aerial 转码").toBeGreaterThan(galleryIdx);
 
-      // 契约 7：renderTextOverlay meta 携画布宽高（comp 选择依据）
-      const overlayMeta = mockRenderTextOverlay.mock.calls[0]?.[1] as {
-        canvasWidth?: number;
-        canvasHeight?: number;
-      };
-      expect(overlayMeta.canvasWidth).toBe(1440);
-      expect(overlayMeta.canvasHeight).toBe(800);
+      // 契约 7（20261009 修订）：renderTextOverlay meta 携画布宽高（存档）+ variant 按卡透传
+      const overlayCalls = mockRenderTextOverlay.mock.calls as Array<
+        [string, { canvasWidth?: number; canvasHeight?: number }, string]
+      >;
+      for (const call of overlayCalls) {
+        expect(call[1].canvasWidth).toBe(1440);
+        expect(call[1].canvasHeight).toBe(800);
+      }
+      expect(overlayCalls.map((c) => c[2]).sort()).toEqual(["landscape", "portrait"]);
     });
   },
 );

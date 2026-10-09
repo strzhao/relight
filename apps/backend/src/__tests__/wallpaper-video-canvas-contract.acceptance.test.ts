@@ -239,7 +239,7 @@ if (!OVERLAY_PRESENT) {
 }
 const dOverlay = OVERLAY_PRESENT ? describe : describe.skip;
 
-dOverlay("C4：Remotion comp 尺寸参数化（calculateMetadata + props 画布契约）", () => {
+dOverlay("C4：Remotion comp 排版档恒定（20261009 排版解耦 + props 契约）", () => {
   const overlayCorpus = (() => {
     // describe.skip 仍会执行本收集回调——目录缺失（CI）时直接返回空 corpus 防 ENOENT
     // （2026-09-26 CI 实证：探针 WARN 打了，readdirSync 照样崩）
@@ -260,17 +260,20 @@ dOverlay("C4：Remotion comp 尺寸参数化（calculateMetadata + props 画布�
     return out.join("\n");
   })();
 
-  it("两个 comp id 存在且挂 calculateMetadata（尺寸参数化，kill 写死）", () => {
+  it("两个 comp id 存在且尺寸恒定为目标排版档（1920×1080 / 1290×2796，kill 画布参数化回归）", () => {
     expect(overlayCorpus).toMatch(/wallpaper-overlay-landscape/);
     expect(overlayCorpus).toMatch(/wallpaper-overlay-portrait/);
-    expect(overlayCorpus).toMatch(/calculateMetadata/);
-    expect(overlayCorpus).toMatch(/canvasWidth/);
-    expect(overlayCorpus).toMatch(/canvasHeight/);
+    // 20261009 排版解耦：排版画布恒定，不再跟随 props 画布（calculateMetadata 参数化已移除）
+    expect(overlayCorpus).not.toMatch(/calculateMetadata/);
+    expect(overlayCorpus).toMatch(/width=\{1920\}/);
+    expect(overlayCorpus).toMatch(/height=\{1080\}/);
+    expect(overlayCorpus).toMatch(/width=\{1290\}/);
+    expect(overlayCorpus).toMatch(/height=\{2796\}/);
     // 旧固定档清除：comp 声明不再含历史画布字面量
     expect(overlayCorpus).not.toMatch(/1216/);
   });
 
-  it("props 契约七字段逐字（20260928 契约 7 纯超集扩展）", () => {
+  it("props 契约八字段逐字（20261009 契约修订：+variant）", () => {
     for (const prop of [
       "videoPath",
       "pickDate",
@@ -279,12 +282,14 @@ dOverlay("C4：Remotion comp 尺寸参数化（calculateMetadata + props 画布�
       "captureDateline",
       "canvasWidth",
       "canvasHeight",
+      "variant",
     ]) {
       expect(overlayCorpus, `overlay 工程缺 props 字段 ${prop}`).toContain(prop);
     }
   });
 
-  it("布局分支按 props 画布比例判定（≥0.9 两栏横版 / <0.9 竖版全屏）", () => {
+  it("布局分支：variant 显式判定优先，缺省回退画布比例 ≥0.9（Studio 预览兼容）", () => {
+    expect(overlayCorpus).toMatch(/variant/);
     expect(overlayCorpus).toMatch(/0\.9/);
   });
 });
