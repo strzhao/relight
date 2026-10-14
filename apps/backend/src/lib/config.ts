@@ -161,12 +161,12 @@ export const config = {
    *  env DAILY_WALLPAPER_VIDEO 覆盖（沿 DAILY_* 惯例，范本 dailyRecentSourceEnabled）。 */
   wallpaperVideoEnabled: (process.env.DAILY_WALLPAPER_VIDEO ?? "false") === "true",
   /** 壁纸视频单条时长（秒）。recipes 纪律（v2）：单条 ≤5s（漂移随时长累积），默认 4；
-   *  长循环由 buildLoop palindrome 拼接至 wallpaperVideoLoopSeconds 兜底。
+   *  （20261014 起 palindrome 拼接已移出管线，单腿直出。）
    *  honeydo CLI 上限 15（--seconds 1-15），运行时 clamp ∈ [1,15]。
    *  env WALLPAPER_VIDEO_SECONDS 覆盖。 */
   wallpaperVideoSeconds: Number.parseInt(process.env.WALLPAPER_VIDEO_SECONDS ?? "4", 10),
-  /** palindrome 循环目标时长（秒）。默认 8（4s 单条 ×2 palindrome 拼接）。
-   *  env WALLPAPER_VIDEO_LOOP_SECONDS 覆盖。 */
+  /** @deprecated 20261014 起管线移除 palindrome 拼接（倒放观感被用户否决，单腿直出、
+   *  回环靠双锚定首尾归位 + 播放器循环），此配置不再被消费，仅为兼容保留。 */
   wallpaperVideoLoopSeconds: Number.parseInt(process.env.WALLPAPER_VIDEO_LOOP_SECONDS ?? "8", 10),
   /** 运动量验收门槛（相对首帧峰值偏移，占满量程百分比；20261014 加入）。
    *  生成后实测（measureVideoMotion），低于门槛且引擎可换 seed 时重试。

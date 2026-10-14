@@ -18,7 +18,7 @@ import path from "node:path";
  *        画布预算钳到 H3C_CANVAS_PIXEL_BUDGET=768×1344）/
  *        honeydo = mmh3turbo int8（env WALLPAPER_VIDEO_ENGINE=honeydo 回滚）；
  *        seconds 默认 4，双锚定，honeydo 走 -r 720p + --width/--height 显式覆盖）
- *      → buildLoop（palindrome 拼接至 loopSeconds 默认 8）
+ *      → renderTextOverlay 双卡（20261014 起跳过 palindrome——倒放观感被否，单腿直出）
  *      → renderTextOverlay ×2（20261009 排版解耦：comp 尺寸恒定、与生成画布解耦——
  *        landscape=16:9 杂志卡 1920×1080（对齐 mac 静态壁纸观感；原生 loop 照片窗 contain）
  *        + portrait=竖版全屏卡 1290×2796（对齐手机静态壁纸 B 方案；loop cover 铺满））
@@ -56,7 +56,6 @@ import {
   WALLPAPER_VIDEO_RES,
   assertVideoDimensions,
   assertVideoSpawnPrerequisites,
-  buildLoop,
   clampWallpaperVideoSeconds,
   measureVideoMotion,
   preprocessHeroFrame,
@@ -99,7 +98,7 @@ export async function getLargestFaceBbox(photoId: string): Promise<FaceBbox | nu
 }
 
 /**
- * 单腿「预裁剪→生成→buildLoop→双卡 renderTextOverlay→三转码→上传→写列」；失败 throw 给上层
+ * 单腿「预裁剪→生成→双卡 renderTextOverlay→三转码→上传→写列」；失败 throw 给上层
  * （runWallpaperVideo 旁路：log 后当日回退静态——契约 8 三列均空）。
  *
  * 顺序刻意安排：**三条转码 + 尺寸护栏全部通过后才上传/写列**——护栏阻断（场景 5）时
@@ -125,7 +124,6 @@ async function produceNativeSide(opts: {
   const cardDstPath = path.join(wallpaperVideoDir(), `${pickDate}-native.mp4`);
   const portraitDstPath = path.join(wallpaperVideoDir(), `${pickDate}-portrait.mp4`);
   const aerialDstPath = path.join(wallpaperVideoDir(), `${pickDate}-landscape.mov`);
-  let loopPath: string | null = null;
   let overlayLandscapePath: string | null = null;
   let overlayPortraitPath: string | null = null;
   try {
@@ -241,15 +239,10 @@ async function produceNativeSide(opts: {
     }
     log(`[wallpaper-video] ${pickDate} native 生成完成 → ${rawPath}`);
 
-    // 3. buildLoop：palindrome 拼接至 loopSeconds（默认 8s；4s 单条 ×2）
-    const loop = await buildLoop(rawPath, config.wallpaperVideoLoopSeconds);
-    loopPath = loop.loopPath;
-    log(
-      `[wallpaper-video] ${pickDate} native palindrome 拼接完成（segments=${loop.segments}）→ ${loopPath}`,
-    );
-
-    // 4. renderTextOverlay ×2（20261009 排版解耦）：同一原生 loop 合成两张排版卡——
-    //    16:9 杂志卡（布局==mac 静态壁纸，照片窗 contain）+ 竖版全屏卡（==手机静态壁纸 B 方案，cover）
+    // 3. renderTextOverlay ×2（20261009 排版解耦；20261014 起跳过 palindrome 拼接——
+    //    用户裁决倒放观感诡异，单腿直出，回环由双锚定首尾归位 + 播放器循环保证）：
+    //    同一原生腿合成两张排版卡——16:9 杂志卡（布局==mac 静态壁纸，照片窗 contain）
+    //    + 竖版全屏卡（==手机静态壁纸 B 方案，cover）
     const overlayMeta = {
       pickDate,
       title: meta.title,
@@ -258,10 +251,10 @@ async function produceNativeSide(opts: {
       canvasWidth: canvas.width,
       canvasHeight: canvas.height,
     };
-    const overlayLandscape = await renderTextOverlay(loopPath, overlayMeta, "landscape");
+    const overlayLandscape = await renderTextOverlay(rawPath, overlayMeta, "landscape");
     overlayLandscapePath = overlayLandscape.overlaidPath;
     log(`[wallpaper-video] ${pickDate} 16:9 卡文字层合成完成 → ${overlayLandscapePath}`);
-    const overlayPortrait = await renderTextOverlay(loopPath, overlayMeta, "portrait");
+    const overlayPortrait = await renderTextOverlay(rawPath, overlayMeta, "portrait");
     overlayPortraitPath = overlayPortrait.overlaidPath;
     log(`[wallpaper-video] ${pickDate} 竖版卡文字层合成完成 → ${overlayPortraitPath}`);
 
@@ -294,7 +287,6 @@ async function produceNativeSide(opts: {
 
     // 中间产物清理（三条转码均成功后）
     await rm(rawPath, { force: true }).catch(() => {});
-    await rm(loopPath, { force: true }).catch(() => {});
     await rm(overlayLandscapePath, { force: true }).catch(() => {});
     await rm(overlayPortraitPath, { force: true }).catch(() => {});
 
@@ -355,7 +347,6 @@ async function produceNativeSide(opts: {
   } finally {
     await rm(framePath, { force: true }).catch(() => {});
     // 失败路径清理已产出的中间产物（成功路径已在上方清理）
-    if (loopPath) await rm(loopPath, { force: true }).catch(() => {});
     if (overlayLandscapePath) await rm(overlayLandscapePath, { force: true }).catch(() => {});
     if (overlayPortraitPath) await rm(overlayPortraitPath, { force: true }).catch(() => {});
   }
@@ -432,7 +423,7 @@ export async function runWallpaperVideo(
 
   await mkdir(wallpaperVideoDir(), { recursive: true });
 
-  // 4. 单腿「生成→buildLoop→renderTextOverlay→双转码→上传→写列」；
+  // 4. 单腿「生成→renderTextOverlay 双卡→三转码→上传→写列」；
   //    任一环节 throw → 旁路 log，当日回退静态（契约 8 两列均空，不影响精选主流程）
   const meta = { title: pick.title, narrative: pick.narrative, takenAt: hero.takenAt ?? null };
   // prompt 解析链（2026-09-13 契约修订）：AI narrate 的 motionPrompt 优先，

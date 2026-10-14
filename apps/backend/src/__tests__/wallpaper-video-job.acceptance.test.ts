@@ -764,7 +764,8 @@ dJob(
       expect(mockReadOrientedDimensions).toHaveBeenCalledTimes(1);
       expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(1);
       expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
-      expect(mockBuildLoop).toHaveBeenCalledTimes(1);
+      // 20261014 起跳过 buildLoop（倒放观感被否，单腿直出）
+      expect(mockBuildLoop).toHaveBeenCalledTimes(0);
       expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
       expect(mockTranscodeForGallery).toHaveBeenCalledTimes(2);
       expect(mockTranscodeForAerialNative).toHaveBeenCalledTimes(1);
@@ -815,7 +816,7 @@ dJob("成功路径（16:9 hero）：排版解耦后画布比例不影响产物�
 // ============================================================================
 
 dJob(
-  "job 串接顺序（D2 单腿逐字 + 20261009 双卡）：preprocess → spawn → buildLoop → overlay ×2 → gallery 转码 ×2 → aerial 转码",
+  "job 串接顺序（20261014 单腿直出）：preprocess → spawn → overlay ×2 → gallery 转码 ×2 → aerial 转码",
   () => {
     it("调用顺序逐字 + 画布由 computeNativeCanvas 派生 + config 时长/loop 参数透传（非默认值证明 wiring）", async () => {
       holder.enabled = true;
@@ -827,16 +828,16 @@ dJob(
 
       await runWallpaperVideo(PICK_DATE);
 
-      // 次数（单腿：preprocess/spawn/buildLoop 各 ×1；overlay 双卡 ×2；gallery 双卡转码 ×2；aerial ×1）
+      // 次数（单腿：preprocess/spawn 各 ×1，buildLoop 已移除；overlay 双卡 ×2；gallery 双卡转码 ×2；aerial ×1）
       expect(mockPreprocessHeroFrame).toHaveBeenCalledTimes(1);
       expect(mockSpawnHoneydoVideo).toHaveBeenCalledTimes(1);
-      expect(mockBuildLoop).toHaveBeenCalledTimes(1);
+      expect(mockBuildLoop).toHaveBeenCalledTimes(0);
       expect(mockRenderTextOverlay).toHaveBeenCalledTimes(2);
       expect(mockTranscodeForGallery).toHaveBeenCalledTimes(2);
       expect(mockTranscodeForAerialNative).toHaveBeenCalledTimes(1);
 
-      // 参数透传：spawnHoneydoVideo.opts.seconds === config.wallpaperVideoSeconds；
-      // buildLoop.targetSeconds === config.wallpaperVideoLoopSeconds
+      // 参数透传：spawnHoneydoVideo.opts.seconds === config.wallpaperVideoSeconds
+      //（loopSeconds 已随 20261014 去倒放移出管线，不再有 buildLoop wiring）
       const spawnOpts = mockSpawnHoneydoVideo.mock.calls[0]?.[0] as {
         seconds?: number;
         width?: number;
@@ -848,31 +849,24 @@ dJob(
       expect(spawnOpts.res).toBe("720p");
       expect(spawnOpts.width).toBe(1440);
       expect(spawnOpts.height).toBe(800);
-      for (const call of mockBuildLoop.mock.calls) {
-        expect(call?.[1], "buildLoop.targetSeconds 必须 === config.wallpaperVideoLoopSeconds").toBe(
-          9,
-        );
-      }
 
       // preprocess 画布 == computeNativeCanvas(heroDims)（真实纯函数派生）
       expect(mockPreprocessHeroFrame.mock.calls[0]?.[1]).toBe(1440);
       expect(mockPreprocessHeroFrame.mock.calls[0]?.[2]).toBe(800);
 
-      // 顺序（D2 逐字 + 20261009 双卡：preprocess → spawn → buildLoop → overlay×2 → gallery×2 → aerial）
+      // 顺序（20261014 起无 buildLoop：preprocess → spawn → overlay×2 → gallery×2 → aerial）
       const seq = pipelineSeq;
       expect(seq[0], "首事件必须是 preprocess（预裁剪先于生成）").toBe("preprocess");
       const spawnIdx = seq.indexOf("spawn");
-      const buildIdx = seq.indexOf("buildLoop", spawnIdx);
-      const overlayIdx = seq.indexOf("overlay", buildIdx);
+      const overlayIdx = seq.indexOf("overlay", spawnIdx);
       const overlay2Idx = seq.indexOf("overlay", overlayIdx + 1);
       const galleryIdx = seq.indexOf("gallery", overlayIdx);
       const aerialIdx = seq.indexOf("aerial", galleryIdx);
       expect(spawnIdx, "spawn 在 preprocess 后").toBeGreaterThan(0);
       expect(
-        buildIdx,
-        "spawn 之后必须先 buildLoop（palindrome）再 renderTextOverlay",
+        overlayIdx,
+        "spawn 之后必须 renderTextOverlay（单腿直出，无 palindrome）",
       ).toBeGreaterThan(spawnIdx);
-      expect(overlayIdx, "buildLoop 之后必须 renderTextOverlay").toBeGreaterThan(buildIdx);
       expect(overlay2Idx, "双卡渲染：overlay 必须连续两次").toBeGreaterThan(overlayIdx);
       expect(galleryIdx, "overlay 之后必须 gallery 卡转码").toBeGreaterThan(overlay2Idx);
       expect(aerialIdx, "gallery 之后才 aerial 转码").toBeGreaterThan(galleryIdx);

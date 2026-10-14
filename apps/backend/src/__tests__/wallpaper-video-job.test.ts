@@ -275,11 +275,13 @@ describe("runWallpaperVideo（20261009 排版解耦）", () => {
     expect(state.calls.spawn[0]?.width).toBe(1248);
     expect(state.calls.spawn[0]?.height).toBe(928);
 
-    // buildLoop ×1 + renderTextOverlay ×2（landscape 16:9 卡 + portrait 竖版卡；meta 携画布宽高存档）
-    expect(state.calls.buildLoop).toHaveLength(1);
-    expect(String(state.calls.buildLoop[0]?.src)).toMatch(/2026-09-12-native-raw\.mp4$/);
-    expect(state.calls.buildLoop[0]?.targetSeconds).toBe(8);
+    // 20261014 起跳过 buildLoop（倒放观感被否，单腿直出）+ renderTextOverlay ×2
+    // （landscape 16:9 卡 + portrait 竖版卡；直接吃 raw 腿；meta 携画布宽高存档）
+    expect(state.calls.buildLoop).toHaveLength(0);
     expect(state.calls.renderTextOverlay).toHaveLength(2);
+    for (const c of state.calls.renderTextOverlay) {
+      expect(String(c.videoPath)).toMatch(/2026-09-12-native-raw\.mp4$/);
+    }
     expect(state.calls.renderTextOverlay.map((c) => c.variant).sort()).toEqual([
       "landscape",
       "portrait",
