@@ -78,16 +78,28 @@ describe("measureVideoMotion", () => {
 // withMotionBoost（20261014 定案：双锚保身份 + 动作强化后缀给运动量）
 // ============================================================================
 
-import { MOTION_BOOST_SUFFIX, withMotionBoost } from "../lib/wallpaper/video";
+import { withMotionBoost } from "../lib/wallpaper/video";
 
-describe("withMotionBoost", () => {
-  it("Audio 段前插入强化短句（生产 prompt 形态）", () => {
-    const out = withMotionBoost("父母举起玩具晃动。 Audio: soft room tone, no talking");
-    expect(out).toBe(`父母举起玩具晃动。 ${MOTION_BOOST_SUFFIX} Audio: soft room tone, no talking`);
+describe("withMotionBoost（包覆式升级 L1/L2 阶梯）", () => {
+  const base = "父母举起玩具晃动。";
+
+  it("L1：Audio 段前包覆强度框架 + 可见动作尾巴", () => {
+    const out = withMotionBoost(`${base} Audio: soft room tone, no talking`, 1);
+    expect(out).toBe(
+      "动作幅度很大：父母举起玩具晃动，所有人的动作快速而大力，头发衣角大幅飞扬，画面动感强烈。 Audio: soft room tone, no talking",
+    );
   });
 
-  it("无 Audio 段 → 尾部追加", () => {
-    const out = withMotionBoost("云层流动，水面荡漾。");
-    expect(out).toBe(`云层流动，水面荡漾。 ${MOTION_BOOST_SUFFIX}`);
+  it("L2：激进档（运动门未过时的 attempt 2）", () => {
+    const out = withMotionBoost(base, 2);
+    expect(out).toBe(
+      "动作幅度很大且速度很快：父母举起玩具晃动，动作快速大力重复不断，头发衣角大幅飞扬。",
+    );
+  });
+
+  it("策展动作描述原样保留在包覆内（只加框架不改正文）", () => {
+    const out = withMotionBoost(`${base} Audio: soft room tone, no talking`, 1);
+    expect(out).toContain("父母举起玩具晃动");
+    expect(out).toContain("Audio: soft room tone, no talking");
   });
 });

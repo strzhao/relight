@@ -137,10 +137,6 @@ async function produceNativeSide(opts: {
     //    全部尝试都不达标时取最优一支继续（发静态优于发空，门槛可经 env 归零关闭）。
     const seconds = clampWallpaperVideoSeconds(config.wallpaperVideoSeconds);
     const engine = config.wallpaperVideoEngine === "h3c" ? "h3c" : "honeydo";
-    // 20261014 定案：h3c 双锚定（保身份）+ 动作强化后缀（给运动量——双锚下静态场景
-    // 原 prompt 近静止 peak 0.45%，强化后 8.91%）；honeydo 路径 prompt 不动
-    const effectivePrompt =
-      engine === "h3c" && config.h3c.motionPromptBoost ? withMotionBoost(prompt) : prompt;
     const maxAttempts = engine === "h3c" ? Math.max(1, config.wallpaperVideoMotionMaxAttempts) : 1;
     const minPeak = config.wallpaperVideoMotionMinPeak;
     log(
@@ -156,13 +152,20 @@ async function produceNativeSide(opts: {
           : rawPath;
       if (engine === "h3c") {
         const seed = config.h3c.seed + attempt - 1;
+        // 动作强化阶梯：attempt 1 = L1 常规放大；attempt 2 = L2 激进修正
+        // （重试换的是力度档位，不只是 seed——纯换 seed 实测无效）
+        const boostLevel = attempt >= 2 ? 2 : 1;
+        const attemptPrompt =
+          engine === "h3c" && config.h3c.motionPromptBoost
+            ? withMotionBoost(prompt, boostLevel)
+            : prompt;
         log(
-          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}${config.h3c.motionPromptBoost ? " 动作强化" : ""}）`,
+          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}${config.h3c.motionPromptBoost ? ` 动作强化L${boostLevel}` : ""}）`,
         );
         await spawnH3cVideo({
           binPath: config.h3c.binPath,
           modelDir: config.h3c.modelDir,
-          prompt: effectivePrompt,
+          prompt: attemptPrompt,
           firstFrame: framePath,
           // 20261014 定案：双锚两端钉死保人脸身份（单锚中段 ArcFace cos 崩到
           // 0.09~0.76，双锚 0.83~0.97）；运动量靠动作强化后缀（原 prompt 生产

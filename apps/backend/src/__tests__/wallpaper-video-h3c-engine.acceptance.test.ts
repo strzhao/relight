@@ -514,9 +514,10 @@ describe("wallpaper-video h3c 引擎派发（1:1 hero）", () => {
     expect(sp.seconds).toBe(4);
     expect(sp.binPath).toBe(holder.h3cBinPath);
     expect(sp.modelDir).toBe(holder.h3cModelDir);
-    // 20261014 定案：双锚定默认（保身份）+ 动作强化后缀（给运动量）
+    // 20261014 定案：双锚定默认（保身份）+ L1 包覆式动作强化（attempt 1 档）
     expect(sp.lastFrame).toBe(holder.firstFramePath);
-    expect(String(sp.prompt)).toContain("动作幅度大而明显");
+    expect(String(sp.prompt)).toContain("动作幅度很大：");
+    expect(String(sp.prompt)).toContain("所有人的动作快速而大力");
   });
 
   it("下游引擎无关：双卡渲染 ×2 + 三转码 + 三件套上传 + DB 三列非空 + 画廊同步", async () => {

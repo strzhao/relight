@@ -1159,19 +1159,31 @@ export async function renderTextOverlay(
 // 动作强化 prompt 后缀（20261014 定案：双锚保身份 + 强化动作给运动量）
 // ============================================================================
 
-/** 动作强化短句（插在 Audio 指引之前；h3.c 双锚定下对静态场景倾向近静止，
- *  生产实测原 prompt peak 0.45% → 强化后 8.91%，身份由双锚两端钉死保证） */
-export const MOTION_BOOST_SUFFIX = "动作幅度大而明显，人物持续大幅运动。";
+/** 动作强化措辞（探针实测，双锚 seed42 帧间avg：原版 0.298% → L1 0.805%(2.7×) →
+ *  L2 1.566%(5.3×)，身份 0.81~0.95 / 0.72~0.88 均在历史合格带）。
+ *  关键教训：运动藏在**具体动词的强度放大**里（快速/大力/重复），抽象强度短句
+ *  （「动作幅度大而明显」）实测无效（生产 0.55% vs 原版 0.45%——纯噪声）。 */
+const MOTION_BOOST_L1 = {
+  prefix: "动作幅度很大：",
+  suffix: "所有人的动作快速而大力，头发衣角大幅飞扬，画面动感强烈。",
+} as const;
+const MOTION_BOOST_L2 = {
+  prefix: "动作幅度很大且速度很快：",
+  suffix: "动作快速大力重复不断，头发衣角大幅飞扬。",
+} as const;
 
 /**
- * 在 prompt 的 Audio 指引前插入动作强化短句（无 Audio 段则追加尾部）。
- * 不改动策展动作描述本身，只加力度——属引擎侧放大器，不回写 motion_prompt 列。
+ * 包覆式动作升级：不改动策展动作描述本身，前加强度框架、后补普适可见动作尾巴，
+ * Audio 指引原样保留在末尾——引擎侧放大器，不回写 motion_prompt 列。
+ *
+ * @param level 1=常规放大（attempt 1）2=激进修正（运动门未过时的 attempt 2）
  */
-export function withMotionBoost(prompt: string): string {
+export function withMotionBoost(prompt: string, level: 1 | 2 = 1): string {
   const idx = prompt.indexOf(" Audio:");
-  return idx >= 0
-    ? `${prompt.slice(0, idx)} ${MOTION_BOOST_SUFFIX}${prompt.slice(idx)}`
-    : `${prompt} ${MOTION_BOOST_SUFFIX}`;
+  const body = (idx >= 0 ? prompt.slice(0, idx) : prompt).trim().replace(/。$/, "");
+  const audio = (idx >= 0 ? prompt.slice(idx) : "").trimStart();
+  const { prefix, suffix } = level >= 2 ? MOTION_BOOST_L2 : MOTION_BOOST_L1;
+  return `${prefix}${body}，${suffix}${audio ? ` ${audio}` : ""}`;
 }
 
 // ============================================================================
