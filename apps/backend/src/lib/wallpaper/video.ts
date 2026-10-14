@@ -1156,6 +1156,25 @@ export async function renderTextOverlay(
 }
 
 // ============================================================================
+// 动作强化 prompt 后缀（20261014 定案：双锚保身份 + 强化动作给运动量）
+// ============================================================================
+
+/** 动作强化短句（插在 Audio 指引之前；h3.c 双锚定下对静态场景倾向近静止，
+ *  生产实测原 prompt peak 0.45% → 强化后 8.91%，身份由双锚两端钉死保证） */
+export const MOTION_BOOST_SUFFIX = "动作幅度大而明显，人物持续大幅运动。";
+
+/**
+ * 在 prompt 的 Audio 指引前插入动作强化短句（无 Audio 段则追加尾部）。
+ * 不改动策展动作描述本身，只加力度——属引擎侧放大器，不回写 motion_prompt 列。
+ */
+export function withMotionBoost(prompt: string): string {
+  const idx = prompt.indexOf(" Audio:");
+  return idx >= 0
+    ? `${prompt.slice(0, idx)} ${MOTION_BOOST_SUFFIX}${prompt.slice(idx)}`
+    : `${prompt} ${MOTION_BOOST_SUFFIX}`;
+}
+
+// ============================================================================
 // 前置校验
 // ============================================================================
 

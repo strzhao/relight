@@ -98,7 +98,8 @@ vi.mock("../lib/config", () => ({
         reuse: holder.h3cReuse,
         seed: holder.h3cSeed,
         ssdStreaming: holder.h3cSsdStreaming,
-        lastFrameAnchor: false,
+        lastFrameAnchor: true,
+        motionPromptBoost: true,
       };
     },
     wallpaperVideoPromptPerson:
@@ -513,8 +514,9 @@ describe("wallpaper-video h3c 引擎派发（1:1 hero）", () => {
     expect(sp.seconds).toBe(4);
     expect(sp.binPath).toBe(holder.h3cBinPath);
     expect(sp.modelDir).toBe(holder.h3cModelDir);
-    // 20261014 单锚定默认：lastFrameAnchor=false → spawn opts 不带 lastFrame
-    expect(sp.lastFrame).toBeUndefined();
+    // 20261014 定案：双锚定默认（保身份）+ 动作强化后缀（给运动量）
+    expect(sp.lastFrame).toBe(holder.firstFramePath);
+    expect(String(sp.prompt)).toContain("动作幅度大而明显");
   });
 
   it("下游引擎无关：双卡渲染 ×2 + 三转码 + 三件套上传 + DB 三列非空 + 画廊同步", async () => {

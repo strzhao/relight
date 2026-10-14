@@ -66,6 +66,7 @@ import {
   spawnHoneydoVideo,
   transcodeForAerialNative,
   transcodeForGallery,
+  withMotionBoost,
 } from "../lib/wallpaper/video";
 
 /** 排版卡恒定尺寸（与 wallpaper-overlay Root.tsx 两 comp 一致；20261009 排版解耦） */
@@ -136,6 +137,10 @@ async function produceNativeSide(opts: {
     //    全部尝试都不达标时取最优一支继续（发静态优于发空，门槛可经 env 归零关闭）。
     const seconds = clampWallpaperVideoSeconds(config.wallpaperVideoSeconds);
     const engine = config.wallpaperVideoEngine === "h3c" ? "h3c" : "honeydo";
+    // 20261014 定案：h3c 双锚定（保身份）+ 动作强化后缀（给运动量——双锚下静态场景
+    // 原 prompt 近静止 peak 0.45%，强化后 8.91%）；honeydo 路径 prompt 不动
+    const effectivePrompt =
+      engine === "h3c" && config.h3c.motionPromptBoost ? withMotionBoost(prompt) : prompt;
     const maxAttempts = engine === "h3c" ? Math.max(1, config.wallpaperVideoMotionMaxAttempts) : 1;
     const minPeak = config.wallpaperVideoMotionMinPeak;
     log(
@@ -152,15 +157,16 @@ async function produceNativeSide(opts: {
       if (engine === "h3c") {
         const seed = config.h3c.seed + attempt - 1;
         log(
-          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}）`,
+          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}${config.h3c.motionPromptBoost ? " 动作强化" : ""}）`,
         );
         await spawnH3cVideo({
           binPath: config.h3c.binPath,
           modelDir: config.h3c.modelDir,
-          prompt,
+          prompt: effectivePrompt,
           firstFrame: framePath,
-          // 20261014 运动量实测：双锚定钉死运动（探针 peak 6.86→15.95%），h3c 默认单锚；
-          // 回环由 palindrome 镜像段恒无缝（尾帧=首帧镜像），身份漂移时 env 恢复双锚
+          // 20261014 定案：双锚两端钉死保人脸身份（单锚中段 ArcFace cos 崩到
+          // 0.09~0.76，双锚 0.83~0.97）；运动量靠动作强化后缀（原 prompt 生产
+          // peak 0.45% → 强化后 8.91%），不再靠去锚。回环由 palindrome 镜像保证
           lastFrame: config.h3c.lastFrameAnchor ? framePath : undefined,
           outPath: attemptRawPath,
           seconds,

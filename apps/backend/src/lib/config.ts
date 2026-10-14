@@ -212,10 +212,15 @@ export const config = {
     seed: Number.parseInt(process.env.H3C_SEED ?? "42", 10),
     /** SSD 流式读 BF16 DiT 层（992² 全驻留会 jetsam OOM，必须开；env H3C_SSD_STREAMING=false 关） */
     ssdStreaming: (process.env.H3C_SSD_STREAMING ?? "true") !== "false",
-    /** 尾帧锚定开关（20261014 运动量实测：双锚定把成片钉死在锚点——探针 peak 6.86%→15.95%，
-     *  默认关=仅首帧锚定，回环由 palindrome 镜像段恒无缝；身份漂移时置 true 恢复双锚。
-     *  env H3C_LAST_FRAME_ANCHOR=true 开启。 */
-    lastFrameAnchor: (process.env.H3C_LAST_FRAME_ANCHOR ?? "false") === "true",
+    /** 尾帧锚定开关（20261014 定案默认开：双锚两端钉死保人脸身份——单锚大动作下
+     *  中段 ArcFace cos 崩到 0.09~0.76 而双锚 0.83~0.97；运动量靠 motionPromptBoost
+     *  强化动作实现，不靠去锚。env H3C_LAST_FRAME_ANCHOR=false 可关。 */
+    lastFrameAnchor: (process.env.H3C_LAST_FRAME_ANCHOR ?? "true") !== "false",
+    /** 动作强化后缀（20261014 定案默认开：双锚下 h3.c 对静态场景倾向近静止输出
+     *  （原 prompt 生产实测 peak 0.45%），在 prompt 的 Audio 指引前插入动作强化短句
+     *  逼模型中途大幅运动（生产实测 peak 8.91%），身份由双锚保证。
+     *  env H3C_MOTION_PROMPT_BOOST=false 关。 */
+    motionPromptBoost: (process.env.H3C_MOTION_PROMPT_BOOST ?? "true") !== "false",
   },
   /** 人物照微动默认 prompt（hero 有人脸时兜底；AI narrate 的 motionPrompt 优先）。
    *  2026-09-13 契约修订 + A/B 实测：原「保持姿态稳定…回到初始画面」过度收敛致画面近乎静止；

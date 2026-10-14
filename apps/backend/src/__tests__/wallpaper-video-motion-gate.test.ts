@@ -73,3 +73,21 @@ describe("measureVideoMotion", () => {
     await expect(measureVideoMotion(bad)).rejects.toThrow();
   });
 });
+
+// ============================================================================
+// withMotionBoost（20261014 定案：双锚保身份 + 动作强化后缀给运动量）
+// ============================================================================
+
+import { MOTION_BOOST_SUFFIX, withMotionBoost } from "../lib/wallpaper/video";
+
+describe("withMotionBoost", () => {
+  it("Audio 段前插入强化短句（生产 prompt 形态）", () => {
+    const out = withMotionBoost("父母举起玩具晃动。 Audio: soft room tone, no talking");
+    expect(out).toBe(`父母举起玩具晃动。 ${MOTION_BOOST_SUFFIX} Audio: soft room tone, no talking`);
+  });
+
+  it("无 Audio 段 → 尾部追加", () => {
+    const out = withMotionBoost("云层流动，水面荡漾。");
+    expect(out).toBe(`云层流动，水面荡漾。 ${MOTION_BOOST_SUFFIX}`);
+  });
+});
