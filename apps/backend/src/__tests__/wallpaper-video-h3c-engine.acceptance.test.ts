@@ -44,6 +44,10 @@ const holder = vi.hoisted(() => ({
   h3cReuse: 2,
   h3cSeed: 42,
   h3cSsdStreaming: true,
+  motionMinPeak: 2.0,
+  motionMaxAttempts: 2,
+  /** measureVideoMotion mock 的 peak 序列（按调用次序弹出； Infinity=throw fail-open） */
+  motionPeaks: [] as number[],
   firstFramePath: "/tmp/relight-none/first.png",
   /** spawn mock 产物登记表：`${width}x${height}` → 源 mp4 路径 */
   productByCanvas: new Map<string, string>(),
@@ -76,6 +80,12 @@ vi.mock("../lib/config", () => ({
     get wallpaperVideoLoopSeconds() {
       return holder.loopSeconds;
     },
+    get wallpaperVideoMotionMinPeak() {
+      return holder.motionMinPeak;
+    },
+    get wallpaperVideoMotionMaxAttempts() {
+      return holder.motionMaxAttempts;
+    },
     wallpaperVideoSpawnTimeoutMs: 5400000,
     // 引擎固定 h3c（本套件的被测对象）
     wallpaperVideoEngine: "h3c",
@@ -88,6 +98,7 @@ vi.mock("../lib/config", () => ({
         reuse: holder.h3cReuse,
         seed: holder.h3cSeed,
         ssdStreaming: holder.h3cSsdStreaming,
+        lastFrameAnchor: false,
       };
     },
     wallpaperVideoPromptPerson:
@@ -159,6 +170,7 @@ const mockBuildLoop = vi.hoisted(() => vi.fn());
 const mockRenderTextOverlay = vi.hoisted(() => vi.fn());
 const mockTranscodeForAerial = vi.hoisted(() => vi.fn());
 const mockTranscodeForGallery = vi.hoisted(() => vi.fn());
+const mockMeasureVideoMotion = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/wallpaper/video", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/wallpaper/video")>();
@@ -171,6 +183,7 @@ vi.mock("../lib/wallpaper/video", async (importOriginal) => {
     renderTextOverlay: mockRenderTextOverlay,
     transcodeForAerialNative: mockTranscodeForAerial,
     transcodeForGallery: mockTranscodeForGallery,
+    measureVideoMotion: mockMeasureVideoMotion,
   };
 });
 
@@ -267,6 +280,15 @@ function wireMocks(): void {
   mockTranscodeForGallery.mockReset();
   mockUploadFile.mockReset();
   mockSyncDayToGallery.mockReset();
+  mockMeasureVideoMotion.mockReset();
+
+  mockMeasureVideoMotion.mockImplementation(async (filePath: string) => {
+    const peak = holder.motionPeaks.shift();
+    if (peak === undefined || !Number.isFinite(peak)) {
+      throw new Error(`measureVideoMotion mock: 测量失败（${filePath}）`);
+    }
+    return { peak, fdiffAvg: peak / 10, frames: 107 };
+  });
 
   mockPreprocessHeroFrame.mockImplementation(async () => holder.firstFramePath);
   // h3c spawn mock：按请求画布落真实 mp4 产物（产物在 outPath），opts 原样回显供断言
@@ -436,6 +458,9 @@ beforeEach(() => {
   holder.enabled = true;
   holder.seconds = 4;
   holder.loopSeconds = 8;
+  holder.motionMinPeak = 2.0;
+  holder.motionMaxAttempts = 2;
+  holder.motionPeaks = [10]; // 默认首发即达标（既有用例的常态路径）
   wireMocks();
 });
 
@@ -488,6 +513,8 @@ describe("wallpaper-video h3c 引擎派发（1:1 hero）", () => {
     expect(sp.seconds).toBe(4);
     expect(sp.binPath).toBe(holder.h3cBinPath);
     expect(sp.modelDir).toBe(holder.h3cModelDir);
+    // 20261014 单锚定默认：lastFrameAnchor=false → spawn opts 不带 lastFrame
+    expect(sp.lastFrame).toBeUndefined();
   });
 
   it("下游引擎无关：双卡渲染 ×2 + 三转码 + 三件套上传 + DB 三列非空 + 画廊同步", async () => {
@@ -517,5 +544,62 @@ describe("wallpaper-video h3c 引擎派发（1:1 hero）", () => {
     expect(row.wallpaper_video_portrait_url).toBe(receiptFor(portraitKey(PICK_SQUARE)));
     expect(row.wallpaper_video_landscape_url).toBe(receiptFor(landscapeKey(PICK_SQUARE)));
     expect(mockSyncDayToGallery).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================================
+// 运动量验收门（20261014）：低峰值换 seed 重试 / 取优发布 / fail-open
+// ============================================================================
+
+describe("wallpaper-video 运动量验收门（h3c 换 seed 重试）", () => {
+  it("首发低于门槛 → 换 seed 重试（seed 42→43），次发达标发布，尝试产物清理", async () => {
+    holder.motionPeaks = [0.5, 6.0];
+    await runWallpaperVideo(PICK_SQUARE);
+
+    expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(2);
+    const seeds = mockSpawnH3cVideo.mock.calls.map((c) => (c?.[0] as { seed: number }).seed);
+    expect(seeds).toEqual([42, 43]);
+    // 尝试产物清理：发布成功后 raw/attempt 文件都不残留
+    const dir = path.join(holder.storageRoot, "wallpaper-videos");
+    const leftovers = fs.readdirSync(dir).filter((f) => f.includes("-native-raw"));
+    expect(leftovers, `尝试产物应清理干净，实际残留: ${leftovers.join(",")}`).toEqual([]);
+    // 正常发布三件套
+    const row = sqlite
+      .prepare("SELECT wallpaper_video_native_url FROM daily_picks WHERE pick_date = ?")
+      .get(PICK_SQUARE) as { wallpaper_video_native_url: string | null };
+    expect(row.wallpaper_video_native_url).toBe(receiptFor(nativeKey(PICK_SQUARE)));
+  });
+
+  it("全部尝试低于门槛 → 耗尽次数取优发布（不空转、不失败）", async () => {
+    holder.motionPeaks = [1.0, 0.5];
+    await runWallpaperVideo(PICK_SQUARE);
+
+    expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(2);
+    const seeds = mockSpawnH3cVideo.mock.calls.map((c) => (c?.[0] as { seed: number }).seed);
+    expect(seeds).toEqual([42, 43]);
+    const dir = path.join(holder.storageRoot, "wallpaper-videos");
+    const leftovers = fs.readdirSync(dir).filter((f) => f.includes("-native-raw"));
+    expect(leftovers).toEqual([]);
+    const row = sqlite
+      .prepare("SELECT wallpaper_video_native_url FROM daily_picks WHERE pick_date = ?")
+      .get(PICK_SQUARE) as { wallpaper_video_native_url: string | null };
+    expect(row.wallpaper_video_native_url).toBe(receiptFor(nativeKey(PICK_SQUARE)));
+  });
+
+  it("首发达标 → 恰 1 次 spawn（seed 42），不触发重试", async () => {
+    holder.motionPeaks = [5.0];
+    await runWallpaperVideo(PICK_SQUARE);
+    expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(1);
+    expect((mockSpawnH3cVideo.mock.calls[0]?.[0] as { seed: number }).seed).toBe(42);
+  });
+
+  it("运动量测量失败 → fail-open 放行（单次尝试、正常发布）", async () => {
+    holder.motionPeaks = [Number.POSITIVE_INFINITY];
+    await runWallpaperVideo(PICK_SQUARE);
+    expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(1);
+    const row = sqlite
+      .prepare("SELECT wallpaper_video_native_url FROM daily_picks WHERE pick_date = ?")
+      .get(PICK_SQUARE) as { wallpaper_video_native_url: string | null };
+    expect(row.wallpaper_video_native_url).toBe(receiptFor(nativeKey(PICK_SQUARE)));
   });
 });

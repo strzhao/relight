@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, rename, rm } from "node:fs/promises";
 import { access } from "node:fs/promises";
 import path from "node:path";
 /**
@@ -58,6 +58,7 @@ import {
   assertVideoSpawnPrerequisites,
   buildLoop,
   clampWallpaperVideoSeconds,
+  measureVideoMotion,
   preprocessHeroFrame,
   readOrientedDimensions,
   renderTextOverlay,
@@ -130,42 +131,104 @@ async function produceNativeSide(opts: {
     // 2. spawn 生成引擎（20261014 双引擎：h3c = h3.c BF16 零量化（默认）/
     //    honeydo = mmh3turbo int8（回滚）；双锚定伪循环：--first-frame 与 --last-frame 同图；
     //    honeydo 契约 6：-r 720p 保留保 stdout 回执语义，画布两轴经 --width/--height 显式覆盖）
+    //    20261014 运动量验收门：生成后实测峰值偏移，低于门槛且引擎可换 seed（h3c）时重试——
+    //    同引擎同 prompt 不同 seed/画布的 draw 方差极大（实测 0.45%~9.32%），近静止样本不入库；
+    //    全部尝试都不达标时取最优一支继续（发静态优于发空，门槛可经 env 归零关闭）。
     const seconds = clampWallpaperVideoSeconds(config.wallpaperVideoSeconds);
     const engine = config.wallpaperVideoEngine === "h3c" ? "h3c" : "honeydo";
+    const maxAttempts = engine === "h3c" ? Math.max(1, config.wallpaperVideoMotionMaxAttempts) : 1;
+    const minPeak = config.wallpaperVideoMotionMinPeak;
     log(
-      `[wallpaper-video] ${pickDate} native ${canvas.width}×${canvas.height} 生成开始（engine=${engine} seconds=${seconds}）`,
+      `[wallpaper-video] ${pickDate} native ${canvas.width}×${canvas.height} 生成开始（engine=${engine} seconds=${seconds} 运动门≥${minPeak}%×${maxAttempts}次）`,
     );
-    if (engine === "h3c") {
-      await spawnH3cVideo({
-        binPath: config.h3c.binPath,
-        modelDir: config.h3c.modelDir,
-        prompt,
-        firstFrame: framePath,
-        lastFrame: framePath,
-        outPath: rawPath,
-        seconds,
-        width: canvas.width,
-        height: canvas.height,
-        timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
-        steps: config.h3c.steps,
-        layers: config.h3c.layers,
-        reuse: config.h3c.reuse,
-        seed: config.h3c.seed,
-        ssdStreaming: config.h3c.ssdStreaming,
+    let attemptRawPath = rawPath;
+    // peak -1 = 尚无实测；Infinity = 测量失败 fail-open 放行
+    let best: { path: string; peak: number } = { path: rawPath, peak: -1 };
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      attemptRawPath =
+        maxAttempts > 1
+          ? path.join(wallpaperVideoDir(), `${pickDate}-native-raw-a${attempt}.mp4`)
+          : rawPath;
+      if (engine === "h3c") {
+        const seed = config.h3c.seed + attempt - 1;
+        log(
+          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}）`,
+        );
+        await spawnH3cVideo({
+          binPath: config.h3c.binPath,
+          modelDir: config.h3c.modelDir,
+          prompt,
+          firstFrame: framePath,
+          // 20261014 运动量实测：双锚定钉死运动（探针 peak 6.86→15.95%），h3c 默认单锚；
+          // 回环由 palindrome 镜像段恒无缝（尾帧=首帧镜像），身份漂移时 env 恢复双锚
+          lastFrame: config.h3c.lastFrameAnchor ? framePath : undefined,
+          outPath: attemptRawPath,
+          seconds,
+          width: canvas.width,
+          height: canvas.height,
+          timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
+          steps: config.h3c.steps,
+          layers: config.h3c.layers,
+          reuse: config.h3c.reuse,
+          seed,
+          ssdStreaming: config.h3c.ssdStreaming,
+        });
+      } else {
+        await spawnHoneydoVideo({
+          cliPath: config.honeydoCliPath,
+          prompt,
+          firstFrame: framePath,
+          lastFrame: framePath,
+          outPath: attemptRawPath,
+          seconds,
+          res: WALLPAPER_VIDEO_RES,
+          width: canvas.width,
+          height: canvas.height,
+          timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
+        });
+      }
+      // 运动量实测（fail-open：测量异常不阻塞发布，仅告警放行）
+      let motion: Awaited<ReturnType<typeof measureVideoMotion>> | null = null;
+      try {
+        motion = await measureVideoMotion(attemptRawPath);
+      } catch (e) {
+        log(
+          `[wallpaper-video] ${pickDate} 运动量测量失败（fail-open 放行）: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+      if (motion) {
+        log(
+          `[wallpaper-video] ${pickDate} 运动量 peak=${motion.peak.toFixed(2)}% 帧间avg=${motion.fdiffAvg.toFixed(3)}%（门槛 ${minPeak}%）`,
+        );
+        if (motion.peak > best.peak) best = { path: attemptRawPath, peak: motion.peak };
+        if (motion.peak >= minPeak) break;
+        if (attempt < maxAttempts) {
+          log(`[wallpaper-video] ${pickDate} 运动量低于门槛，换 seed 重试`);
+        }
+      } else {
+        // 测量失败 fail-open：视为达标放行（不再重试）
+        best = { path: attemptRawPath, peak: Number.POSITIVE_INFINITY };
+        break;
+      }
+    }
+    // 把最优一支归位到规范 raw 路径，清理未入选的尝试产物
+    if (best.path !== rawPath) {
+      await rename(best.path, rawPath).catch(async () => {
+        // 同目录 rename 不应失败；兜底拷贝防御性保留
+        await copyFile(best.path, rawPath);
+        await rm(best.path, { force: true }).catch(() => {});
       });
-    } else {
-      await spawnHoneydoVideo({
-        cliPath: config.honeydoCliPath,
-        prompt,
-        firstFrame: framePath,
-        lastFrame: framePath,
-        outPath: rawPath,
-        seconds,
-        res: WALLPAPER_VIDEO_RES,
-        width: canvas.width,
-        height: canvas.height,
-        timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
-      });
+    }
+    for (let i = 1; i <= maxAttempts; i++) {
+      const p = path.join(wallpaperVideoDir(), `${pickDate}-native-raw-a${i}.mp4`);
+      if (p !== best.path) await rm(p, { force: true }).catch(() => {});
+    }
+    if (best.peak !== Number.POSITIVE_INFINITY && best.peak >= 0) {
+      log(
+        `[wallpaper-video] ${pickDate} 运动门通过/取优：peak=${best.peak.toFixed(2)}%（门槛 ${minPeak}%）`,
+      );
     }
     log(`[wallpaper-video] ${pickDate} native 生成完成 → ${rawPath}`);
 

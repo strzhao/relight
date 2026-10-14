@@ -368,8 +368,10 @@ export interface H3cVideoOptions {
   prompt: string;
   /** 首帧图路径（预裁剪 tmp png） */
   firstFrame: string;
-  /** 尾帧图路径（双锚定伪循环：与 firstFrame 同图） */
-  lastFrame: string;
+  /** 尾帧图路径（20261014 运动量实测：双锚定会把成片钉死在锚点——探针 peak 6.86%→15.95%、
+   *  帧间 3.3 倍；默认不传，回环由 palindrome 镜像段恒无缝保证；config.h3c.lastFrameAnchor
+   *  开启时才传，防身份漂移逃生口） */
+  lastFrame?: string;
   /** 产物 mp4 路径（h3.c 内部经 ffmpeg 封装 H.264 + 32kHz AAC） */
   outPath: string;
   /** 时长秒（24fps；引擎内部 5+17n 帧量化——4s→107 帧≈4.46s，buildLoop 兼容） */
@@ -415,8 +417,8 @@ export async function spawnH3cVideo(opts: H3cVideoOptions): Promise<H3cVideoResu
     opts.prompt,
     "--first-frame",
     opts.firstFrame,
-    "--last-frame",
-    opts.lastFrame,
+    // 尾帧锚定可选（20261014 运动量实测：默认单锚，见 H3cVideoOptions.lastFrame 注）
+    ...(opts.lastFrame ? ["--last-frame", opts.lastFrame] : []),
     "-o",
     opts.outPath,
     "--width",
@@ -819,6 +821,96 @@ export async function buildLoop(src: string, targetSeconds: number): Promise<Loo
     );
   }
   return { loopPath, segments };
+}
+
+// ============================================================================
+// measureVideoMotion（20261014 运动量验收门：生成后实测，近静止样本换 seed 重试）
+// ============================================================================
+
+export interface VideoMotionStats {
+  /** 相对首帧的峰值平均偏移（0-100，占满量程 255 的百分比；标尺：68% 一眼可见 / 1~7% 察觉不到） */
+  peak: number;
+  /** 相邻帧平均变化（0-100；衡量「动不动」而非「偏多远」） */
+  fdiffAvg: number;
+  frames: number;
+}
+
+/**
+ * 无损运动量实测（仓库既有方法移植 TS：gray 320×180 rawvideo → Buffer 内算偏移，
+ * 不经 JPEG——压缩噪声会让同一支视频测出 0.9% 与 4.0% 两种结果）。
+ *
+ * - peak = max_i mean(|frame_i − frame_0|) / 255 × 100
+ * - fdiffAvg = mean_i mean(|frame_{i+1} − frame_i|) / 255 × 100
+ *
+ * 失败（ffprobe/ffmpeg 异常）throw 由调用方 fail-open（运动门是质量增强不是硬依赖，
+ * 测量失败不得阻塞发布）。
+ */
+export async function measureVideoMotion(filePath: string): Promise<VideoMotionStats> {
+  const W = 320;
+  const H = 180;
+  const raw = await new Promise<Buffer>((resolve, reject) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 60_000);
+    const chunks: Buffer[] = [];
+    const proc = spawn(
+      config.video.ffmpegPath,
+      [
+        "-v",
+        "error",
+        "-i",
+        filePath,
+        "-vf",
+        `scale=${W}:${H}`,
+        "-pix_fmt",
+        "gray",
+        "-f",
+        "rawvideo",
+        "-",
+      ],
+      { signal: ac.signal, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    proc.stdout?.on("data", (d: Buffer) => chunks.push(d));
+    proc.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(Buffer.concat(chunks));
+      else reject(new Error(`measureVideoMotion ffmpeg 退出码 ${code}`));
+    });
+  });
+
+  const frameLen = W * H;
+  const n = Math.floor(raw.length / frameLen);
+  if (n < 2) throw new Error(`measureVideoMotion 帧数不足: ${n} (${filePath})`);
+  // noUncheckedIndexedAccess：Buffer 索引访问返回 number|undefined——按仓惯例走
+  // for..of 迭代（迭代值恒为 number），首帧/前帧快照用 number[]，越界守卫 ?? 0
+  //（subarray 切片恰为 frameLen，守卫永不触发）
+  const first: number[] = Array.from(raw.subarray(0, frameLen));
+  let peak = 0;
+  let fdiffSum = 0;
+  let prev: number[] = first;
+  for (let i = 1; i < n; i++) {
+    const cur = Array.from(raw.subarray(i * frameLen, (i + 1) * frameLen));
+    let sumFirst = 0;
+    let sumDiff = 0;
+    let p = 0;
+    for (const v of cur) {
+      sumFirst += Math.abs(v - (first[p] ?? 0));
+      sumDiff += Math.abs(v - (prev[p] ?? 0));
+      p++;
+    }
+    const avgFirst = sumFirst / frameLen;
+    if (avgFirst > peak) peak = avgFirst;
+    fdiffSum += sumDiff / frameLen;
+    prev = cur;
+  }
+  return {
+    peak: (peak / 255) * 100,
+    fdiffAvg: (fdiffSum / (n - 1) / 255) * 100,
+    frames: n,
+  };
 }
 
 // ============================================================================

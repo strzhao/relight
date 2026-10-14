@@ -168,6 +168,19 @@ export const config = {
   /** palindrome 循环目标时长（秒）。默认 8（4s 单条 ×2 palindrome 拼接）。
    *  env WALLPAPER_VIDEO_LOOP_SECONDS 覆盖。 */
   wallpaperVideoLoopSeconds: Number.parseInt(process.env.WALLPAPER_VIDEO_LOOP_SECONDS ?? "8", 10),
+  /** 运动量验收门槛（相对首帧峰值偏移，占满量程百分比；20261014 加入）。
+   *  生成后实测（measureVideoMotion），低于门槛且引擎可换 seed 时重试。
+   *  标尺：1~7% 察觉不到 / 68% 一眼可见；mmh3turbo 生产日 1.2~24.8%。
+   *  0 或 NaN = 关闭门槛（只测不拦）。env WALLPAPER_VIDEO_MOTION_MIN_PEAK 覆盖。 */
+  wallpaperVideoMotionMinPeak: Number.parseFloat(
+    process.env.WALLPAPER_VIDEO_MOTION_MIN_PEAK ?? "2.0",
+  ),
+  /** 运动量不达标时的最大生成尝试次数（每次换 seed：h3c.seed + attempt-1；
+   *  honeydo seed 恒 42 重试无意义，恒为 1 次）。env WALLPAPER_VIDEO_MOTION_MAX_ATTEMPTS 覆盖。 */
+  wallpaperVideoMotionMaxAttempts: Number.parseInt(
+    process.env.WALLPAPER_VIDEO_MOTION_MAX_ATTEMPTS ?? "2",
+    10,
+  ),
   /** spawn honeydo 单条视频生成超时（ms）。默认 5400000（90min/条——15s 实际耗时未实测，
    *  按 4s 成片 6-23 分钟线性外推上界预留）；NaN 或 ≤0 → 回退默认。
    *  env WALLPAPER_VIDEO_SPAWN_TIMEOUT_MS 覆盖。 */
@@ -199,6 +212,10 @@ export const config = {
     seed: Number.parseInt(process.env.H3C_SEED ?? "42", 10),
     /** SSD 流式读 BF16 DiT 层（992² 全驻留会 jetsam OOM，必须开；env H3C_SSD_STREAMING=false 关） */
     ssdStreaming: (process.env.H3C_SSD_STREAMING ?? "true") !== "false",
+    /** 尾帧锚定开关（20261014 运动量实测：双锚定把成片钉死在锚点——探针 peak 6.86%→15.95%，
+     *  默认关=仅首帧锚定，回环由 palindrome 镜像段恒无缝；身份漂移时置 true 恢复双锚。
+     *  env H3C_LAST_FRAME_ANCHOR=true 开启。 */
+    lastFrameAnchor: (process.env.H3C_LAST_FRAME_ANCHOR ?? "false") === "true",
   },
   /** 人物照微动默认 prompt（hero 有人脸时兜底；AI narrate 的 motionPrompt 优先）。
    *  2026-09-13 契约修订 + A/B 实测：原「保持姿态稳定…回到初始画面」过度收敛致画面近乎静止；

@@ -138,6 +138,22 @@ touch "$out"
     expect(args).not.toContain("--ssd-streaming");
   });
 
+  it("不传 lastFrame → argv 不含 --last-frame（20261014 单锚定默认：双锚定钉死运动）", async () => {
+    const script = makeFakeH3(`
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+touch "$out"
+`);
+    await spawnH3cVideo({ ...baseOpts, binPath: script, lastFrame: undefined });
+    const args = readCapture(capturePath);
+    expect(args).not.toContain("--last-frame");
+    expect(args).toContain("--first-frame");
+  });
+
   it("spawn 前 pre-delete 产物：退出 0 但未写产物时，陈旧文件不构成误判成功", async () => {
     // 预埋陈旧产物 → fake h3 退出 0 且不 touch。若实现无 pre-delete，access(陈旧文件)
     // 会命中 → 误判成功；pre-delete 后必须报「产物文件不存在」。
