@@ -518,6 +518,9 @@ describe("wallpaper-video h3c 引擎派发（1:1 hero）", () => {
     expect(sp.lastFrame).toBe(holder.firstFramePath);
     expect(String(sp.prompt)).toContain("动作幅度很大：");
     expect(String(sp.prompt)).toContain("所有人的动作快速而大力");
+    // 负面清单护栏（20261014 社区调研）：防幻觉加字/切镜/变形/自加配乐
+    expect(String(sp.prompt)).toContain("全程单镜头不切镜");
+    expect(String(sp.prompt)).toContain("无背景音乐");
   });
 
   it("下游引擎无关：双卡渲染 ×2 + 三转码 + 三件套上传 + DB 三列非空 + 画廊同步", async () => {

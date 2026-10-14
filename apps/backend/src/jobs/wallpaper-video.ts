@@ -65,6 +65,7 @@ import {
   spawnHoneydoVideo,
   transcodeForAerialNative,
   transcodeForGallery,
+  withH3NegativeList,
   withMotionBoost,
 } from "../lib/wallpaper/video";
 
@@ -153,10 +154,12 @@ async function produceNativeSide(opts: {
         // 动作强化阶梯：attempt 1 = L1 常规放大；attempt 2 = L2 激进修正
         // （重试换的是力度档位，不只是 seed——纯换 seed 实测无效）
         const boostLevel = attempt >= 2 ? 2 : 1;
-        const attemptPrompt =
+        const boosted =
           engine === "h3c" && config.h3c.motionPromptBoost
             ? withMotionBoost(prompt, boostLevel)
             : prompt;
+        // 负面清单护栏独立于动作强化开关（防幻觉加字/切镜/变形/自加配乐）
+        const attemptPrompt = withH3NegativeList(boosted);
         log(
           `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}${config.h3c.motionPromptBoost ? ` 动作强化L${boostLevel}` : ""}）`,
         );

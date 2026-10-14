@@ -78,7 +78,7 @@ describe("measureVideoMotion", () => {
 // withMotionBoost（20261014 定案：双锚保身份 + 动作强化后缀给运动量）
 // ============================================================================
 
-import { withMotionBoost } from "../lib/wallpaper/video";
+import { withH3NegativeList, withMotionBoost } from "../lib/wallpaper/video";
 
 describe("withMotionBoost（包覆式升级 L1/L2 阶梯）", () => {
   const base = "父母举起玩具晃动。";
@@ -101,5 +101,31 @@ describe("withMotionBoost（包覆式升级 L1/L2 阶梯）", () => {
     const out = withMotionBoost(`${base} Audio: soft room tone, no talking`, 1);
     expect(out).toContain("父母举起玩具晃动");
     expect(out).toContain("Audio: soft room tone, no talking");
+  });
+});
+
+describe("withH3NegativeList（20261014 社区调研采纳：负面清单护栏）", () => {
+  const base = "父母举起玩具晃动。";
+
+  it("插在 Audio 指引之前，Audio 仍居末尾", () => {
+    const out = withH3NegativeList(`${base} Audio: soft room tone, no talking`);
+    expect(out).toBe(
+      "父母举起玩具晃动，全程单镜头不切镜，画面中不出现任何字幕、文字或水印，人物五官保持稳定不变形，无背景音乐。 Audio: soft room tone, no talking",
+    );
+  });
+
+  it("无 Audio 段时负面清单收尾", () => {
+    const out = withH3NegativeList(base);
+    expect(out).toBe(
+      "父母举起玩具晃动，全程单镜头不切镜，画面中不出现任何字幕、文字或水印，人物五官保持稳定不变形，无背景音乐。",
+    );
+  });
+
+  it("覆盖幻觉加字/切镜/变形/自加配乐四个实证缺陷", () => {
+    const out = withH3NegativeList(base);
+    expect(out).toContain("不切镜");
+    expect(out).toContain("不出现任何字幕、文字或水印");
+    expect(out).toContain("五官保持稳定不变形");
+    expect(out).toContain("无背景音乐");
   });
 });

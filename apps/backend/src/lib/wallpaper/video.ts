@@ -1186,6 +1186,19 @@ export function withMotionBoost(prompt: string, level: 1 | 2 = 1): string {
   return `${prefix}${body}，${suffix}${audio ? ` ${audio}` : ""}`;
 }
 
+/** 负面清单（20261014 社区调研采纳）：官方示例把「不做什么」作为主要风格控制手段。
+ *  正中 h3.c 实证缺陷——09-30/10-05 幻觉白字（对应「不加文字」）、切镜破坏回环、
+ *  五官漂移、自加 BGM。插在 Audio 指引之前，Audio 仍居末尾。 */
+const H3_NEGATIVE_TAIL =
+  "全程单镜头不切镜，画面中不出现任何字幕、文字或水印，人物五官保持稳定不变形，无背景音乐。";
+
+export function withH3NegativeList(prompt: string): string {
+  const idx = prompt.indexOf(" Audio:");
+  const body = (idx >= 0 ? prompt.slice(0, idx) : prompt).trim().replace(/。$/, "");
+  const audio = (idx >= 0 ? prompt.slice(idx) : "").trimStart();
+  return `${body}，${H3_NEGATIVE_TAIL}${audio ? ` ${audio}` : ""}`;
+}
+
 // ============================================================================
 // 前置校验
 // ============================================================================
