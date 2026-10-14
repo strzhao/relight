@@ -16,7 +16,7 @@
  * 不 mock child_process——更黑盒、更接近真实 spawn 路径。
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -75,6 +75,7 @@ describe("spawnH3cVideo", () => {
 
   it("成功：argv 组装（-d/-p/--first-frame/--last-frame/-o/--width/--height/--seconds）+ A/B 默认档参数 + 返回 outPath", async () => {
     const script = makeFakeH3(`
+pwd > "$H3C_CAPTURE.cwd"
 out=""
 prev=""
 for a in "$@"; do
@@ -87,6 +88,11 @@ echo "rendering... done"
     const res = await spawnH3cVideo({ ...baseOpts, binPath: script });
     expect(res.outPath).toBe(baseOpts.outPath);
     expect(res.stdout).toContain("rendering");
+
+    // cwd 必须固定到 bin 同目录（h3 以 CWD 相对路径加载 h3_shaders.metal）；
+    // pwd 输出真实路径（/private/var…），tmpdir 是符号链接，须 realpath 后比较
+    const cwd = execFileSync("cat", [`${capturePath}.cwd`], { encoding: "utf8" }).trim();
+    expect(cwd).toBe(realpathSync(path.dirname(script)));
 
     const args = readCapture(capturePath);
     expect(args[args.indexOf("-d") + 1]).toBe(baseOpts.modelDir);

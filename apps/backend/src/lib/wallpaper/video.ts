@@ -446,6 +446,10 @@ export async function spawnH3cVideo(opts: H3cVideoOptions): Promise<H3cVideoResu
   try {
     const exitCode = await new Promise<number>((resolve, reject) => {
       const proc = spawn(opts.binPath, args, {
+        // h3 以 CWD 相对路径加载 Metal 着色器源（h3_gpu.m：source_path 兜底
+        // "h3_shaders.metal"），文件只在构建目录——cwd 固定到 bin 同目录；
+        // 传入 h3 的全部路径参数（modelDir/首尾帧/产物）均为绝对路径，不受 cwd 影响
+        cwd: path.dirname(opts.binPath),
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"],
       });
