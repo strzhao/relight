@@ -178,6 +178,28 @@ export const config = {
   /** honeydo CLI 绝对路径（spawn 用，PM2 PATH 不保证；env HONEYDO_CLI_PATH 覆盖，
    *  默认运行时 `which honeydo` 解析）。 */
   honeydoCliPath: resolveHoneydoCliPath(),
+  /** 壁纸视频生成引擎（20261014 h3.c 接入）：h3c = antirez h3.c 原生 Metal BF16 零量化
+   *  （A/B 定案消除 int8 幻觉文字/涂鸦、纹理/人脸质量全面提升、耗时打平 ~45min）；
+   *  honeydo = mmh3turbo int8 旧引擎（回滚用：env WALLPAPER_VIDEO_ENGINE=honeydo）。
+   *  引擎只影响生成腿（画布预算/CLI 参数），后续 palindrome/双卡排版/三转码链路完全同构。 */
+  wallpaperVideoEngine: (process.env.WALLPAPER_VIDEO_ENGINE ?? "h3c") as "honeydo" | "h3c",
+  /** h3.c 引擎配置（wallpaperVideoEngine === "h3c" 时消费） */
+  h3c: {
+    /** h3 可执行文件绝对路径（env H3C_BIN_PATH 覆盖） */
+    binPath: process.env.H3C_BIN_PATH ?? "/Users/stringzhao/ml/h3.c/h3",
+    /** MiniMax-H3 BF16 权重目录（FL2VA 子集；env H3C_MODEL_DIR 覆盖） */
+    modelDir: process.env.H3C_MODEL_DIR ?? "/Users/stringzhao/ml/h3-models",
+    /** 去噪步数（默认 20 = A/B 验证档；env H3C_STEPS 覆盖） */
+    steps: Number.parseInt(process.env.H3C_STEPS ?? "20", 10),
+    /** DiT 层数（45 fast 档 = A/B 验证档，50 为 exact；env H3C_LAYERS 覆盖） */
+    layers: Number.parseInt(process.env.H3C_LAYERS ?? "45", 10),
+    /** 去噪器复用（2 fast 档 = A/B 验证档；env H3C_REUSE 覆盖） */
+    reuse: Number.parseInt(process.env.H3C_REUSE ?? "2", 10),
+    /** 随机种子（默认 42 与 mmh3turbo 惯例一致，坏天可确定性复现；env H3C_SEED 覆盖） */
+    seed: Number.parseInt(process.env.H3C_SEED ?? "42", 10),
+    /** SSD 流式读 BF16 DiT 层（992² 全驻留会 jetsam OOM，必须开；env H3C_SSD_STREAMING=false 关） */
+    ssdStreaming: (process.env.H3C_SSD_STREAMING ?? "true") !== "false",
+  },
   /** 人物照微动默认 prompt（hero 有人脸时兜底；AI narrate 的 motionPrompt 优先）。
    *  2026-09-13 契约修订 + A/B 实测：原「保持姿态稳定…回到初始画面」过度收敛致画面近乎静止；
    *  「轻轻侧头/发丝轻扬」等微小动作仍不可见（实测运动量仅为可见动作版 1/57）。

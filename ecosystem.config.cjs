@@ -30,6 +30,9 @@ module.exports = {
         // 动态视频壁纸（2026-09-13 开启）：每日精选后自动生成壁纸视频。
         // 关闭方式：此行删掉 + pm2 reload relight-workers --update-env
         DAILY_WALLPAPER_VIDEO: "true",
+        // 壁纸视频生成引擎（20261014 h3.c BF16 接入，代码默认即 h3c，此处显式声明留回滚点）。
+        // 回滚旧引擎：改 "honeydo" + pm2 reload relight-workers --update-env
+        WALLPAPER_VIDEO_ENGINE: process.env.WALLPAPER_VIDEO_ENGINE || "h3c",
       },
     },
     {

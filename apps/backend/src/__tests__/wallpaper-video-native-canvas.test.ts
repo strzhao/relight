@@ -18,7 +18,7 @@
  *   设计注：≤2% 偏差性质断言仅适用于未触 R clamp 边界的样本（触边界样本由精确 fixture 断言锁定）。
  */
 import { describe, expect, it } from "vitest";
-import { computeNativeCanvas } from "../lib/wallpaper/native-canvas";
+import { H3C_CANVAS_PIXEL_BUDGET, computeNativeCanvas } from "../lib/wallpaper/native-canvas";
 
 const BUDGET = 1_177_600;
 const BUDGET_HALF = BUDGET / 2;
@@ -174,5 +174,112 @@ describe("computeNativeCanvas 性质与边界", () => {
       expect(width % 32).toBe(0);
       expect(height % 32).toBe(0);
     }
+  });
+});
+
+// ============================================================================
+// 20261014 h3.c 引擎预算（opts.maxPixels = H3C_CANVAS_PIXEL_BUDGET = 768×1344）：
+// 引擎硬校验「width/height 为 32 倍数且像素积 ≤ 768×1344」超限报错退出，
+// 调用方（jobs/wallpaper-video.ts）必须先钳——本表锁 h3c 预算下的精确输出。
+// ============================================================================
+
+describe("computeNativeCanvas h3c 引擎预算（maxPixels=768×1344）", () => {
+  const H3C_BUDGET = 768 * 1344;
+
+  const exactCases: Array<{
+    name: string;
+    origW: number;
+    origH: number;
+    width: number;
+    height: number;
+  }> = [
+    { name: "1:1 正方形", origW: 3000, origH: 3000, width: 992, height: 992 },
+    { name: "3:2 横图", origW: 3000, origH: 2000, width: 1216, height: 800 },
+    {
+      name: "16:9 横图（恰满预算 1344×768=1,032,192）",
+      origW: 1920,
+      origH: 1080,
+      width: 1344,
+      height: 768,
+    },
+    { name: "9:16 竖图（朝向保持竖版）", origW: 1080, origH: 1920, width: 768, height: 1344 },
+    { name: "4:3 横图", origW: 4000, origH: 3000, width: 1152, height: 864 },
+    { name: "3:4 竖图", origW: 3000, origH: 4000, width: 864, height: 1152 },
+    { name: "2.35:1 超宽（兜底分支）", origW: 2350, origH: 1000, width: 1440, height: 704 },
+    { name: "R clamp 边界 2.40（兜底分支）", origW: 2400, origH: 1000, width: 1440, height: 704 },
+    {
+      name: "R clamp 竖版边界（兜底分支，朝向仍竖版）",
+      origW: 1000,
+      origH: 2500,
+      width: 704,
+      height: 1440,
+    },
+    { name: "21:9 超宽（兜底分支）", origW: 2520, origH: 1080, width: 1440, height: 704 },
+    {
+      name: "20000×10000 大图（R=2.0 主循环）",
+      origW: 20000,
+      origH: 10000,
+      width: 1408,
+      height: 704,
+    },
+  ];
+
+  for (const c of exactCases) {
+    it(`${c.name}: ${c.origW}×${c.origH} → ${c.width}×${c.height}`, () => {
+      expect(computeNativeCanvas(c.origW, c.origH, { maxPixels: H3C_BUDGET })).toEqual({
+        width: c.width,
+        height: c.height,
+      });
+    });
+  }
+
+  it("导出常量 = 768×1344（h3_host.h H3_MAX_PIXELS 逐字）", () => {
+    expect(H3C_CANVAS_PIXEL_BUDGET).toBe(1_032_192);
+  });
+
+  it("全比例扫描：h3c 预算下 32 倍数 + 像素积 ≤ 768×1344 + 朝向保持 + 比例偏差 ≤2%（未触 clamp）", () => {
+    const ratios: Array<[number, number]> = [
+      [1, 1],
+      [5, 4],
+      [4, 3],
+      [3, 2],
+      [16, 10],
+      [16, 9],
+      [9, 16],
+      [10, 16],
+      [3, 4],
+      [2, 3],
+      [9, 21],
+      [7, 5],
+      [1.85, 1],
+      [1.5, 1],
+      [1.9, 1],
+    ];
+    for (const [w, h] of ratios) {
+      const { width, height } = computeNativeCanvas(w, h, { maxPixels: H3C_BUDGET });
+      expect(width % 32).toBe(0);
+      expect(height % 32).toBe(0);
+      expect(width * height).toBeLessThanOrEqual(H3C_BUDGET);
+      // 朝向保持
+      if (w > h) expect(width).toBeGreaterThan(height);
+      if (w < h) expect(height).toBeGreaterThan(width);
+      if (w === h) expect(width).toBe(height);
+      // 未触兜底分支：比例偏差 ≤2%。h3c 预算下兜底阈值提前——704 短轴纪律要求
+      // 704²×R ≤ 768×1344 → R ≤ 2.0816；R 超此值主循环恒不满足走兜底（短轴优先，
+      // 比例被压缩到 1440/704≈2.05，设计行为，精确值由 exact 表 9:21/2.35:1 用例锁定）
+      const r = Math.max(w, h) / Math.min(w, h);
+      if (r >= 1.0 && r <= 2.0) {
+        const outR = Math.max(width, height) / Math.min(width, height);
+        expect(Math.abs(outR - r) / r).toBeLessThanOrEqual(0.02);
+      }
+    }
+  });
+
+  it("默认调用（无 opts）与 h3c 预算互不串扰：1:1 默认 1056² / h3c 992²", () => {
+    expect(computeNativeCanvas(3000, 3000)).toEqual({ width: 1056, height: 1056 });
+    expect(computeNativeCanvas(3000, 3000, { maxPixels: H3C_BUDGET })).toEqual({
+      width: 992,
+      height: 992,
+    });
   });
 });

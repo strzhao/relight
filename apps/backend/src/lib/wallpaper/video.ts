@@ -15,6 +15,14 @@
  *     非零退出 / JSON 解析失败 / 产物文件不存在 / 超时 abort → throw HoneydoSpawnError
  *     （message 含 stdout tail ≤2000 字符与超时毫秒数）。
  *
+ *   spawnH3cVideo({binPath, modelDir, prompt, firstFrame, lastFrame, outPath, seconds,
+ *     width, height, timeoutMs?, steps?, layers?, reuse?, seed?, ssdStreaming?})
+ *     → {outPath, stdout}（20261014 h3.c 引擎接入：BF16 零量化，A/B 定案消除 int8 幻觉）
+ *     同骨架；无 stdout JSON 回执，成功判据 = 退出码 0 ∧ 产物存在（spawn 前 pre-delete）；
+ *     参数档 --steps 20 --layers 45 --reuse 2 --ssd-streaming --seed 42（A/B 验证档）。
+ *     画布预算钳制在调用方（computeNativeCanvas + H3C_CANVAS_PIXEL_BUDGET，
+ *     引擎对像素积 >768×1344 硬报错退出）。
+ *
  *   buildLoop(src, targetSeconds) → {loopPath, segments}（v2 增量任务 13）
  *     palindrome 拼接（split/reverse/concat，forward+reverse 交替；音轨 areverse 同构）
  *     至 ≥targetSeconds ∧ 偶数段；错误枚举 LoopBuildError（ffmpeg 失败 / 拼接后时长 < targetSeconds-1）。
@@ -334,6 +342,168 @@ export async function spawnHoneydoVideo(opts: HoneydoVideoOptions): Promise<Hone
     if (e instanceof HoneydoSpawnError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     throw new HoneydoSpawnError(`honeydo video gen spawn 失败: ${msg}`);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ============================================================================
+// spawnH3cVideo（20261014 h3.c 引擎接入：BF16 零量化，A/B 定案替代 mmh3turbo 消除幻觉）
+// ============================================================================
+
+/** spawn h3.c 失败（非零退出 / 产物缺失 / 超时 abort） */
+export class H3cSpawnError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "H3cSpawnError";
+  }
+}
+
+export interface H3cVideoOptions {
+  /** h3 可执行文件绝对路径（config.h3c.binPath） */
+  binPath: string;
+  /** MiniMax-H3 BF16 权重目录（config.h3c.modelDir，FL2VA 子集） */
+  modelDir: string;
+  /** 生成 prompt（与 honeydo 同源：motionPrompt / 分层默认，含 Audio 环境音指引） */
+  prompt: string;
+  /** 首帧图路径（预裁剪 tmp png） */
+  firstFrame: string;
+  /** 尾帧图路径（双锚定伪循环：与 firstFrame 同图） */
+  lastFrame: string;
+  /** 产物 mp4 路径（h3.c 内部经 ffmpeg 封装 H.264 + 32kHz AAC） */
+  outPath: string;
+  /** 时长秒（24fps；引擎内部 5+17n 帧量化——4s→107 帧≈4.46s，buildLoop 兼容） */
+  seconds: number;
+  /** 画布宽（32 倍数；调用方须已按 H3C_CANVAS_PIXEL_BUDGET 钳像素积，引擎超限硬报错） */
+  width: number;
+  /** 画布高（同上） */
+  height: number;
+  /** 超时 ms（默认 config.wallpaperVideoSpawnTimeoutMs） */
+  timeoutMs?: number;
+  /** 去噪步数（config.h3c.steps，默认 20 = A/B 验证档） */
+  steps?: number;
+  /** DiT 层数（config.h3c.layers，默认 45 fast 档；50 exact） */
+  layers?: number;
+  /** 去噪器复用（config.h3c.reuse，默认 2 fast 档） */
+  reuse?: number;
+  /** 随机种子（config.h3c.seed，默认 42；同输入确定性复现） */
+  seed?: number;
+  /** SSD 流式读 BF16 DiT 层（默认 true；992² 级画布全驻留会 jetsam OOM，必须开） */
+  ssdStreaming?: boolean;
+}
+
+export interface H3cVideoResult {
+  outPath: string;
+  stdout: string;
+}
+
+/**
+ * spawn h3.c 图生视频（antirez 原生 Metal 引擎，BF16 零量化）。
+ *
+ * 与 spawnHoneydoVideo 同契约骨架：绝对路径 spawn、stdio pipe、超时 SIGTERM→SIGKILL 升级、
+ * stdout/stderr tail 留证；差异 = 回执协议——h3.c 无 stdout 机读 JSON，成功判据为
+ * **退出码 0 ∧ 产物文件存在**（spawn 前 pre-delete 产物路径，杜绝陈旧文件误判）。
+ * 参数锁定 A/B 验证档：--steps 20 --layers 45 --reuse 2 --ssd-streaming --seed 42。
+ */
+export async function spawnH3cVideo(opts: H3cVideoOptions): Promise<H3cVideoResult> {
+  const timeoutMs = resolveTimeoutMs(opts.timeoutMs);
+
+  const args = [
+    "-d",
+    opts.modelDir,
+    "-p",
+    opts.prompt,
+    "--first-frame",
+    opts.firstFrame,
+    "--last-frame",
+    opts.lastFrame,
+    "-o",
+    opts.outPath,
+    "--width",
+    String(opts.width),
+    "--height",
+    String(opts.height),
+    "--seconds",
+    String(opts.seconds),
+    "--steps",
+    String(opts.steps ?? 20),
+    "--layers",
+    String(opts.layers ?? 45),
+    "--reuse",
+    String(opts.reuse ?? 2),
+    "--seed",
+    String(opts.seed ?? 42),
+    ...((opts.ssdStreaming ?? true) ? ["--ssd-streaming"] : []),
+  ];
+
+  // pre-delete 产物：h3.c 无 JSON 回执，成功判据是产物存在——先清场防陈旧文件误判
+  await rm(opts.outPath, { force: true }).catch(() => {});
+
+  let stdout = "";
+  let stderr = "";
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      const proc = spawn(opts.binPath, args, {
+        env: { ...process.env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      // 超时 SIGTERM；5s 未退出（子进程持有 stdio）→ SIGKILL 升级；
+      // kill 后等 'close'（stdio 冲刷完）再走超时分支，保住 stdout tail。
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          proc.kill("SIGTERM");
+        } catch {
+          // 已退出忽略
+        }
+        setTimeout(() => {
+          try {
+            proc.kill("SIGKILL");
+          } catch {
+            // 已退出忽略
+          }
+        }, 5_000).unref();
+      }, timeoutMs);
+      proc.stdout?.on("data", (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr?.on("data", (d) => {
+        stderr += d.toString();
+      });
+      proc.on("error", reject);
+      proc.on("close", (code) => {
+        if (timer) clearTimeout(timer);
+        resolve(code ?? -1);
+      });
+    });
+
+    if (timedOut) {
+      throw new H3cSpawnError(
+        `h3.c 视频生成超时（${timeoutMs}ms）（stderr=${stderr.slice(-500) || "（空）"} | stdout=${stdoutTail(stdout)}）`,
+      );
+    }
+
+    if (exitCode !== 0) {
+      throw new H3cSpawnError(
+        `h3.c 视频生成退出码 ${exitCode}（stderr=${stderr.slice(-800) || "（空）"} | stdout=${stdoutTail(stdout)}）`,
+      );
+    }
+
+    try {
+      await access(opts.outPath);
+    } catch {
+      throw new H3cSpawnError(
+        `h3.c 视频生成产物文件不存在: ${opts.outPath}（stderr=${stderr.slice(-500) || "（空）"} | stdout=${stdoutTail(stdout)}）`,
+      );
+    }
+
+    return { outPath: opts.outPath, stdout };
+  } catch (e) {
+    if (e instanceof H3cSpawnError) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new H3cSpawnError(`h3.c 视频生成 spawn 失败: ${msg}`);
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -904,15 +1074,22 @@ async function resolveExecutable(p: string): Promise<string> {
 }
 
 /**
- * spawn 前置校验（v2）：honeydo bin、ffmpeg、原图路径三存在 +
- * wallpaper-overlay 工程入口 / Remotion 运行时 / overlay 字体（v2 增量任务 14：
- * workspace 无 remotion 依赖时报错，不自动安装）。
+ * spawn 前置校验（v2；20261014 引擎感知）：ffmpeg、原图路径 +
+ * wallpaper-overlay 工程入口 / Remotion 运行时 / overlay 字体恒检；
+ * 生成引擎二选一——h3c：h3 二进制 + BF16 权重目录；honeydo：honeydo bin。
  * 任一缺失 throw Error（范本 assertSpawnPrerequisites）。
  */
 export async function assertVideoSpawnPrerequisites(photoPath: string): Promise<void> {
   const overlayDir = wallpaperOverlayProjectDir();
+  const engineChecks: Array<{ label: string; p: string; resolve: boolean }> =
+    config.wallpaperVideoEngine === "h3c"
+      ? [
+          { label: "h3.c 二进制", p: config.h3c.binPath, resolve: false },
+          { label: "h3.c BF16 权重目录", p: config.h3c.modelDir, resolve: false },
+        ]
+      : [{ label: "honeydo CLI", p: config.honeydoCliPath, resolve: false }];
   const checks: Array<{ label: string; p: string; resolve: boolean }> = [
-    { label: "honeydo CLI", p: config.honeydoCliPath, resolve: false },
+    ...engineChecks,
     { label: "ffmpeg", p: config.video.ffmpegPath, resolve: true },
     { label: "hero 原图", p: photoPath, resolve: false },
     // v2 增量任务 14：Remotion 文字层前置（不自动安装）
@@ -945,7 +1122,7 @@ export async function assertVideoSpawnPrerequisites(photoPath: string): Promise<
       throw new Error(`spawn 前置缺失: ${c.label} (${c.p})`);
     }
   }
-  if (!config.honeydoCliPath) {
+  if (config.wallpaperVideoEngine !== "h3c" && !config.honeydoCliPath) {
     throw new Error(
       "spawn 前置缺失: honeydo CLI（config.honeydoCliPath 为空，未安装且未设 HONEYDO_CLI_PATH）",
     );

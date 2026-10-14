@@ -13,8 +13,12 @@ import path from "node:path";
  *   3. faces 表取 hero 最大人脸 bbox（仅用于 prompt 分层默认；预裁剪已去除人脸窗口）
  *      + sharp 读 hero EXIF 旋转后尺寸 → computeNativeCanvas 算单腿原生画布
  *   4. 单腿串接（produceNativeSide）：
- *      preprocess（cover 微裁至画布）→ spawn honeydo 生成（seconds 默认 4，双锚定，
- *      -r 720p + --width/--height 画布显式覆盖）→ buildLoop（palindrome 拼接至 loopSeconds 默认 8）
+ *      preprocess（cover 微裁至画布）→ 生成引擎（20261014 双引擎二选一：
+ *        h3c = antirez h3.c 原生 Metal BF16 零量化（默认，A/B 定案消除 int8 幻觉；
+ *        画布预算钳到 H3C_CANVAS_PIXEL_BUDGET=768×1344）/
+ *        honeydo = mmh3turbo int8（env WALLPAPER_VIDEO_ENGINE=honeydo 回滚）；
+ *        seconds 默认 4，双锚定，honeydo 走 -r 720p + --width/--height 显式覆盖）
+ *      → buildLoop（palindrome 拼接至 loopSeconds 默认 8）
  *      → renderTextOverlay ×2（20261009 排版解耦：comp 尺寸恒定、与生成画布解耦——
  *        landscape=16:9 杂志卡 1920×1080（对齐 mac 静态壁纸观感；原生 loop 照片窗 contain）
  *        + portrait=竖版全屏卡 1290×2796（对齐手机静态壁纸 B 方案；loop cover 铺满））
@@ -43,8 +47,9 @@ import {
   wallpaperVideoNativeCosKey,
   wallpaperVideoPortraitCosKey,
 } from "../lib/gallery/manifest";
-// 画布 SSOT（20260928 单腿原生）：computeNativeCanvas 从 native-canvas.ts 引入
-import { computeNativeCanvas } from "../lib/wallpaper/native-canvas";
+// 画布 SSOT（20260928 单腿原生）：computeNativeCanvas 从 native-canvas.ts 引入；
+// 20261014 引擎感知预算：h3c 引擎传 H3C_CANVAS_PIXEL_BUDGET（引擎超限硬报错）
+import { H3C_CANVAS_PIXEL_BUDGET, computeNativeCanvas } from "../lib/wallpaper/native-canvas";
 import {
   DimensionAssertError,
   type FaceBbox,
@@ -56,6 +61,7 @@ import {
   preprocessHeroFrame,
   readOrientedDimensions,
   renderTextOverlay,
+  spawnH3cVideo,
   spawnHoneydoVideo,
   transcodeForAerialNative,
   transcodeForGallery,
@@ -121,24 +127,46 @@ async function produceNativeSide(opts: {
   let overlayLandscapePath: string | null = null;
   let overlayPortraitPath: string | null = null;
   try {
-    // 2. spawn honeydo（双锚定伪循环：--first-frame 与 --last-frame 同图；seconds 默认 4；
-    //    契约 6：-r 720p 保留保 stdout 回执语义，画布两轴经 --width/--height 显式覆盖）
+    // 2. spawn 生成引擎（20261014 双引擎：h3c = h3.c BF16 零量化（默认）/
+    //    honeydo = mmh3turbo int8（回滚）；双锚定伪循环：--first-frame 与 --last-frame 同图；
+    //    honeydo 契约 6：-r 720p 保留保 stdout 回执语义，画布两轴经 --width/--height 显式覆盖）
     const seconds = clampWallpaperVideoSeconds(config.wallpaperVideoSeconds);
+    const engine = config.wallpaperVideoEngine === "h3c" ? "h3c" : "honeydo";
     log(
-      `[wallpaper-video] ${pickDate} native ${canvas.width}×${canvas.height} 生成开始（seconds=${seconds}）`,
+      `[wallpaper-video] ${pickDate} native ${canvas.width}×${canvas.height} 生成开始（engine=${engine} seconds=${seconds}）`,
     );
-    await spawnHoneydoVideo({
-      cliPath: config.honeydoCliPath,
-      prompt,
-      firstFrame: framePath,
-      lastFrame: framePath,
-      outPath: rawPath,
-      seconds,
-      res: WALLPAPER_VIDEO_RES,
-      width: canvas.width,
-      height: canvas.height,
-      timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
-    });
+    if (engine === "h3c") {
+      await spawnH3cVideo({
+        binPath: config.h3c.binPath,
+        modelDir: config.h3c.modelDir,
+        prompt,
+        firstFrame: framePath,
+        lastFrame: framePath,
+        outPath: rawPath,
+        seconds,
+        width: canvas.width,
+        height: canvas.height,
+        timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
+        steps: config.h3c.steps,
+        layers: config.h3c.layers,
+        reuse: config.h3c.reuse,
+        seed: config.h3c.seed,
+        ssdStreaming: config.h3c.ssdStreaming,
+      });
+    } else {
+      await spawnHoneydoVideo({
+        cliPath: config.honeydoCliPath,
+        prompt,
+        firstFrame: framePath,
+        lastFrame: framePath,
+        outPath: rawPath,
+        seconds,
+        res: WALLPAPER_VIDEO_RES,
+        width: canvas.width,
+        height: canvas.height,
+        timeoutMs: config.wallpaperVideoSpawnTimeoutMs,
+      });
+    }
     log(`[wallpaper-video] ${pickDate} native 生成完成 → ${rawPath}`);
 
     // 3. buildLoop：palindrome 拼接至 loopSeconds（默认 8s；4s 单条 ×2）
@@ -311,12 +339,16 @@ export async function runWallpaperVideo(
   // 前置校验（honeydo bin / ffmpeg / 原图 / Remotion 文字层工程四组存在）
   await assertVideoSpawnPrerequisites(hero.filePath);
 
-  // 3. hero EXIF 旋转后尺寸 → 单腿原生画布（SSOT computeNativeCanvas）；
+  // 3. hero EXIF 旋转后尺寸 → 单腿原生画布（SSOT computeNativeCanvas；20261014 引擎感知
+  //    预算：h3c 引擎像素积钳到 768×1344，honeydo 维持 1177600）；
   //    faces 表取 hero 最大人脸 bbox（仅 prompt 分层默认；预裁剪已无人脸窗口）
   const dims = await readOrientedDimensions(hero.filePath);
-  const canvas = computeNativeCanvas(dims.width, dims.height);
+  const canvas =
+    config.wallpaperVideoEngine === "h3c"
+      ? computeNativeCanvas(dims.width, dims.height, { maxPixels: H3C_CANVAS_PIXEL_BUDGET })
+      : computeNativeCanvas(dims.width, dims.height);
   log(
-    `[wallpaper-video] ${pickDate} 原生画布 ${canvas.width}×${canvas.height}（原图 ${dims.width}×${dims.height}）`,
+    `[wallpaper-video] ${pickDate} 原生画布 ${canvas.width}×${canvas.height}（原图 ${dims.width}×${dims.height}，engine=${config.wallpaperVideoEngine}）`,
   );
 
   const faceBbox = await getLargestFaceBbox(hero.id);
