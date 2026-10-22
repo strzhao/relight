@@ -99,3 +99,11 @@
 - **Scenario**：改全屏滚动流的单元顺序（如壁纸卡上移首屏）、给媒体加 object-fit 智能裁切、或跑红蓝对抗谓词取证时
 - **Lesson**：① 单元 DOM 锚点若全按 dataset 属性查询，顺序迁移**零波及**（HUD/URL sync/深链全不受影响），破坏面集中在两类断言——位置索引（首单元/最后单元/第 N 个）与 nextElementSibling 类邻接断言，迁移前先盘点这两类（邻接类要看新顺序下是否自然满足）；② `object-fit` 裁切生效要求媒体盒 `width/height:100%` 铺满容器（`max-width+auto` 盒随固有尺寸收缩、无裁切余量），且模糊垫底层**不可占卡内首个 img 位**（querySelector 首图语义 + 旧断言锚点都指首图，垫层排后靠 z-index 压底）；③ 红队 artifact 是确定性 JSON 时，同型交互两次执行会字节级相同 → MD5 撞车被取证闸门判复制，payload 嵌 `pred id + executedAt` 自证独立；④ fs-grep 文本契约锚点会被文件头 role 枚举注释 shadow（findIndex 命中首个=注释行）——契约 token 别写进无关注释
 - **Evidence**：15 场景 48 谓词 SSOT + gallery-wallpaper-hero 私有 fixture（不动共享 gen-manifest 防旧套件二次破坏）；stop-hook §5.7 两轮 block（PRED-ARTIFACT-MISSING/DUP）修复记录（核对锚点：2026-09-14 state.md 变更日志）
+
+## 画廊主视频朝向自适应（20261023）+ 朝向信号实证法
+
+[2026-10-23] <!-- tags: gallery, wallpaper-video, orientation, manifest, e2e -->
+
+- **Decision**：`wallpaperVideoUrl` 朝向感知三分支——hero 横版 → native(16:9 卡) 优先（现状）；竖版/方图 → portrait(竖版卡) 优先、native 兜底（兼容 0928~1008 原生比例时代）；维度缺失现状兜底。16:9 卡在竖版/方图日保留 COS/DB 但画廊不可达（用户裁决）。rejected：后端交换写列（零收益）/仅竖版换卡（方图 57% 覆盖不住）/全面竖版化（横版裁切过狠）。
+- **Lesson**：① 朝向信号源靠实证不靠读码——DB dims 是否 EXIF 归一化，44/44 视频天 hero sharp metadata 对拍 5 分钟定案（含 o=6/8 两例）；错分后果（回退现状）≪修复面（schema/backfill）时不修。② native 槽语义三演进（原生画布→恒16:9卡→朝向自适应）须函数头注释+CLAUDE.md 双留痕三时代兼容矩阵。③ 「QA 只跑 --list」埋 2 周级潜伏失败：b3f36e6 菜单加竖版视频项漏 `isDynamic` gate → 404 降级日死链 mp4 控件；修复 oracle = forceStatic 分支自注释 invariant。纯选择逻辑改动让历史 14 天零重生成立即生效（manifest photos[0] 既有字段即信号源）。
+- **Evidence**：44 hero EXIF 对拍全 OK；场景14.P3 FAIL→1 行修复→153/0 全绿（核对锚点：20261023 state.md QA 报告）

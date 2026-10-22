@@ -181,3 +181,8 @@
 - **Scenario**：QA 需真跑壁纸视频重跑验证发布链（COS 上传/manifest 推送），但套件内 spawn 的进程继承沙箱空串凭据 → 上传静默返回空串、回执不写——**不是缺陷，是 09-12 守卫在正确工作**；发布面谓词必须沙箱外驱动（干净 env 手动 rerun），或延后到自然日发布后求值
 - **Lesson**：①沙箱内「产物落盘 + exit 0」可真验，「上传/推送面」不可验——设计验证方案时就要把两面拆开，别让 QA 套件白烧 GPU；②stop-hook §5.7 校验谓词 artifact 用**规范路径** `/tmp/autopilot-artifacts/<pred-id>.out`（如 `3.P1.out`）——红队 writeArtifact 的 `场景3.P1.out` 前缀名不被认，编排器求值后须按裸名落位；③真跑类红队测试的超时要按「单腿实测 × 腿数 + Remotion 冷启动」估算，别用想当然的整数上限（2h 上限 vs 双腿 111.8min 实测险胜）
 - **Evidence**：20260925 任务 QA——沙箱内 rerun 上传空串/回执保留旧值无污染；28 谓词 artifact 裸名落位后 §5.7 过（核对锚点：2026-09-25 apps/backend/vitest.setup.ts）
+
+## autopilot 谓词 artifact 绝对路径 + gate 清空自愈（收编 2026-09-28 inbox）
+
+- **Lesson**：① stop-hook §5.7 对 state.md 里 artifact 字段做字面 `-f` 检查——冻结验收场景时必须写绝对路径 `/tmp/autopilot-artifacts/<pred-id>.out`，测试 writeArtifact 同源；共享目录有旧任务同名文件时靠时间戳+内容甄别。② PRED-ARTIFACT-MISSING / AC-FIELD-INVALID 等 block 都伴随 `set_field gate ""`——修复根因后必须同轮 Edit 恢复 `gate: review-accept`，否则空 gate 直落泛化 phase 提示（无 PRED-*/AC-* 前缀 = gate 为空的症状，不是新问题）；分级三元组 `e2e_status`/`leftover_critical`/`unexecuted_core_paths` 缺一即清 gate，auto-merge 只认 `verified ∧ 0 ∧ 0`。③ 红蓝测试冲突回设计 SSOT 裁决（红队测试=设计意图代码化）；设计未写死的内部符号名不构成蓝队偏差，红队按字面符号断言属过度指定（E1 类改红队+留痕）。
+- **Evidence**：32 条 PRED-ARTIFACT-MISSING / §5.7 两轮 block 修复记录（核对锚点：inbox 2026-09-28-autopilot-谓词artifact绝对路径与gate恢复.md，已收编本文件）

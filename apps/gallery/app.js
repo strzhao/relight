@@ -1230,9 +1230,27 @@
     return unit;
   }
 
-  /** 壁纸视频变体 URL 优先级（20260928 单腿原生）：native > portrait(legacy) > landscape(legacy 16:9)；
-   *  历史日无 native → 原行为回退，三字段皆空 → 静态卡 */
+  /** 壁纸视频变体 URL 朝向自适应选择（20261023；取代 20260928 单腿 native 恒优先）：
+   *  hero 显示维度横版（w>h）→ native(16:9 杂志卡) > portrait > landscape（现状）；
+   *  竖版/方图（h≥w）→ portrait(竖版卡) > native > landscape（native 兜底兼容 0928~1008
+   *  原生比例时代——该时代 native 本就朝向正确）；维度缺失（photos[0] 缺失或 0，防御）
+   *  → native > portrait > landscape（现状兜底）。三字段皆空 → 静态卡（回退不变式） */
   function wallpaperVideoUrl(day) {
+    const hero = day.photos?.[0];
+    const w = hero ? hero.width : 0;
+    const h = hero ? hero.height : 0;
+    // 朝向自适应（20261023）：hero 显示维度横版 → 维持 16:9 杂志卡优先（现状）；
+    // 竖版/方图 → 竖版卡优先；维度缺失 → 维持现状优先级。
+    if (w > 0 && h > 0 && w > h) {
+      return (
+        day.wallpaperVideoNative || day.wallpaperVideoPortrait || day.wallpaperVideoLandscape || ""
+      );
+    }
+    if (w > 0 && h > 0) {
+      return (
+        day.wallpaperVideoPortrait || day.wallpaperVideoNative || day.wallpaperVideoLandscape || ""
+      );
+    }
     return (
       day.wallpaperVideoNative || day.wallpaperVideoPortrait || day.wallpaperVideoLandscape || ""
     );
@@ -1269,7 +1287,7 @@
 
   /**
    * wallpaper 卡右下动作栏（改版 [2026-09-14] 两态矩阵，取代旧「竖版主钮+横版次钮」直排）：
-   *   动态日（wallpaperVideoPortrait 非空）：[声音] → [主钮·保存视频] → [更多]
+   *   动态日（wallpaperVideoUrl(day) 非空，20261023 起朝向自适应选卡）：[声音] → [主钮·保存视频] → [更多]
    *     （弹层收静态壁纸竖版「保存静态壁纸」+ 横版「电脑版」——次级动作让位动态视频主场景）
    *   静态日：[主钮·保存壁纸（primary）] → [更多（仅横版直链非空时，弹层收横版「电脑版」）]
    *   菜单项保锚点：role 沿用 wallpaper-download-portrait / wallpaper-download-landscape，
@@ -1320,9 +1338,12 @@
       bindDownloadClick(portraitDl, day.wallpaperPortrait, `拾光壁纸-${day.pickDate}-手机竖版.jpg`);
       railChildren.push(portraitDl.btn);
     }
-    // 竖版动态壁纸视频非空才收进菜单（20261009 排版解耦：portrait 卡 = 手机全屏动态壁纸，
-    // 与主钮「保存视频」（16:9 卡）互补；缺直链不渲染死链控件）
-    if (day.wallpaperVideoPortrait) {
+    // 竖版动态壁纸视频非空才收进菜单（20261009 排版解耦：portrait 卡 = 手机全屏动态壁纸；
+    // 20261023 朝向自适应后：横版 hero 日与主钮「保存视频」（16:9 卡）互补，竖版/方图日
+    // 主钮已指向竖版卡、菜单项保留同资源入口——菜单结构不在本次范围。缺直链不渲染死链控件；
+    // 降级日（forceStatic）壁纸视频资源类已整体 404 → mp4 菜单项按静态矩阵收敛为仅电脑版，
+    // isDynamic gate 防死链控件（场景14.P3 契约，20261023 auto-fix 修复 20261009 起的潜伏回归）
+    if (isDynamic && day.wallpaperVideoPortrait) {
       const portraitVideoDl = createDownloadButton({
         role: "wallpaper-download-video-portrait",
         label: "保存竖版视频",

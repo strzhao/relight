@@ -176,3 +176,9 @@
 - [2026-05-01] pnpm onlyBuiltDependencies → [release-ops](domains/release-ops.md)
 - [2026-05-01] Vitest workspace 根安装 → [testing](domains/testing.md)
 - [2026-05-01] Biome organizeImports → [testing](domains/testing.md)
+
+### 收编时间线（2026-10-23，inbox 积压 Integration）
+
+- [2026-10-23] 画廊主视频朝向自适应 + 朝向信号实证法 + isDynamic gate 潜伏回归 | tags: gallery, wallpaper-video, orientation | → [gallery](domains/gallery.md)
+- [2026-09-28] 壁纸视频单腿原生比例改版 v4（固定画布取景崩坏/computeNativeCanvas SSOT/失败语义分类） | tags: wallpaper-video, native-canvas | → [video](domains/video.md)
+- [2026-09-28] autopilot 谓词 artifact 绝对路径 + §5.7 gate 清空自愈 + 红蓝冲突 SSOT 裁决 | tags: autopilot, stop-hook, artifact, gate | → [testing](domains/testing.md)
