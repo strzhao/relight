@@ -1,5 +1,5 @@
 /**
- * 候选池构造：4 源平等混采（可选第 5 源 recent）+ 年代完全平权 + 30 天去重
+ * 候选池构造：4 源平等混采（可选第 5 源 recent）+ 年代完全平权 + 全量历史去重（30 天窗口兜底）
  *
  * 架构：
  * - 独立子查询（historyToday / sameMonth / sameSeason / randomSample [+ recent]），
@@ -107,7 +107,7 @@ export function computeEventKey(filePath: string, takenAt: string | null): strin
 }
 
 /**
- * 获取最近 daysBack 天精选照片的事件键集合 + photoId 去重集合。
+ * 获取精选照片的事件键集合 + photoId 去重集合（窗口扫描或全量历史）。
  *
  * 同时扫描两个表：
  * 1. daily_picks（旧格式：hero photoId + members JSON 列）
@@ -116,34 +116,38 @@ export function computeEventKey(filePath: string, takenAt: string | null): strin
  * 每条结果 JOIN photos 表获取 file_path、taken_at，然后计算事件键。
  * taken_at 为 NULL 的行不生成事件键。
  *
+ * @param daysBack 去重窗口天数（对称窗口 [D-daysBack, D+daysBack]）；
+ *                 传 "all" 扫全量历史——一张照片终生只入选一次。
+ *                 两种模式都排除目标日自身（重跑/回填当天时，当天已有精选
+ *                 不应把原照片自排除，否则重跑会强制换图）。
  * @returns { eventKeys: Set<string>, excludeIds: Set<string> }
  */
 export async function getRecentPickedEventKeys(
-  daysBack = 30,
+  daysBack: number | "all" = 30,
   now: Date = new Date(),
 ): Promise<{ eventKeys: Set<string>; excludeIds: Set<string> }> {
   // 窗口边界与目标日均按北京日期计算，与 dailyPicks.pickDate（formatPickDate 用北京时区）
   // 保持一致。若改用 UTC 日期（now.toISOString()），在北京凌晨时段（= UTC 前一日）会与
   // pickDate 跨天错位，导致 ne(pickDate, nowDate) 误把"昨天的精选"排除出去重池。
   const toBeijingDate = (ms: number) => new Date(ms + 8 * 3600_000).toISOString().slice(0, 10);
-  const cutoffBefore = toBeijingDate(now.getTime() - daysBack * 86400_000);
-  const cutoffAfter = toBeijingDate(now.getTime() + daysBack * 86400_000);
   const nowDate = toBeijingDate(now.getTime());
+  const pickDateFilter =
+    daysBack === "all"
+      ? ne(schema.dailyPicks.pickDate, nowDate)
+      : and(
+          gte(schema.dailyPicks.pickDate, toBeijingDate(now.getTime() - daysBack * 86400_000)),
+          lte(schema.dailyPicks.pickDate, toBeijingDate(now.getTime() + daysBack * 86400_000)),
+          ne(schema.dailyPicks.pickDate, nowDate),
+        );
 
-  // 扫描 daily_picks（旧格式）— 对称窗口 [cutoffBefore, cutoffAfter]，排除目标日自身
+  // 扫描 daily_picks（旧格式）— 窗口扫描或全量历史，排除目标日自身
   const pickRows = await db
     .select({
       photoId: schema.dailyPicks.photoId,
       members: schema.dailyPicks.members,
     })
     .from(schema.dailyPicks)
-    .where(
-      and(
-        gte(schema.dailyPicks.pickDate, cutoffBefore),
-        lte(schema.dailyPicks.pickDate, cutoffAfter),
-        ne(schema.dailyPicks.pickDate, nowDate),
-      ),
-    );
+    .where(pickDateFilter);
 
   const excludeIds = new Set<string>();
   for (const r of pickRows) {
@@ -165,13 +169,7 @@ export async function getRecentPickedEventKeys(
       schema.dailyPicks,
       sql`${schema.dailyPicks.id} = ${schema.dailyPickEntries.dailyPickId}`,
     )
-    .where(
-      and(
-        gte(schema.dailyPicks.pickDate, cutoffBefore),
-        lte(schema.dailyPicks.pickDate, cutoffAfter),
-        ne(schema.dailyPicks.pickDate, nowDate),
-      ),
-    );
+    .where(pickDateFilter);
 
   for (const r of entryRows) {
     excludeIds.add(r.photoId);
@@ -298,6 +296,18 @@ export async function buildCandidatePool(
   // 与 routes/photos.ts:39 的列表过滤保持一致。
   const burstRepOnly = sql`(${schema.photos.burstId} IS NULL OR ${schema.photos.isBurstRepresentative} = 1)`;
 
+  // 去重排除集下推到各源 SQL（NOT IN）。必须下推而非仅靠 toEnriched 的 JS 过滤——
+  // 各源是「ORDER BY aes DESC LIMIT K」窗口查询，若 top-K 窗口被已入选照片整段
+  // 饱和（全量历史去重下排除集持续增长，高分层几乎全部在列），JS 侧过滤后每源
+  // 只剩零星候选，池子塌缩。下推后 LIMIT 作用于「未入选」候选，池深不受影响。
+  const excludeSql =
+    excludeIds.size > 0
+      ? sql`${schema.photos.id} NOT IN (${sql.join(
+          [...excludeIds].map((id) => sql`${id}`),
+          sql`, `,
+        )})`
+      : null;
+
   // ---- 4 个独立子查询 ----
 
   // 源1: 历史上的今天（月日匹配，不限年份——今年今日的照片也可入选）
@@ -329,6 +339,7 @@ export async function buildCandidatePool(
         sql`strftime('%m-%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) = ${monthDay}`,
         gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
+        ...(excludeSql ? [excludeSql] : []),
       ),
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -364,6 +375,7 @@ export async function buildCandidatePool(
         sql`strftime('%d', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) != ${day}`,
         gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
         burstRepOnly,
+        ...(excludeSql ? [excludeSql] : []),
       ),
     )
     .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -403,6 +415,7 @@ export async function buildCandidatePool(
           sql`strftime('%m', COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt})) IN (${sql.raw(monthsInClause)})`,
           gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
           burstRepOnly,
+          ...(excludeSql ? [excludeSql] : []),
         ),
       )
       .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -434,7 +447,11 @@ export async function buildCandidatePool(
       sql`${schema.storageSources.id} = ${schema.photos.storageSourceId}`,
     )
     .where(
-      and(gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary), burstRepOnly),
+      and(
+        gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
+        burstRepOnly,
+        ...(excludeSql ? [excludeSql] : []),
+      ),
     )
     .orderBy(
       desc(sql`(COALESCE(${schema.photoAnalyses.aestheticScore}, 5.0) + ABS(RANDOM() % 3)) / 1.0`),
@@ -483,6 +500,7 @@ export async function buildCandidatePool(
             sql`substr(COALESCE(${schema.photos.takenAt}, ${schema.photos.createdAt}), 1, 10) >= ${recentCutoff}`,
             gte(schema.photoAnalyses.aestheticScore, config.minAestheticScorePrimary),
             burstRepOnly,
+            ...(excludeSql ? [excludeSql] : []),
           ),
         )
         .orderBy(desc(schema.photoAnalyses.aestheticScore))
@@ -722,6 +740,61 @@ export async function buildCandidatePool(
   // ---- 在最终池形成后注入 peopleNicknames（仅图片候选）----
   await enrichWithPeopleNicknames(finalPool);
   return finalPool;
+}
+
+/** 去重模式：all = 全量历史（一张照片终生只入选一次）；window-30 = 30 天滑动窗口兜底 */
+export type DedupMode = "all" | "window-30";
+
+/**
+ * 全量历史去重构造候选池，空池时回退 30 天窗口兜底。
+ *
+ * 背景（2026-11-02）：原实现固定 30 天滑动窗口去重，照片 30 天后重新 eligible，
+ * 高分层照片（8.5+ 全库仅 ~76 张）每月循环霸榜——单张最多重复入选 7 次，
+ * 近 30 天 63% 的 entries 是历史重复照片。改为全量历史去重后照片终生不再重复；
+ * 仅当全量去重把池子耗尽（候选为空，多年后才会发生）才回退 30 天窗口保底出片。
+ *
+ * 生产入口：daily-selection worker；诊断入口：dry-run-real-pool CLI。
+ * 两者共用本函数，保证 dry run 与生产行为一致。
+ */
+export async function buildCandidatePoolWithDedup(options: {
+  now: Date;
+  maxN?: number;
+  includeRecentSource?: boolean;
+  log?: (msg: string) => void;
+}): Promise<{
+  pool: ClusteredCandidate[];
+  mode: DedupMode;
+  eventKeys: Set<string>;
+  excludeIds: Set<string>;
+}> {
+  const { now, maxN = MAX_N, includeRecentSource, log = () => {} } = options;
+
+  const buildWith = async (exclusions: {
+    eventKeys: Set<string>;
+    excludeIds: Set<string>;
+  }): Promise<ClusteredCandidate[]> =>
+    buildCandidatePool({
+      now,
+      excludeIds: exclusions.excludeIds,
+      eventKeys: exclusions.eventKeys,
+      maxN,
+      includeRecentSource,
+    });
+
+  // 首选：全量历史去重
+  const allTime = await getRecentPickedEventKeys("all", now);
+  log(`全量历史去重池: ${allTime.excludeIds.size} 个 photoId, ${allTime.eventKeys.size} 个事件键`);
+  const pool = await buildWith(allTime);
+
+  // 兜底：全量去重耗尽池子（排除集非空才有意义——空库时窗口模式结果相同，不重复查）
+  if (pool.length === 0 && allTime.excludeIds.size > 0) {
+    log("全量历史去重后候选池为空，回退 30 天滑动窗口兜底（允许近期重复以保底出片）");
+    const recent = await getRecentPickedEventKeys(30, now);
+    const fallbackPool = await buildWith(recent);
+    return { pool: fallbackPool, mode: "window-30", ...recent };
+  }
+
+  return { pool, mode: "all", ...allTime };
 }
 
 /**

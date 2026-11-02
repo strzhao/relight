@@ -13,7 +13,7 @@ import { config } from "../lib/config";
 import { beijingDateOf } from "../lib/datetime";
 import { generateHeroMotionPrompt, prepareHeroJpeg } from "../lib/motion/generate";
 import { createStorageAdapter } from "../storage";
-import { buildCandidatePool, getRecentPickedEventKeys } from "./daily-selection/candidate-pool";
+import { buildCandidatePoolWithDedup } from "./daily-selection/candidate-pool";
 import type { ClusteredCandidate } from "./daily-selection/cluster";
 import { buildRelatedPool } from "./daily-selection/related-pool";
 import { probeAllSources } from "./storage-health";
@@ -219,7 +219,7 @@ interface EntryResult {
  * @param candidate - 候选照片（含 AI 分析元数据）
  * @param rank - 候选序号（0-19）
  * @param otherHeroIds - 已选作其它 entry hero 的 photoId 集合（跨 entry members 互斥）
- * @param recentIds - 30 天去重 Set（用于构建关联池排除集）
+ * @param recentIds - 去重排除集（全量历史或 30 天窗口，用于构建关联池排除集）
  * @param log - 日志函数
  */
 async function processSingleEntry(
@@ -525,16 +525,13 @@ export async function dailySelectionWorker(job: Job): Promise<void> {
   job.log(`并发度: ${concurrency}`);
 
   // ---- 阶段 0: 构造候选池 ----
-  const { eventKeys, excludeIds: recentIds } = await getRecentPickedEventKeys(30, pickNow);
-  job.log(`最近 30 天去重池: ${recentIds.size} 个 photoId, ${eventKeys.size} 个事件键`);
-
-  const poolCandidates = await buildCandidatePool({
-    now: pickNow,
+  // 全量历史去重（一张照片终生只入选一次），空池时回退 30 天窗口兜底
+  const {
+    pool: poolCandidates,
+    mode: dedupMode,
     excludeIds: recentIds,
-    eventKeys,
-    maxN: 12,
-  });
-
+  } = await buildCandidatePoolWithDedup({ now: pickNow, maxN: 12, log: (m) => job.log(m) });
+  job.log(`去重模式: ${dedupMode}`);
   job.log(`4 源候选池共 ${poolCandidates.length} 张候选`);
 
   if (poolCandidates.length === 0) {

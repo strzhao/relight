@@ -350,6 +350,97 @@ describe("buildCandidatePool 集成测试", () => {
     expect(excludeIds.has("old1")).toBe(false);
   });
 
+  it('getRecentPickedEventKeys："all" 模式全量历史去重，35 天前的精选也在排除集内', async () => {
+    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+    addSource(testSqlite);
+    addPhoto(testSqlite, "old2", yearsAgoISO(5), 8.0);
+    addPhoto(testSqlite, "member2", yearsAgoISO(5), 7.0);
+
+    const oldDate = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
+    addDailyPick(testSqlite, "old2", oldDate, [{ photoId: "member2", caption: "测试" }]);
+
+    const { excludeIds } = await getRecentPickedEventKeys("all");
+    expect(excludeIds.has("old2")).toBe(true);
+    expect(excludeIds.has("member2")).toBe(true);
+  });
+
+  it('getRecentPickedEventKeys："all" 模式仍排除目标日自身（重跑当天不自排除）', async () => {
+    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+    addSource(testSqlite);
+    addPhoto(testSqlite, "today1", yearsAgoISO(1), 8.0);
+
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    addDailyPick(testSqlite, "today1", today);
+
+    const { excludeIds } = await getRecentPickedEventKeys("all");
+    expect(excludeIds.has("today1")).toBe(false);
+  });
+
+  describe("buildCandidatePoolWithDedup：全量历史去重 + 空池兜底", () => {
+    it("首选全量去重：35 天前已入选的照片被排除，mode=all", async () => {
+      const { buildCandidatePoolWithDedup } = await import("../candidate-pool");
+      addSource(testSqlite);
+      // picked35dAgo：35 天前已入选（30 天窗口外、全量历史内）
+      addPhoto(testSqlite, "picked35dAgo", yearsAgoISO(1), 8.0);
+      // fresh：从未入选
+      addPhoto(testSqlite, "fresh", yearsAgoISO(2), 8.5);
+
+      const oldDate = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
+      addDailyPick(testSqlite, "picked35dAgo", oldDate);
+
+      const { pool, mode } = await buildCandidatePoolWithDedup({ now: new Date() });
+      expect(mode).toBe("all");
+      const ids = pool.map((r) => r.photoId);
+      expect(ids).toContain("fresh");
+      expect(ids).not.toContain("picked35dAgo");
+    });
+
+    it("全量去重耗尽池子时回退 30 天窗口：mode=window-30，照片重新可用", async () => {
+      const { buildCandidatePoolWithDedup } = await import("../candidate-pool");
+      addSource(testSqlite);
+      // 库里唯一可入池的照片，35 天前已入选：全量去重后池空 → 回退
+      addPhoto(testSqlite, "only1", yearsAgoISO(1), 8.0);
+
+      const oldDate = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
+      addDailyPick(testSqlite, "only1", oldDate);
+
+      const { pool, mode } = await buildCandidatePoolWithDedup({ now: new Date() });
+      expect(mode).toBe("window-30");
+      expect(pool.map((r) => r.photoId)).toContain("only1");
+    });
+
+    it("排除集下推 SQL：top-K 窗口被已入选照片饱和时，主源仍能取到未入选候选", async () => {
+      const { buildCandidatePoolWithDedup } = await import("../candidate-pool");
+      addSource(testSqlite);
+      // 30 张 9.x 高分全部已在 35~65 天前入选（pickDate 有 UNIQUE 约束，逐日错开；
+      // 全部超出 30 天窗口 → 30 天窗口模式取不到、全量历史模式必须排除）
+      for (let i = 0; i < 30; i++) {
+        const id = `consumed${i}`;
+        addPhoto(testSqlite, id, yearsAgoISO((i % 10) + 1), 9.0 - i * 0.01);
+        const pickDate = new Date(Date.now() - (35 + i) * 86400_000).toISOString().slice(0, 10);
+        addDailyPick(testSqlite, id, pickDate);
+      }
+      // 20 张 7.8 分从未入选（aes 排位全部在 30 张 consumed 之后）
+      for (let i = 0; i < 20; i++) {
+        addPhoto(testSqlite, `eligible${i}`, yearsAgoISO((i % 10) + 1), 7.8);
+      }
+
+      const { pool, mode } = await buildCandidatePoolWithDedup({ now: new Date() });
+      expect(mode).toBe("all");
+      const ids = pool.map((r) => r.photoId);
+      // 未入选候选经主源（historyToday，非 fillUp 回填）进入池子 = NOT IN 下推生效
+      expect(
+        pool.some(
+          (c) =>
+            c.source === "historyToday" &&
+            ids.includes(c.photoId) &&
+            c.photoId.startsWith("eligible"),
+        ),
+      ).toBe(true);
+      expect(ids.some((id) => id.startsWith("consumed"))).toBe(false);
+    });
+  });
+
   describe("连拍去重契约：同组连拍只让代表进入候选池", () => {
     it("historyToday: 1 代表 + 2 非代表 → 候选只含代表", async () => {
       const { buildCandidatePool } = await import("../candidate-pool");

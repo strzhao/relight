@@ -1,21 +1,18 @@
 /**
- * Dry run（真实代码路径）：直接调用线上 buildCandidatePool + getRecentPickedEventKeys，
- * 对「近期拍摄第 5 源」开关做 A/B 对比。只读不写库、不调 AI。
+ * Dry run（真实代码路径）：直接调用线上 buildCandidatePoolWithDedup（生产同款
+ * 全量历史去重 + 30 天窗口兜底），对「近期拍摄第 5 源」开关做 A/B 对比。
+ * 只读不写库、不调 AI。
  *
  * 与复刻版 dry-run-candidate-pool.ts 的区别：本脚本跑的是生产实现本身，
  * 验证真实 SQL / quota / 聚类 / fillUp 链路下开关的效果。
  *
- * 注意：getRecentPickedEventKeys(30, pickNow) 的窗口是对称的 [D-30, D+30]，
- * 对历史日期模拟时会额外排除"当时尚不存在"的未来真实精选。该偏差对开关
- * 两个方向等价施加，不影响 A/B 结论。
+ * 注意：全量历史去重对历史日期模拟时会额外排除"当时尚不存在"的其余真实
+ * 精选。该偏差对开关两个方向等价施加，不影响 A/B 结论。
  *
  * 用法：pnpm tsx src/cli/dry-run-real-pool.ts [startDate] [endDate] [rounds] [includeRecent 0|1] [showDetail 0|1]
  */
 import "dotenv/config";
-import {
-  buildCandidatePool,
-  getRecentPickedEventKeys,
-} from "../jobs/daily-selection/candidate-pool";
+import { buildCandidatePoolWithDedup } from "../jobs/daily-selection/candidate-pool";
 import { type ClusteredCandidate, parseTakenAtMs } from "../jobs/daily-selection/cluster";
 
 const DAY_MS = 86_400_000;
@@ -88,23 +85,19 @@ async function main() {
 
   for (let round = 0; round < rounds; round++) {
     for (const pickDate of dates) {
-      // 排除集每日期只算一次（确定性的表读），轮间复用
-      const { eventKeys, excludeIds } = (cacheExclusions.get(pickDate) ??
-        (await getRecentPickedEventKeys(30, pickNowFor(pickDate)))) as {
-        eventKeys: Set<string>;
-        excludeIds: Set<string>;
-      };
-      cacheExclusions.set(pickDate, { eventKeys, excludeIds });
+      // 去重模式判定（全量优先 + 空池兜底）每日期只算一次（确定性的表读），轮间复用
+      const cached = cacheDedup.get(pickDate);
+      const dedup =
+        cached ??
+        (await buildCandidatePoolWithDedup({
+          now: pickNowFor(pickDate),
+          maxN: 12,
+          includeRecentSource: includeRecent,
+        }));
+      cacheDedup.set(pickDate, dedup);
 
-      const pool = await buildCandidatePool({
-        now: pickNowFor(pickDate),
-        excludeIds,
-        eventKeys,
-        maxN: 12,
-        includeRecentSource: includeRecent,
-      });
-      stats.push(statPool(pool, pickDate));
-      if (round === 0) detail.push({ pickDate, pool });
+      stats.push(statPool(dedup.pool, pickDate));
+      if (round === 0) detail.push({ pickDate, pool: dedup.pool });
     }
     process.stderr.write(`round ${round + 1}/${rounds} done\n`);
   }
@@ -152,7 +145,7 @@ async function main() {
   }
 }
 
-const cacheExclusions = new Map<string, Awaited<ReturnType<typeof getRecentPickedEventKeys>>>();
+const cacheDedup = new Map<string, Awaited<ReturnType<typeof buildCandidatePoolWithDedup>>>();
 
 main()
   .then(() => process.exit(0))
