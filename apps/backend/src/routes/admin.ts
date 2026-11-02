@@ -364,6 +364,11 @@ export const adminRouter = new Hono()
         : "healthy";
 
     // 6. System 信息（Node.js 内置 API）
+    // 内存三项必须同一次采样：os.freemem() 多次独立调用在负载下口径不一致
+    // （macOS 页缓存回收使 freemem 毫秒级波动），used != total - free、
+    // free + used > total 的不自洽会被 /admin/health 契约测试抓住。
+    const memTotal = os.totalmem();
+    const memFree = os.freemem();
     const memUsage = process.memoryUsage();
     const system = {
       cpu: {
@@ -372,10 +377,10 @@ export const adminRouter = new Hono()
         loadAvg: os.loadavg(),
       },
       memory: {
-        total: os.totalmem(),
-        free: os.freemem(),
-        used: os.totalmem() - os.freemem(),
-        usagePercent: Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 10000) / 100,
+        total: memTotal,
+        free: memFree,
+        used: memTotal - memFree,
+        usagePercent: Math.round(((memTotal - memFree) / memTotal) * 10000) / 100,
       },
       process: {
         pid: process.pid,
