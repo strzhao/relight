@@ -557,7 +557,12 @@ function spawnFfmpeg(args: string[], timeoutMs: number): Promise<void> {
  * crop 已保证入 scale 前比例恰 16:9，故 scale 无非等比形变（**绝不拉伸**）。
  * 调用方须先以 isAerialCompatCanvas 把关（画布比例 ∈ [1.5,1.9]，最坏裁切占比 ≤0.15）。
  *
- * hevc_videotoolbox 失败（非本机硬件编码器/旧系统）→ fallback libx265 -crf 22。
+ * hevc_videotoolbox 失败（非本机硬件编码器/旧系统）→ fallback libx265 -crf 22：
+ * - `numa-pools=none` 禁用 NUMA 亲和/thread pool——受限环境（CI VM/容器）下 x265 的
+ *   NUMA 检测（set_mempolicy EPERM）会**偶发** encoder init 失败（exit 161
+ *   「Could not open encoder before EOF」，同进程先后调用可一成一败）；单线程编码
+ *   慢但确定性稳，该腿仅在 videotoolbox 不可用时才走，慢一点可接受。
+ * - 仍偶发失败（失败是百 ms 级快败）→ 重试一次再放弃。
  * 超时 600s。
  */
 export async function transcodeForAerialNative(src: string, dst: string): Promise<void> {
@@ -580,10 +585,25 @@ export async function transcodeForAerialNative(src: string, dst: string): Promis
       AERIAL_TRANSCODE_TIMEOUT_MS,
     );
   } catch {
-    await spawnFfmpeg(
-      [...common, "-c:v", "libx265", "-crf", "22", "-tag:v", "hvc1", dst],
-      AERIAL_TRANSCODE_TIMEOUT_MS,
-    );
+    const libx265Args = [
+      ...common,
+      "-c:v",
+      "libx265",
+      "-crf",
+      "22",
+      "-x265-params",
+      "numa-pools=none",
+      "-tag:v",
+      "hvc1",
+      dst,
+    ];
+    try {
+      await spawnFfmpeg(libx265Args, AERIAL_TRANSCODE_TIMEOUT_MS);
+    } catch (firstErr) {
+      const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      console.warn(`[wallpaper-video] libx265 兜底转码首次失败（${msg.slice(0, 200)}），重试一次`);
+      await spawnFfmpeg(libx265Args, AERIAL_TRANSCODE_TIMEOUT_MS);
+    }
   }
 }
 
