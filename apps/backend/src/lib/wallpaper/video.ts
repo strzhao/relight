@@ -543,7 +543,9 @@ function spawnFfmpeg(args: string[], timeoutMs: number): Promise<void> {
     proc.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg 退出码 ${code}（stderr=${stderr.slice(-500)}）`));
+      // 尾部 1500 字符：ffmpeg 7.x 的「Could not open encoder」真因行（如 x265
+      // alpha 不支持）在上方几行，500 字符会被 Conversion failed! / 进度行挤掉
+      else reject(new Error(`ffmpeg 退出码 ${code}（stderr=${stderr.slice(-1500)}）`));
     });
   });
 }
@@ -555,6 +557,9 @@ function spawnFfmpeg(args: string[], timeoutMs: number): Promise<void> {
  * 滤镜链 = **crop 前置 + scale 后置**：先把源居中裁到恰 16:9（`crop=min(iw,ih*16/9):min(ih,iw*9/16)`
  * 横竖超宽窄高统一处理），再 `scale=1920:1080:flags=lanczos,setsar=1` 等比放大——
  * crop 已保证入 scale 前比例恰 16:9，故 scale 无非等比形变（**绝不拉伸**）。
+ * 尾部 `format=yuv420p` 剥 alpha（20261102 CI 实证：RGBA 输入直通 libx265 会因
+ * 「libx265 does not support alpha layer encoding」encoder open 必败；生产链路喂
+ * 渲染后 mp4 不踩此坑，但护栏使函数对任意图片源安全）。
  * 调用方须先以 isAerialCompatCanvas 把关（画布比例 ∈ [1.5,1.9]，最坏裁切占比 ≤0.15）。
  *
  * hevc_videotoolbox 失败（非本机硬件编码器/旧系统）→ fallback libx265 -crf 22：
@@ -571,7 +576,7 @@ export async function transcodeForAerialNative(src: string, dst: string): Promis
     "-i",
     src,
     "-vf",
-    "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)',scale=1920:1080:flags=lanczos,setsar=1",
+    "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)',scale=1920:1080:flags=lanczos,setsar=1,format=yuv420p",
     "-c:a",
     "aac",
     "-b:a",

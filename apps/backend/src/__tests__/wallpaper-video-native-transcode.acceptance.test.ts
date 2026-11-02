@@ -260,6 +260,8 @@ beforeAll(async () => {
   makeSrcWithStereoAudio(canvasMaster, "1312x864");
 
   // 形变检测源：1312×864 蓝底 + 中心 300×300 红方块
+  // （composite 输出保留 alpha 通道是故意的——RGBA 直通 libx265 会 encoder open
+  // 必败，本用例因此兼测 aerial 滤镜链尾部 format=yuv420p 剥 alpha 护栏）
   markerSrc = path.join(tmpRoot, "marker-1312x864.png");
   {
     const sharp = (await import("sharp")).default;
