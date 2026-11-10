@@ -1230,27 +1230,46 @@
     return unit;
   }
 
-  /** 壁纸视频变体 URL 朝向自适应选择（20261023；取代 20260928 单腿 native 恒优先）：
-   *  hero 显示维度横版（w>h）→ native(16:9 杂志卡) > portrait > landscape（现状）；
-   *  竖版/方图（h≥w）→ portrait(竖版卡) > native > landscape（native 兜底兼容 0928~1008
-   *  原生比例时代——该时代 native 本就朝向正确）；维度缺失（photos[0] 缺失或 0，防御）
-   *  → native > portrait > landscape（现状兜底）。三字段皆空 → 静态卡（回退不变式） */
+  /** 壁纸视频变体 URL 朝向自适应选择（20261023 三分支；20261110 方图分支翻转）：
+   *  hero 显示维度方图（宽高比 [0.9,1.1] 双闭区间，容忍 photos 表未做 EXIF orientation
+   *  5-8 宽高互换与压缩维度抖动）→ native(16:9 杂志卡) > portrait > landscape——0 裁切
+   *  纸底 letterbox，与静态壁纸/mac Aerial 动静统一（旧竖版卡 cover 裁掉方图源约 54% 宽度）；
+   *  横版（r>1.1）→ native > portrait > landscape（现状不变）；
+   *  竖版（r<0.9）→ portrait(竖版卡) > native > landscape（现状不变；native 兜底兼容
+   *  0928~1008 原生比例时代——该时代 native 本就朝向正确）；
+   *  维度缺失（photos[0] 缺失或 0，防御）→ native > portrait > landscape（现状兜底）。
+   *  三字段皆空 → 静态卡（回退不变式） */
   function wallpaperVideoUrl(day) {
     const hero = day.photos?.[0];
     const w = hero ? hero.width : 0;
     const h = hero ? hero.height : 0;
-    // 朝向自适应（20261023）：hero 显示维度横版 → 维持 16:9 杂志卡优先（现状）；
-    // 竖版/方图 → 竖版卡优先；维度缺失 → 维持现状优先级。
-    if (w > 0 && h > 0 && w > h) {
-      return (
-        day.wallpaperVideoNative || day.wallpaperVideoPortrait || day.wallpaperVideoLandscape || ""
-      );
-    }
     if (w > 0 && h > 0) {
+      const r = w / h;
+      if (r >= 0.9 && r <= 1.1) {
+        // 方图（20261110 起翻转）：16:9 杂志卡优先——0 裁切纸底 letterbox，
+        // 与静态壁纸/mac Aerial 动静统一；竖版卡降为兜底（「更多」菜单仍可手动保存）
+        return (
+          day.wallpaperVideoNative ||
+          day.wallpaperVideoPortrait ||
+          day.wallpaperVideoLandscape ||
+          ""
+        );
+      }
+      if (r > 1.1) {
+        // 横版（20261023 现状不变）：native(16:9 卡) 优先
+        return (
+          day.wallpaperVideoNative ||
+          day.wallpaperVideoPortrait ||
+          day.wallpaperVideoLandscape ||
+          ""
+        );
+      }
+      // 竖版（20261023 现状不变）：portrait 优先
       return (
         day.wallpaperVideoPortrait || day.wallpaperVideoNative || day.wallpaperVideoLandscape || ""
       );
     }
+    // 维度缺失兜底（现状不变）
     return (
       day.wallpaperVideoNative || day.wallpaperVideoPortrait || day.wallpaperVideoLandscape || ""
     );
@@ -1339,10 +1358,11 @@
       railChildren.push(portraitDl.btn);
     }
     // 竖版动态壁纸视频非空才收进菜单（20261009 排版解耦：portrait 卡 = 手机全屏动态壁纸；
-    // 20261023 朝向自适应后：横版 hero 日与主钮「保存视频」（16:9 卡）互补，竖版/方图日
-    // 主钮已指向竖版卡、菜单项保留同资源入口——菜单结构不在本次范围。缺直链不渲染死链控件；
-    // 降级日（forceStatic）壁纸视频资源类已整体 404 → mp4 菜单项按静态矩阵收敛为仅电脑版，
-    // isDynamic gate 防死链控件（场景14.P3 契约，20261023 auto-fix 修复 20261009 起的潜伏回归）
+    // 20261023 朝向自适应后菜单项与主钮互补；20261110 方图翻转后方图/横版日主钮指 16:9 卡、
+    // 竖版日主钮指竖版卡——菜单项恒读 portrait 字段，是方图/横版日竖版卡唯一手动入口。
+    // 缺直链不渲染死链控件；降级日（forceStatic）壁纸视频资源类已整体 404 → mp4 菜单项
+    // 按静态矩阵收敛为仅电脑版，isDynamic gate 防死链控件（场景14.P3 契约，
+    // 20261023 auto-fix 修复 20261009 起的潜伏回归）
     if (isDynamic && day.wallpaperVideoPortrait) {
       const portraitVideoDl = createDownloadButton({
         role: "wallpaper-download-video-portrait",

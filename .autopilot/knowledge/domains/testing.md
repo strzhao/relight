@@ -6,6 +6,20 @@
 
 ## 模式与教训
 
+### [2026-11-10] CSS 恒满盒下布局盒断言量不到内容适配 + 等待谓词空放竞态 — 代理断言观测面选择
+
+<!-- tags: e2e, playwright, assertion, observability, object-fit, data-fill, wait-predicate, race, gallery, autopilot, testing -->
+
+**Pattern**: 对 object-fit/cover 类「内容适配」写自动化代理断言时，两种观测面错误都会让测试失去判定力：① 断言**布局盒**宽高——CSS 契约媒体恒满盒（`.wallpaper-video` width/height:100% + 单元 100dvh）下盒尺寸恒定，contain/cover 只改盒内绘制不改盒，盒断言要么恒红要么恒绿（本案红队 1.P3「盒 w>h」任何实现必红，其旧版反向断言在同盒恒绿，双向自证量不到目标）；② 等待谓词 `!v || ok` 把「元素未挂载」当通过——卡片渲染 selector 先于 video 挂载，动态日在全量并行负载下偶发空放（单跑绿/全量红，1.P1 与 M4 各一次，同源竞态）。
+
+**Fix / Lesson**:
+1. 内容适配断言量**机读态 + 内容维度**：本案 smart-fill 机读态 `data-fill`（cover|contain，挂流单元 dataset）+ `videoWidth>videoHeight`。「断言机制错」铁律例外的证据链三件套 = CSS 契约源码 + 失败消息实际值 + 截图亲验视觉意图达成，闭合后 AI 自决修测试+重锁+留痕。
+2. 等待谓词按**动态/静态日门**分流：`data-has-video=="1"`（动态日）严格等 `!!v && readyState>=2 && !paused`；仅静态日允许 `!v` 即刻通过。共同上游修 helper 而非逐用例打补丁（1.P1/M4/未来新用例一次治愈）。
+3. 多套件共享 artifact 目录会**同 id 互相覆写**（s1p1.out 被两套件轮写，QA 三元组佐证链受损，只能以逐用例判定为权威兜底）——artifact 命名加套件前缀。
+4. 区别于 [[2026-07-02]]：那条是测试意图与设计决策冲突需升级用户；本条是断言**观测面机制错误**（量不到目标），证据链闭合即自决。
+
+---
+
 ### [2026-07-03] 组件 DOM 迁位致「区域切片」acceptance 测试失效 — 位置无关边界 + 契约演进反转断言
 
 <!-- tags: dom-order, region-slice, acceptance-test, contract-evolution, indexof, migration, red-team, frontend, wallpaper, autopilot, testing -->

@@ -23,7 +23,10 @@
 
 ### 决策 (decisions.md)
 
+- [2026-11-10] 方图日壁纸视频翻转为 16:9 卡优先（[0.9,1.1] 带，推翻 1023 方图→竖版卡；裁人 > 满屏沉浸）→ [gallery](domains/gallery.md)
+- [2026-11-10] e2e 观测面两坑（恒满盒布局盒断言量不到内容适配 / 等待谓词 `!v` 空放竞态）→ [testing](domains/testing.md)
 - [2026-09-25] 竖版画布 736×1600 对齐手机屏 + lmedia --width/--height 透传 + 验证分层法（文本级/1s 探针/自然日免费）→ [video](domains/video.md)
+- [2026-10-23] 画廊主视频朝向自适应三分支（20261110 方图分支已翻转，条目内留痕）→ [gallery](domains/gallery.md)
 - [2026-09-25] 凭据沙箱下发布面谓词须沙箱外驱动 + 谓词 artifact 规范路径 <pred-id>.out → [testing](domains/testing.md)
 - [2026-09-25] motionPrompt 拆分两步链路（qwen facts→deepseek-chat）+ deepseek-flash 是推理档 content 空 → [ai-prompt](domains/ai-prompt.md)
 - [2026-09-14] 画廊动作栏/弹层菜单三坑（capture 外点关、aria-label 遮蔽可达名、降级重建 forceStatic）→ [gallery](domains/gallery.md)
