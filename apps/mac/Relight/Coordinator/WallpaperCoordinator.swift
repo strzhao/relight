@@ -41,8 +41,8 @@ actor WallpaperCoordinator {
         return
       }
 
-      // 分支 0（动态视频壁纸）：wallpaperVideoUrl 有值 → 下载 → Aerial 注入。
-      // 任何失败（无 assetID / 写失败 / 下载失败）→ 记录 aerial-fallback 标记 + fall through
+      // 分支 0（动态视频壁纸）：wallpaperVideoUrl 有值 → 下载 → Aerial 注册 + 桌面层播放。
+      // 任何失败（写失败 / 下载失败）→ 记录 aerial-fallback 标记 + fall through
       // 现有静态链路（行为与现状逐字一致，不崩溃、不阻塞）。
       if let videoURLString = pick.wallpaperVideoUrl, !videoURLString.isEmpty,
          let aerialEngine {
@@ -51,6 +51,9 @@ actor WallpaperCoordinator {
             pickDate: pick.pickDate, downloadURL: videoURLString
           )
           _ = try await aerialEngine.apply(photo: photo, sourceURL: cachedURL, on: NSScreen.screens)
+          // 桌面动效实际由自有桌面层窗口播放器承担（Tahoe 原生 aerial 管线不加载
+          // 用户注册资产，AerialVideoEngine 注册只服务锁屏/屏保管道）
+          await MainActor.run { DesktopVideoWindowEngine.shared.play(url: cachedURL) }
           await MainActor.run { [pick] in settings.lastAppliedPickDate = pick.pickDate }
           logger.info("壁纸已更新（Aerial 注入）: \(pick.pickDate) → \(cachedURL.path)")
           await sendNotification(title: "壁纸已更新", body: "今日精选视频 — \(pick.pickDate)")
@@ -145,6 +148,9 @@ actor WallpaperCoordinator {
       await refreshNow()
     } else {
       logger.info("bootstrap: today \(today) already applied, skip")
+      // 桌面播放器恢复：refreshNow 不会跑，直接用当日缓存拉起（幂等，文件缺失时引擎自跳过）
+      let cachedURL = await MainActor.run { WallpaperCache.shared.aerialVideoURL(pickDate: today) }
+      await MainActor.run { DesktopVideoWindowEngine.shared.ensurePlaying(url: cachedURL) }
     }
   }
 
@@ -179,6 +185,8 @@ actor WallpaperCoordinator {
       if repaired {
         logger.info("scheduler tick: aerial slot repaired")
       }
+      // 桌面播放器自愈（App 重启后 lastApplied==today 走不到 refreshNow，靠这里拉起）
+      await MainActor.run { DesktopVideoWindowEngine.shared.ensurePlaying(url: cachedURL) }
     } catch {
       logger.warning("aerial-fallback repair: \(String(describing: error))")
     }

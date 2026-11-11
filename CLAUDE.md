@@ -99,7 +99,7 @@ worktree 里 `pnpm dev` 直接启动 backend + web；workers 用 `pnpm --filter 
 ```
 apps/backend/    # Hono API 服务 (默认 :3000)
 apps/web/        # Next.js 前端 (默认 :3001)
-apps/mac/        # SwiftUI macOS 壁纸 APP（独立 Xcode 工程，xcodebuild 构建；**Aerial 动态壁纸走「自有 assetID 注册」姿势**——劫持 Apple asset slot 会被 CDN 校验 30s 还原（2026-11-11 实测），正解 = slot .mov + thumbnail + catalog entries.json（url-* 全 file://）+ Index.plist 全 Provider 四位一体，判例与社区方案见 `apps/mac/Relight/WallpaperEngine/AerialVideoEngine.swift` 头注与 `aerial-video.acceptance.test.sh`）
+apps/mac/        # SwiftUI macOS 壁纸 APP（独立 Xcode 工程，xcodebuild 构建；**桌面动效 = DesktopVideoWindowEngine 桌面层 AVPlayer 窗口**（桌面图标层之下，Tahoe 原生 aerial 管线不加载用户注册资产——实测选择保留但只渲染 Apple 海报静帧）；AerialVideoEngine 的自有 assetID 注册服务锁屏/屏保管道，劫持 Apple asset slot 会被 CDN 校验 30s 还原（2026-11-11 实测）。判例与社区方案见 `AerialVideoEngine.swift` 头注与 `aerial-video.acceptance.test.sh`）
 packages/shared/ # 共享类型、Zod Schema、API 路由常量
 ```
 
