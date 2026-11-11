@@ -378,15 +378,15 @@ enum SelfTest {
         let videoURL = "http://127.0.0.1:\(server.port)/wallpaper.mov"
         server.setResponse(for: "/api/daily/today", (200, "application/json", Self.cannedPickJSON(videoURL: videoURL)))
 
-        // 保存真实 apiURL（self-test 结束后恢复，避免 fixture 端口残留）
-        let savedApiURL = await MainActor.run { AppSettings.shared.apiURL }
+        // 保存真实状态（self-test 结束后显式恢复）。
+        // ⚠️ 不能用 defer：本函数以 exit() 终止进程，defer 不执行——
+        //    历史事故：fixture 随机端口经 apiURL 永久残留真实 defaults（2026-10-29 起主 App
+        //    静默连死端口、壁纸断供近两周，2026-11-11 定位）。三个被污染键全量保存/恢复。
+        let saved = await MainActor.run { () -> (apiURL: String, lastApplied: String?, fallbackReason: String?) in
+            (AppSettings.shared.apiURL, AppSettings.shared.lastAppliedPickDate, AppSettings.shared.lastFallbackReason)
+        }
         // AppSettings.shared 已在进程启动时读取 defaults——self-test 模式直接改写 shared 实例
         await MainActor.run { AppSettings.shared.apiURL = "http://127.0.0.1:\(server.port)" }
-        defer {
-            Task { @MainActor in
-                AppSettings.shared.apiURL = savedApiURL
-            }
-        }
 
         let cache = WallpaperCache.shared
         try? cache.ensureDirectories()
@@ -427,6 +427,14 @@ enum SelfTest {
             print("[wallpaper-refresh-fallback] FAIL: lastFallbackReason 不含 aerial-fallback 标记")
             ok = false
         }
+
+        // 显式恢复真实状态（exit() 跳过 defer，必须放在 exit 之前）
+        await MainActor.run {
+            AppSettings.shared.apiURL = saved.apiURL
+            AppSettings.shared.lastAppliedPickDate = saved.lastApplied
+            AppSettings.shared.lastFallbackReason = saved.fallbackReason
+        }
+        print("[wallpaper-refresh-fallback] restored: apiURL=\(saved.apiURL) lastApplied=\(saved.lastApplied ?? "nil")")
         try await Task.sleep(for: .milliseconds(100))
         exit(ok ? 0 : 1)
     }
