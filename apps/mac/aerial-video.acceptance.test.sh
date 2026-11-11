@@ -6,22 +6,19 @@
 #
 # 职责：黑盒验收 AerialVideoEngine / Coordinator Aerial 分支 / self-test 三模式实现，
 #       包括文件结构与 pbxproj 引用、xcodebuild 编译、aerial-probe、
-#       aerial-apply（真实覆写 + backup + ffprobe codec 契约 + backup 还原）、
+#       aerial-apply（自有 assetID 四位一体注册：slot .mov + thumbnail + catalog 条目
+#       file:// 锚定 + Index.plist 指向；Apple 既有资产零触碰 + ffprobe codec 契约）、
 #       wallpaper-refresh-fallback --simulate-aerial-failure（aerial-fallback 回退契约）、
 #       以及 monorepo 不被破坏。
 #
-# 覆盖验收谓词（state.md ## 验收场景）：
-#   - 场景 2.P2 [real-process]：App 执行壁纸注入 → Aerial 用户级目录 slot 被覆写
-#     ∧ .mov.backup 存在 ∧ 清单（entries.json）contains 注入条目标识
-#   - 场景 2.P3（代码化）：注入文件 codec=hvc1 ∧ 1920×1080 ∧ 无音轨
+# 覆盖验收谓词（state.md ## 验收场景，2026-11-11 注册姿势重构）：
+#   - 场景 2.P2 [real-process]：App 执行注册 → 自有 {assetID}.mov 落位
+#     ∧ thumbnail 落位 ∧ entries.json 含条目（url-* 全 file://）∧ Index.plist 指向
+#     ∧ Apple 既有 slot 零触碰（历史教训：劫持 Apple asset 会被 CDN 校验 30s 还原）
+#   - 场景 2.P3（代码化）：slot 文件 codec=hvc1 ∧ 1920×1080 ∧ 无音轨
 #   - 场景 6.P1 [real-process]：注入失败 → 回退静态壁纸，路径 contains
 #     "Application Support/Relight" 且扩展名 ∈ {.jpg,.jpeg,.png}
 #   - 场景 6.P2 [det-machine]：App 保持运行并记录回退事件（日志含 aerial-fallback 标记）
-#
-# 设计前提（一次性人工动作）：refreshNow 进入 Aerial 分支须用户先在系统设置选一次 Aerial
-#   桌面壁纸（Index.plist 出现 assetID choice）。本机若未满足，aerial-apply 按契约抛
-#   AerialError.aerialNotSelected —— 覆写组据此降级为「错误契约断言 + 环境前提跳过」，
-#   与 video-heic 骨架 D 组的后端依赖跳过同型；QA 真机履约后重跑即全量。
 
 set -euo pipefail
 
@@ -194,195 +191,6 @@ fi
 rm -f "${PROBE_LOG}"
 
 # ────────────────────────────────────────────────────────────
-# D 组：aerial-apply 真实覆写 + backup + ffprobe codec 契约 + 还原
-# ────────────────────────────────────────────────────────────
-echo ""
-echo "▶ Check D: aerial-apply（--self-test=aerial-apply --file <2s 样片>）"
-echo "──────────────────────────────────────"
-
-# D0: ffmpeg/ffprobe 硬前置（红队铁律：fixture 失败即真红，不静默跳过）
-if ! command -v ffmpeg > /dev/null 2>&1; then
-  fail_and_exit "D0 — ffmpeg 不可用" "本验收要求真实 ffmpeg 造 2s hvc1 样片"
-fi
-if ! command -v ffprobe > /dev/null 2>&1; then
-  fail_and_exit "D0 — ffprobe 不可用" "本验收要求 ffprobe 断言 slot codec 契约"
-fi
-
-mkdir -p "${TMP_WORK}" 2>/dev/null || true
-
-# 工具函数：目录快照（name|size|mtime），仅 *.mov（.mov.backup 不匹配 *.mov 前缀规则）
-snapshot_slots() { # $1 = out file
-  : > "$1"
-  find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov" 2>/dev/null | while IFS= read -r f; do
-    echo "$(basename "${f}")|$(stat -f %z "${f}")|$(stat -f %m "${f}")"
-  done > "$1"
-}
-
-# 工具函数：ffprobe 单文件 → "codec_tag|WxH|audio_streams"
-ffprobe_slot() { # $1 = file
-  local tag wh a
-  tag=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_tag_string -of csv=p=0 "$1" 2>/dev/null | head -1 | tr -d '[:space:]')
-  wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$1" 2>/dev/null | head -1 | tr -d '[:space:]')
-  a=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$1" 2>/dev/null | grep -c . || true)
-  echo "${tag}|${wh}|${a}"
-}
-
-BEFORE_FILE="${TMP_WORK}/slots-before.txt"
-AFTER_FILE="${TMP_WORK}/slots-after.txt"
-snapshot_slots "${BEFORE_FILE}"
-
-# D1: ffmpeg 造 2s 1920×1080 无音轨 hvc1 样片（hevc_videotoolbox 优先，libx265 fixture 兜底）
-SAMPLE="${TMP_WORK}/aerial-sample.mov"
-echo "  → ffmpeg 造 2s 1920×1080 无音轨样片..."
-if ! ffmpeg -y -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=2" \
-    -c:v hevc_videotoolbox -b:v 2M -tag:v hvc1 -an -movflags +faststart \
-    "${SAMPLE}" > "${TMP_WORK}/ffmpeg-sample.log" 2>&1; then
-  echo "  → hevc_videotoolbox 失败，fixture 降级 libx265（仅样片生成，非测试容差）..."
-  ffmpeg -y -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=2" \
-    -c:v libx265 -crf 28 -pix_fmt yuv420p -tag:v hvc1 -an -movflags +faststart \
-    "${SAMPLE}" > "${TMP_WORK}/ffmpeg-sample.log" 2>&1 \
-    || fail_and_exit "D1 — ffmpeg 造样片失败" " videotoolbox 与 libx265 均失败，查看 ${TMP_WORK}/ffmpeg-sample.log"
-fi
-SAMPLE_PROBE=$(ffprobe_slot "${SAMPLE}")
-if [ "$(stat -f %z "${SAMPLE}")" -le 0 ]; then
-  fail_and_exit "D1 — 样片为空" "ffmpeg 产物 size == 0"
-fi
-pass "2s 1920×1080 无音轨样片已生成（${SAMPLE_PROBE}）"
-
-# D2: 真实执行一次覆写（设计 §RelightApp §6：用本地文件真实执行一次覆写+备份）
-APPLY_LOG="${TMP_WORK}/aerial-apply.log"
-APPLY_EXIT=0
-echo "  → 运行 Relight --self-test=aerial-apply --file <样片> ..."
-timeout 60 "${APP_BINARY}" "--self-test=aerial-apply" "--file" "${SAMPLE}" \
-  > "${APPLY_LOG}" 2>&1 || APPLY_EXIT=$?
-echo "  → aerial-apply 退出码: ${APPLY_EXIT}"
-
-# D3: 比对快照找被覆写 slot（含新增文件）
-snapshot_slots "${AFTER_FILE}"
-CHANGED_FILE="${TMP_WORK}/changed-slots.txt"
-: > "${CHANGED_FILE}"
-while IFS= read -r line; do
-  name="${line%%|*}"
-  grep -Fxq "${line}" "${BEFORE_FILE}" || echo "${AERIAL_VIDEOS_DIR}/${name}" >> "${CHANGED_FILE}"
-done < "${AFTER_FILE}"
-CHANGED_COUNT=$(grep -c . "${CHANGED_FILE}" || true)
-# 新增 .backup（本次 run 创建 vs 既有）
-BACKUP_BEFORE_FILE="${TMP_WORK}/backups-before.txt"
-: > "${BACKUP_BEFORE_FILE}"
-find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov.backup" 2>/dev/null | sort > "${BACKUP_BEFORE_FILE}" || true
-
-if [ "${APPLY_EXIT}" -eq 0 ]; then
-  # ── happy path：断言（先采证再还原，保证任何 fail 前已还原）──
-  if [ "${CHANGED_COUNT}" -ge 1 ]; then
-    pass "Aerial 用户级目录内有 slot 被覆写（${CHANGED_COUNT} 个）"
-  else
-    fail_and_exit "D3 — aerial-apply 退出 0 但无任何 slot 被覆写" \
-      "快照比对零变化（期望至少覆写 1 个 {assetID}.mov）；输出: $(tail -5 "${APPLY_LOG}" || true)"
-  fi
-
-  # 采证（restore 之前；证据行字段用 | 分隔，字段值内不再含 |）
-  EVIDENCE_FILE="${TMP_WORK}/evidence.txt"
-  : > "${EVIDENCE_FILE}"
-  RESTORED_OK=true
-  RESTORE_DETAIL=""
-  while IFS= read -r slot; do
-    [ -f "${slot}" ] || continue
-    bname=$(basename "${slot}")
-    backup="${slot}.backup"
-    sz=$(stat -f %z "${slot}")
-    tag=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_tag_string -of csv=p=0 "${slot}" 2>/dev/null | head -1 | tr -d '[:space:]')
-    wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${slot}" 2>/dev/null | head -1 | tr -d '[:space:]')
-    audio=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "${slot}" 2>/dev/null | grep -c . || true)
-    before_line=$(grep -F "${bname}|" "${BEFORE_FILE}" | head -1 || true)
-    before_size="${before_line#*|}"; before_size="${before_size%%|*}"
-    backup_is_new="preexisting"
-    grep -Fxq "${backup}" "${BACKUP_BEFORE_FILE}" || backup_is_new="new"
-
-    echo "${bname}|tag=${tag}|wh=${wh}|audio=${audio}|backup=$( [ -f "${backup}" ] && echo yes || echo no )|size=${sz}" >> "${EVIDENCE_FILE}"
-
-    # 还原：从 .backup 还原原片；本次新建的 backup 还原后移除（回到测试前状态）
-    if [ -f "${backup}" ]; then
-      cp -p "${backup}" "${slot}"
-      if [ "${backup_is_new}" = "new" ]; then
-        rm -f "${backup}"
-      fi
-    else
-      RESTORED_OK=false
-      RESTORE_DETAIL="${RESTORE_DETAIL} ${bname}(无 backup 可还原)"
-    fi
-    # 还原校验：size 回到覆写前
-    if [ -n "${before_size}" ]; then
-      after_sz=$(stat -f %z "${slot}")
-      if [ "${after_sz}" != "${before_size}" ]; then
-        RESTORED_OK=false
-        RESTORE_DETAIL="${RESTORE_DETAIL} ${bname}(size ${before_size}→${after_sz})"
-      fi
-    fi
-  done < "${CHANGED_FILE}"
-
-  # 断言（基于证据）：.mov.backup 存在 ∧ codec=hvc1 ∧ 1920×1080 ∧ 无音轨（契约逐字）
-  D_ASSERTS_FAILED=""
-  while IFS= read -r ev; do
-    bname="${ev%%|*}"
-    case "${ev}" in
-      *"backup=no"*) D_ASSERTS_FAILED="${D_ASSERTS_FAILED} ${bname}:.mov.backup 不存在";;
-    esac
-    case "${ev}" in
-      *"|tag=hvc1|wh=1920,1080|audio=0|"*) :;; # 契约逐字：hvc1 ∧ 1920×1080 ∧ 无音轨
-      *) D_ASSERTS_FAILED="${D_ASSERTS_FAILED} ${bname}:ffprobe 不满足 hvc1/1920×1080/无音轨（${ev}）";;
-    esac
-    case "${ev}" in
-      *"|size=0|"*) D_ASSERTS_FAILED="${D_ASSERTS_FAILED} ${bname}:覆写后 size == 0";;
-    esac
-  done < "${EVIDENCE_FILE}"
-
-  if [ -z "${D_ASSERTS_FAILED}" ]; then
-    pass ".mov.backup 存在；slot ffprobe 满足 codec=hvc1 ∧ 1920×1080 ∧ 无音轨"
-  else
-    echo "  ── aerial-apply 输出 ──"
-    cat "${APPLY_LOG}" || true
-    fail_and_exit "D3 — slot 契约断言失败" "${D_ASSERTS_FAILED}"
-  fi
-
-  # D4: 清单锚定（场景 2.P2：清单内容 contains 该注入文件标识——entries.json 含 assetID）
-  D4_MISSING_IDS=""
-  while IFS= read -r slot; do
-    assetID="$(basename "${slot}" .mov)"
-    if ! grep -q "${assetID}" "${AERIAL_ENTRIES_JSON}" 2>/dev/null; then
-      D4_MISSING_IDS="${D4_MISSING_IDS} ${assetID}"
-    fi
-  done < "${CHANGED_FILE}"
-  if [ -z "${D4_MISSING_IDS}" ]; then
-    pass "Aerial 清单 entries.json contains 注入条目标识（assetID 全命中）"
-  else
-    fail_and_exit "D4 — entries.json 未含注入条目标识" "缺失 assetID:${D4_MISSING_IDS}（期望 ${AERIAL_ENTRIES_JSON} 锚定）"
-  fi
-
-  # D5: 还原校验
-  if [ "${RESTORED_OK}" = true ]; then
-    pass "脚本结束前已从 .backup 还原全部原片（size 与覆写前一致）"
-  else
-    fail_and_exit "D5 — 原片还原失败" "${RESTORE_DETAIL}"
-  fi
-else
-  # ── 错误契约路径：apply 非零退出 → 断言零部分状态（失败不得留下半覆写/半备份）──
-  ORPHAN_BACKUPS=$(comm -13 "${BACKUP_BEFORE_FILE}" \
-    <(find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov.backup" 2>/dev/null | sort) \
-    2>/dev/null | grep -c . || true)
-  if [ "${CHANGED_COUNT}" -eq 0 ] && [ "${ORPHAN_BACKUPS}" -eq 0 ]; then
-    pass "aerial-apply 非零退出且零部分状态（无 slot 被覆写、无新增孤儿 backup）"
-  else
-    echo "  ── aerial-apply 输出 ──"
-    cat "${APPLY_LOG}" || true
-    fail_and_exit "D3 — apply 失败但留下部分状态" \
-      "changed=${CHANGED_COUNT}, orphan_backups=${ORPHAN_BACKUPS}（失败路径不得半覆写）"
-  fi
-  skip "D3/D4/D5 — slot 覆写 ∧ backup ∧ ffprobe(hvc1/1920×1080/无音轨) ∧ 清单锚定 ∧ 还原" \
-    "设计前提未满足：用户须先在系统设置一次性选择 Aerial 桌面壁纸（Index.plist 无 assetID 时按契约抛 AerialError.aerialNotSelected）；前提满足后重跑本脚本即全量"
-  echo "  ⚠ 警告：D 组覆写路径已跳过。请在系统设置选择一次 Aerial 桌面壁纸后重跑以完整验收场景 2.P2/P3。"
-fi
-
-# ────────────────────────────────────────────────────────────
 # E 组：wallpaper-refresh-fallback --simulate-aerial-failure（场景 6.P1/P2）
 # ────────────────────────────────────────────────────────────
 echo ""
@@ -449,6 +257,198 @@ fi
 
 rm -f "${FB_LOG}"
 
+
+# ────────────────────────────────────────────────────────────
+# D 组：aerial-apply 自有 assetID 四位一体注册（2026-11-11 姿势重构，见 D2 注释）
+# ⚠️ E 组必须先于 D 组执行：D 组结尾 killall -9 壁纸栈，紧随其后的桌面读回断言会撞上
+#    WallpaperAgent 重启窗口（实测 setDesktopImageURL 被 Index.plist 重载覆写）
+# ────────────────────────────────────────────────────────────
+echo ""
+echo "▶ Check D: aerial-apply（--self-test=aerial-apply --file <2s 样片>）"
+echo "──────────────────────────────────────"
+
+# D0: ffmpeg/ffprobe 硬前置（红队铁律：fixture 失败即真红，不静默跳过）
+if ! command -v ffmpeg > /dev/null 2>&1; then
+  fail_and_exit "D0 — ffmpeg 不可用" "本验收要求真实 ffmpeg 造 2s hvc1 样片"
+fi
+if ! command -v ffprobe > /dev/null 2>&1; then
+  fail_and_exit "D0 — ffprobe 不可用" "本验收要求 ffprobe 断言 slot codec 契约"
+fi
+
+mkdir -p "${TMP_WORK}" 2>/dev/null || true
+
+# 工具函数：目录快照（name|size|mtime），仅 *.mov（.mov.backup 不匹配 *.mov 前缀规则）
+snapshot_slots() { # $1 = out file
+  : > "$1"
+  find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov" 2>/dev/null | while IFS= read -r f; do
+    echo "$(basename "${f}")|$(stat -f %z "${f}")|$(stat -f %m "${f}")"
+  done > "$1"
+}
+
+# 工具函数：ffprobe 单文件 → "codec_tag|WxH|audio_streams"
+ffprobe_slot() { # $1 = file
+  local tag wh a
+  tag=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_tag_string -of csv=p=0 "$1" 2>/dev/null | head -1 | tr -d '[:space:]')
+  wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$1" 2>/dev/null | head -1 | tr -d '[:space:]')
+  a=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$1" 2>/dev/null | grep -c . || true)
+  echo "${tag}|${wh}|${a}"
+}
+
+BEFORE_FILE="${TMP_WORK}/slots-before.txt"
+AFTER_FILE="${TMP_WORK}/slots-after.txt"
+snapshot_slots "${BEFORE_FILE}"
+
+# D1: ffmpeg 造 2s 1920×1080 无音轨 hvc1 样片（hevc_videotoolbox 优先，libx265 fixture 兜底）
+SAMPLE="${TMP_WORK}/aerial-sample.mov"
+echo "  → ffmpeg 造 2s 1920×1080 无音轨样片..."
+if ! ffmpeg -y -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=2" \
+    -c:v hevc_videotoolbox -b:v 2M -tag:v hvc1 -an -movflags +faststart \
+    "${SAMPLE}" > "${TMP_WORK}/ffmpeg-sample.log" 2>&1; then
+  echo "  → hevc_videotoolbox 失败，fixture 降级 libx265（仅样片生成，非测试容差）..."
+  ffmpeg -y -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=2" \
+    -c:v libx265 -crf 28 -pix_fmt yuv420p -tag:v hvc1 -an -movflags +faststart \
+    "${SAMPLE}" > "${TMP_WORK}/ffmpeg-sample.log" 2>&1 \
+    || fail_and_exit "D1 — ffmpeg 造样片失败" " videotoolbox 与 libx265 均失败，查看 ${TMP_WORK}/ffmpeg-sample.log"
+fi
+SAMPLE_PROBE=$(ffprobe_slot "${SAMPLE}")
+if [ "$(stat -f %z "${SAMPLE}")" -le 0 ]; then
+  fail_and_exit "D1 — 样片为空" "ffmpeg 产物 size == 0"
+fi
+pass "2s 1920×1080 无音轨样片已生成（${SAMPLE_PROBE}）"
+
+# D2: 真实执行一次注册（2026-11-11 姿势重构：不再劫持 Apple asset slot——
+#     Tahoe 壁纸栈会在 killall 重载后 ~30s 内从 CDN 原样拉回被篡改的 Apple asset；
+#     正确姿势 = 注册自有 assetID 进 catalog（slot .mov + thumbnail + entries.json 条目
+#     + Index.plist 全 Provider 指向，url-* 键全为本地 file:// URL，系统校验拉的就是
+#     本地文件自己，字节恒一致）。参考 AerialMotion / LiveDesk 社区实证方案。）
+APPLY_LOG="${TMP_WORK}/aerial-apply.log"
+APPLY_EXIT=0
+echo "  → 运行 Relight --self-test=aerial-apply --file <样片> ..."
+timeout 60 "${APP_BINARY}" "--self-test=aerial-apply" "--file" "${SAMPLE}" \
+  > "${APPLY_LOG}" 2>&1 || APPLY_EXIT=$?
+echo "  → aerial-apply 退出码: ${APPLY_EXIT}"
+
+RELIGHT_ASSET_ID="C37A729D-D797-4C98-A546-D970E905C7F2"
+RELIGHT_SLOT="${AERIAL_VIDEOS_DIR}/${RELIGHT_ASSET_ID}.mov"
+RELIGHT_THUMB="${HOME}/Library/Application Support/com.apple.wallpaper/aerials/thumbnails/${RELIGHT_ASSET_ID}.png"
+AERIAL_INDEX_PLIST="${HOME}/Library/Application Support/com.apple.wallpaper/Store/Index.plist"
+
+# 失败取证快照（catalog / Index 注册前状态）
+cp "${AERIAL_ENTRIES_JSON}" "${TMP_WORK}/entries-before.json" 2>/dev/null || true
+cp "${AERIAL_INDEX_PLIST}" "${TMP_WORK}/index-before.plist" 2>/dev/null || true
+
+# 注册后快照（供 Apple slot 零触碰断言）
+snapshot_slots "${AFTER_FILE}"
+# 新增 .backup 检查（注册姿势不再产生 .backup——出现即异常）
+BACKUP_BEFORE_FILE="${TMP_WORK}/backups-before.txt"
+: > "${BACKUP_BEFORE_FILE}"
+find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov.backup" 2>/dev/null | sort > "${BACKUP_BEFORE_FILE}" || true
+
+if [ "${APPLY_EXIT}" -eq 0 ]; then
+  # ── happy path：自有 asset 四位一体注册断言 ──
+
+  # D3-1: 自有 slot 落位 ∧ 字节 == 样片 ∧ 644 权限
+  if [ -f "${RELIGHT_SLOT}" ] && cmp -s "${RELIGHT_SLOT}" "${SAMPLE}" \
+     && [ "$(stat -f %Lp "${RELIGHT_SLOT}")" = "644" ]; then
+    pass "自有 asset slot 落位 ∧ 字节与样片一致 ∧ 644 权限"
+  else
+    fail_and_exit "D3-1 — 自有 asset slot 未正确落位" \
+      "slot=${RELIGHT_SLOT} exists=$([ -f "${RELIGHT_SLOT}" ] && echo yes || echo no) bytes_match=$(cmp -s "${RELIGHT_SLOT}" "${SAMPLE}" 2>/dev/null && echo yes || echo no) mode=$(stat -f %Lp "${RELIGHT_SLOT}" 2>/dev/null || echo none)；输出: $(tail -5 "${APPLY_LOG}" || true)"
+  fi
+
+  # D3-2: Apple 既有 slot 零触碰 ∧ 无新增孤儿 .backup（劫持时代的军备竞赛不复存在）
+  TOUCHED=""
+  while IFS= read -r line; do
+    name="${line%%|*}"
+    [ "${name}" = "${RELIGHT_ASSET_ID}.mov" ] && continue
+    grep -Fxq "${line}" "${BEFORE_FILE}" || TOUCHED="${TOUCHED} ${name}"
+  done < "${AFTER_FILE}"
+  ORPHAN_BACKUPS=$(comm -13 "${BACKUP_BEFORE_FILE}" \
+    <(find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov.backup" 2>/dev/null | sort) \
+    2>/dev/null | grep -c . || true)
+  if [ -z "${TOUCHED}" ] && [ "${ORPHAN_BACKUPS}" -eq 0 ]; then
+    pass "Apple 既有 slot 零触碰 ∧ 无新增 .mov.backup"
+  else
+    fail_and_exit "D3-2 — Apple slot 被触碰或产生孤儿 backup" \
+      "touched=${TOUCHED} orphan_backups=${ORPHAN_BACKUPS}（注册姿势不得改动 Apple 资产）"
+  fi
+
+  # D3-3: slot ffprobe codec 契约（hvc1 ∧ 1920×1080 ∧ 无音轨）
+  SLOT_PROBE=$(ffprobe_slot "${RELIGHT_SLOT}")
+  case "${SLOT_PROBE}" in
+    "hvc1|1920,1080|0") pass "slot ffprobe 满足 codec=hvc1 ∧ 1920×1080 ∧ 无音轨";;
+    *) fail_and_exit "D3-3 — slot codec 契约断言失败" "ffprobe=${SLOT_PROBE}（期望 hvc1|1920,1080|0）";;
+  esac
+
+  # D3-4: thumbnail 落位（预览图，catalog previewImage 指向它）
+  if [ -f "${RELIGHT_THUMB}" ] && [ "$(stat -f %z "${RELIGHT_THUMB}")" -gt 0 ]; then
+    pass "thumbnail 落位（${RELIGHT_THUMB}）"
+  else
+    fail_and_exit "D3-4 — thumbnail 未落位" "期望 ${RELIGHT_THUMB} 存在且非空"
+  fi
+
+  # D4: catalog 锚定（id 命中 ∧ 全部 url-* 键为本地 file:// URL——系统校验回路锁死在本地）
+  D4_CHECK=$(python3 -c "
+import json
+with open('${AERIAL_ENTRIES_JSON}') as f:
+    c = json.load(f)
+asset = next((a for a in c.get('assets', []) if a.get('id') == '${RELIGHT_ASSET_ID}'), None)
+if not asset:
+    print('MISSING'); raise SystemExit
+urls = {k: v for k, v in asset.items() if k.startswith('url-')}
+if not urls:
+    print('NO_URL_KEYS'); raise SystemExit
+bad = [k for k, v in urls.items() if not str(v).startswith('file://')]
+print('BAD:' + ','.join(bad) if bad else 'OK')
+" 2>&1)
+  case "${D4_CHECK}" in
+    OK) pass "catalog entries.json 含自有条目 ∧ 全部 url-* 键为 file:// 本地 URL";;
+    *) fail_and_exit "D4 — catalog 注册契约不满足" "检查结果: ${D4_CHECK}";;
+  esac
+
+  # D5: Index.plist 全 Provider 指向（抽查 SystemDefault.Desktop 首 choice 的 assetID）
+  D5_CHECK=$(python3 -c "
+import plistlib
+with open('${AERIAL_INDEX_PLIST}','rb') as f:
+    idx = plistlib.load(f)
+sd = idx.get('SystemDefault', {})
+cfg = sd.get('Desktop', {}).get('Content', {}).get('Choices', [{}])[0].get('Configuration')
+if cfg is None:
+    print('NO_CONFIG'); raise SystemExit
+val = cfg if isinstance(cfg, dict) else plistlib.loads(cfg)
+print(val.get('assetID', 'NO_ASSET_ID'))
+" 2>&1)
+  if [ "${D5_CHECK}" = "${RELIGHT_ASSET_ID}" ]; then
+    pass "Index.plist SystemDefault.Desktop 指向自有 assetID"
+  else
+    fail_and_exit "D5 — Index 选择未指向自有 asset" "SystemDefault.Desktop assetID=${D5_CHECK}（期望 ${RELIGHT_ASSET_ID}）"
+  fi
+
+  # D6: 桌面不留 fixture——当日真实壁纸缓存存在则覆回（注册保持、内容还原）
+  TODAY_CACHE="${RELIGHT_WALLPAPER_ROOT}/wallpapers/aerial-video/$(date +%F).mov"
+  if [ -f "${TODAY_CACHE}" ]; then
+    cp "${TODAY_CACHE}" "${RELIGHT_SLOT}"
+    pass "fixture 内容已覆回当日真实壁纸（注册保持）"
+  else
+    skip "D6 — fixture 内容覆回" "当日真实壁纸缓存不存在（${TODAY_CACHE}），桌面将显示样片直至下次刷新"
+  fi
+else
+  # ── 错误契约路径：apply 非零退出 → 断言零部分注册状态 ──
+  ORPHAN_BACKUPS=$(comm -13 "${BACKUP_BEFORE_FILE}" \
+    <(find "${AERIAL_VIDEOS_DIR}" -maxdepth 1 -type f -name "*.mov.backup" 2>/dev/null | sort) \
+    2>/dev/null | grep -c . || true)
+  if [ ! -f "${RELIGHT_SLOT}" ] && [ "${ORPHAN_BACKUPS}" -eq 0 ]; then
+    pass "aerial-apply 非零退出且零部分状态（无自有 slot 残留、无孤儿 backup）"
+  else
+    echo "  ── aerial-apply 输出 ──"
+    cat "${APPLY_LOG}" || true
+    fail_and_exit "D3 — apply 失败但留下部分状态" \
+      "slot_exists=$([ -f "${RELIGHT_SLOT}" ] && echo yes || echo no), orphan_backups=${ORPHAN_BACKUPS}（失败路径不得半注册）"
+  fi
+  skip "D3-D6 — 四位一体注册 ∧ ffprobe(hvc1/1920×1080/无音轨) ∧ catalog file:// 锚定 ∧ Index 指向" \
+    "aerial-apply 非零退出（错误契约路径已验证零部分状态）；查看输出定位失败环节后重跑"
+fi
+
 # ────────────────────────────────────────────────────────────
 # F 组：QA 真机判定项（visual-residue / 系统状态）
 # ────────────────────────────────────────────────────────────
@@ -461,9 +461,9 @@ skip "F2 — 场景 2.P4 系统壁纸状态（Index.plist）指向注入视频�
   "QA 真机在场景 1 产物就绪 + Aerial 已选择后求值（本脚本 fixture 样片不作为当日 pick）"
 
 echo "  ℹ F 组契约约定（供 QA 参考）："
-echo "    · 注入 slot 路径：~/Library/Application Support/com.apple.wallpaper/aerials/videos/{assetID}.mov"
-echo "    · 首次覆写保留 {assetID}.mov.backup"
-echo "    · 进程副作用：killall WallpaperAgent legacyScreenSaver"
+echo "    · 注册 slot 路径：~/Library/Application Support/com.apple.wallpaper/aerials/videos/{assetID}.mov"
+echo "    · catalog：~/Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json（url-* 全 file://）"
+echo "    · 进程副作用：killall -9 WallpaperAgent WallpaperAerialsExtension"
 echo "    · repairIfNeeded：已应用日 slot 与缓存不一致时每小时 tick 重新覆写"
 
 # ────────────────────────────────────────────────────────────
