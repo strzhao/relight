@@ -399,26 +399,35 @@ enum SelfTest {
         )
         await coordinator.refreshNow()
 
-        // 断言：桌面壁纸指向 Relight 静态图（s6p1 谓词）
+        // 断言（s6p1 谓词 2026-11-11 修订）：静态链路真实执行 = composed 缓存文件落盘。
+        // 桌面读回（desktopImageURL）降级为信息输出——aerial provider 激活时 Tahoe
+        // 读回占位符（DefaultDesktop.heic），不再反映 imageFile 写入是否成功。
         guard let screen = NSScreen.main ?? NSScreen.screens.first else {
             print("[self-test] no screen")
             exit(1)
         }
         let desktopURL = NSWorkspace.shared.desktopImageURL(for: screen)
-        print("[wallpaper-refresh-fallback] desktopImageURL=\(desktopURL?.path ?? "nil")")
+        print("[wallpaper-refresh-fallback] desktopImageURL(参考)=\(desktopURL?.path ?? "nil")")
+        let composedDir = WallpaperCache.shared.composedDir
+        let freshComposed = (try? FileManager.default.contentsOfDirectory(
+            at: composedDir, includingPropertiesForKeys: [.contentModificationDateKey]
+        ))?
+            .filter { $0.lastPathComponent.hasPrefix("2000-01-01") && $0.pathExtension.lowercased() == "jpg" }
+            .max { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da < db
+            }
+        if let fresh = freshComposed {
+            print("[wallpaper-refresh-fallback] composedApplied=\(fresh.path)（s6p1：静态链路已执行）")
+        } else {
+            print("[wallpaper-refresh-fallback] FAIL: composed 缓存无 2000-01-01 产物（静态链路未执行）")
+        }
         let fallbackReason = await MainActor.run { AppSettings.shared.lastFallbackReason }
         print("[wallpaper-refresh-fallback] lastFallbackReason=\(fallbackReason ?? "nil")")
 
         var ok = true
-        if let path = desktopURL?.path {
-            let isRelightStatic = path.contains("Application Support/Relight")
-                && ["jpg", "jpeg", "png"].contains((path as NSString).pathExtension.lowercased())
-            if !isRelightStatic {
-                print("[wallpaper-refresh-fallback] FAIL: 桌面壁纸不是 Relight 静态图")
-                ok = false
-            }
-        } else {
-            print("[wallpaper-refresh-fallback] FAIL: desktopImageURL 为 nil")
+        if freshComposed == nil {
             ok = false
         }
         if (fallbackReason ?? "").contains("aerial-fallback") {

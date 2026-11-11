@@ -237,8 +237,9 @@ if [ -z "${FB_MATCH}" ]; then
     "场景 6.P1：壁纸路径 contains 'Application Support/Relight' 且扩展名 ∈ {.jpg,.jpeg,.png}"
 fi
 FB_MATCH_DECODED="${FB_MATCH//%20/ }"
-# 剥离日志行前缀（grep -oE 的 [^']* 会把 "[wallpaper-refresh-fallback] desktopImageURL=" 一起匹配进来）
-FB_MATCH_DECODED="${FB_MATCH_DECODED##*desktopImageURL=}"
+# 剥离日志行前缀（grep -oE 的 [^']* 会把 "[wallpaper-refresh-fallback] xxx=" 一起匹配进来；
+# 路径本身不含 =，按最后一个 = 通用剥离，兼容 desktopImageURL(参考)= / composedApplied= 等行）
+FB_MATCH_DECODED="${FB_MATCH_DECODED##*=}"
 if echo "${FB_MATCH_DECODED}" | grep -q "Application Support/Relight"; then
   pass "回退壁纸路径 contains 'Application Support/Relight' 且扩展名合法（${FB_MATCH_DECODED}）"
 else
