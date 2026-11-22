@@ -8,7 +8,7 @@
  * 契约 3: entries[rank=0] 与 dailyPicks 主字段（photoId/title/narrative/score/members）同源
  * 契约 4: 同一 photoId 不会同时是两个 entries 行的 hero（hero 间互斥）
  * 契约 5: 单 candidate AI 失败时该 rank 写入 fallback 文案，不阻塞其他 rank
- * 契约 6: getRecentPickedPhotoIds(30) 返回集合包含 daily_pick_entries.photo_id（跨表去重）
+ * 契约 6: getPickedPhotoIds(30) 返回集合包含 daily_pick_entries.photo_id（跨表去重）
  *
  * 红队铁律：
  * - 不读取任何蓝队实现文件（daily-selection.ts 等）
@@ -786,10 +786,10 @@ describe("daily-selection entries — 验收测试（红队）", () => {
   });
 
   // ================================================================
-  // 契约 6: getRecentPickedPhotoIds(30) 包含 daily_pick_entries.photo_id
+  // 契约 6: getPickedPhotoIds(30) 包含 daily_pick_entries.photo_id
   // ================================================================
 
-  describe("契约 6 — getRecentPickedPhotoIds 跨表去重（包含 daily_pick_entries.photo_id）", () => {
+  describe("契约 6 — getPickedPhotoIds 跨表去重（包含 daily_pick_entries.photo_id）", () => {
     it("日期窗口内 daily_pick_entries 的 photo_id 不会再次作为 hero 被选中", async () => {
       // 第一轮：植入 3 张候选，跑 job 产生 3 条 entries
       const firstRoundIds = seedNCandidates(testSqlite, 3);
@@ -823,10 +823,10 @@ describe("daily-selection entries — 验收测试（红队）", () => {
       const m = String(today2.getMonth() + 1).padStart(2, "0");
       const d = String(today2.getDate()).padStart(2, "0");
 
-      // 年份取 Y-4..Y-8：避开第一轮候选所用的 Y-1/Y-2/Y-3（seedNCandidates 按 i%5 分散），
-      // 否则同 dirname(`photos`) + 同月日 + 同年 会与上轮 entry 撞上"事件键"(dirname::date)，
-      // 被 30 天事件键去重整批滤掉，导致本轮候选池为空、根本产不出 pick。
-      // 这里要验证的是 photo_id 级跨表去重，故让新候选拥有各不相同且不与上轮冲突的事件键。
+      // 年份取 Y-4..Y-8：避开第一轮候选所用的 Y-1/Y-2/Y-3（seedNCandidates 按 i%5 分散）。
+      // 新候选的 photo_id 本就不与上轮重叠，photoId 去重不会滤掉它们；
+      // 各不相同且不与上轮冲突的 (dirname, 月日) 只是保持数据干净，便于聚焦验证
+      // photo_id 级跨表去重本身。
       for (let i = 0; i < 5; i++) {
         const newId = `new-candidate-round2-${i}`;
         seedPhoto(testSqlite, {

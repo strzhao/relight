@@ -9,10 +9,7 @@ import { writeFile } from "node:fs/promises";
  */
 import Database from "better-sqlite3";
 import { runSelectStage } from "../src/jobs/daily-selection";
-import {
-  buildCandidatePool,
-  getRecentPickedEventKeys,
-} from "../src/jobs/daily-selection/candidate-pool";
+import { buildCandidatePool } from "../src/jobs/daily-selection/candidate-pool";
 import type { ClusteredCandidate } from "../src/jobs/daily-selection/cluster";
 
 const DB_PATH = "./data/relight.db";
@@ -74,7 +71,6 @@ async function main() {
     const pool: ClusteredCandidate[] = await buildCandidatePool({
       now: pickNow,
       excludeIds: new Set(selectedIds),
-      eventKeys: new Set(),
       maxN: 12,
     });
 

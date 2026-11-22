@@ -322,8 +322,8 @@ describe("buildCandidatePool 集成测试", () => {
     expect(sources.has("historyToday")).toBe(true);
   });
 
-  it("getRecentPickedEventKeys：读取 30 天内精选的 photoId 含 members + 事件键", async () => {
-    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+  it("getPickedPhotoIds：读取 30 天内精选的 photoId 含 members", async () => {
+    const { getPickedPhotoIds } = await import("../candidate-pool");
     addSource(testSqlite);
     addPhoto(testSqlite, "hero1", yearsAgoISO(1), 8.0);
     addPhoto(testSqlite, "member1", yearsAgoISO(1), 7.0);
@@ -331,27 +331,25 @@ describe("buildCandidatePool 集成测试", () => {
     const recentDate = new Date(Date.now() - 5 * 86400_000).toISOString().slice(0, 10);
     addDailyPick(testSqlite, "hero1", recentDate, [{ photoId: "member1", caption: "测试" }]);
 
-    const { excludeIds, eventKeys } = await getRecentPickedEventKeys(30);
+    const excludeIds = await getPickedPhotoIds(30);
     expect(excludeIds.has("hero1")).toBe(true);
     expect(excludeIds.has("member1")).toBe(true);
-    // 事件键应包含 hero1 和 member1 的事件键
-    expect(eventKeys.size).toBeGreaterThanOrEqual(1);
   });
 
-  it("getRecentPickedEventKeys：超过 30 天的精选不在集合内", async () => {
-    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+  it("getPickedPhotoIds：超过 30 天的精选不在集合内", async () => {
+    const { getPickedPhotoIds } = await import("../candidate-pool");
     addSource(testSqlite);
     addPhoto(testSqlite, "old1", yearsAgoISO(5), 8.0);
 
     const oldDate = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
     addDailyPick(testSqlite, "old1", oldDate);
 
-    const { excludeIds } = await getRecentPickedEventKeys(30);
+    const excludeIds = await getPickedPhotoIds(30);
     expect(excludeIds.has("old1")).toBe(false);
   });
 
-  it('getRecentPickedEventKeys："all" 模式全量历史去重，35 天前的精选也在排除集内', async () => {
-    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+  it('getPickedPhotoIds："all" 模式全量历史去重，35 天前的精选也在排除集内', async () => {
+    const { getPickedPhotoIds } = await import("../candidate-pool");
     addSource(testSqlite);
     addPhoto(testSqlite, "old2", yearsAgoISO(5), 8.0);
     addPhoto(testSqlite, "member2", yearsAgoISO(5), 7.0);
@@ -359,20 +357,20 @@ describe("buildCandidatePool 集成测试", () => {
     const oldDate = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
     addDailyPick(testSqlite, "old2", oldDate, [{ photoId: "member2", caption: "测试" }]);
 
-    const { excludeIds } = await getRecentPickedEventKeys("all");
+    const excludeIds = await getPickedPhotoIds("all");
     expect(excludeIds.has("old2")).toBe(true);
     expect(excludeIds.has("member2")).toBe(true);
   });
 
-  it('getRecentPickedEventKeys："all" 模式仍排除目标日自身（重跑当天不自排除）', async () => {
-    const { getRecentPickedEventKeys } = await import("../candidate-pool");
+  it('getPickedPhotoIds："all" 模式仍排除目标日自身（重跑当天不自排除）', async () => {
+    const { getPickedPhotoIds } = await import("../candidate-pool");
     addSource(testSqlite);
     addPhoto(testSqlite, "today1", yearsAgoISO(1), 8.0);
 
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     addDailyPick(testSqlite, "today1", today);
 
-    const { excludeIds } = await getRecentPickedEventKeys("all");
+    const excludeIds = await getPickedPhotoIds("all");
     expect(excludeIds.has("today1")).toBe(false);
   });
 

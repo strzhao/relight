@@ -16,7 +16,7 @@
  *   B-8  最终池上限：返回数组 length <= maxN
  *
  * 红队铁律：
- * - 不读取蓝队新增的 computeEventKey / getRecentPickedEventKeys / filterByEventKey
+ * - 不读取蓝队新增的 getPickedPhotoIds
  *   等函数体
  * - 仅依赖公开导出类型 + 行为契约
  * - 真实 SQLite(:memory:) + setupTestSchema

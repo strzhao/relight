@@ -1,5 +1,5 @@
 /**
- * 候选池构造：4 源平等混采（可选第 5 源 recent）+ 年代完全平权 + 全量历史去重（30 天窗口兜底）
+ * 候选池构造：4 源平等混采（可选第 5 源 recent）+ 年代完全平权 + photoId 全量历史去重（30 天窗口兜底）
  *
  * 架构：
  * - 独立子查询（historyToday / sameMonth / sameSeason / randomSample [+ recent]），
@@ -15,6 +15,15 @@
  * LIMIT、randomSample 全库抽样命中概率过低，近 30 天照片日均 <1 席。recent 源
  * （近 N 天拍摄、同美学门槛）让近期照片在自己的集合内竞争，供给不足时其余源
  * 自然回填——自平衡，不开天窗。
+ *
+ * 事件键去重撤销（2026-11-22）：原实现除 photoId 外还按事件键（dirname::拍摄日）
+ * 过滤——一张照片入选即连坐封杀同目录同天的全部照片。生产实测：200 天精选衍生的
+ * 371 个事件键把从未入选的 2063 张达标照片连坐掉 1240 张，主路径 4 源全灭
+ * （aes desc LIMIT 窗口内候选 100% 命中连坐），触发 30 天窗口兜底 → 30 天前入选
+ * 照片集体复活，每日精选每 30 天循环重复（11-15 起日志「主路径仅 0-1 簇」，
+ * 11-20/11-21 入选照片 100% 历史重复）。同事件防扎堆交由池内
+ * clusterByDirnameAndTime（dirname+时间窗聚类）与 fillUp 冲突过滤承担；
+ * photoId 全量去重（终生一次）不变。
  *
  * 注：K_PER_SOURCE 设为 maxN（而非固定 8），确保当候选只集中在 1-2 个源时
  * 仍能获取足够多的唯一候选，避免跨源重叠导致最终候选池不足 maxN 张。
@@ -90,42 +99,22 @@ function computeWeightedScore(aestheticScore: number | null): number {
 }
 
 /**
- * 计算事件键：`dirname::takenAt_date`。
- *
- * 一对 (dirname, date(takenAt)) 定义为"事件键"。30 天内每个事件键最多入选 1 次，
- * 避免同一拍摄事件的照片反复出现在精选池中。
- *
- * @param filePath - 照片文件路径（POSIX 风格）
- * @param takenAt - ISO 时间字符串或 null
- * @returns 事件键字符串，或 null（takenAt 为 null 时）
- */
-export function computeEventKey(filePath: string, takenAt: string | null): string | null {
-  if (!takenAt) return null;
-  const dirname = path.posix.dirname(filePath);
-  const date = takenAt.slice(0, 10); // "YYYY-MM-DD"
-  return `${dirname}::${date}`;
-}
-
-/**
- * 获取精选照片的事件键集合 + photoId 去重集合（窗口扫描或全量历史）。
+ * 获取精选照片的 photoId 去重集合（窗口扫描或全量历史）。
  *
  * 同时扫描两个表：
  * 1. daily_picks（旧格式：hero photoId + members JSON 列）
  * 2. daily_pick_entries（新格式：每行一个 entry 的 photo_id + members JSON 列）
  *
- * 每条结果 JOIN photos 表获取 file_path、taken_at，然后计算事件键。
- * taken_at 为 NULL 的行不生成事件键。
- *
  * @param daysBack 去重窗口天数（对称窗口 [D-daysBack, D+daysBack]）；
  *                 传 "all" 扫全量历史——一张照片终生只入选一次。
  *                 两种模式都排除目标日自身（重跑/回填当天时，当天已有精选
  *                 不应把原照片自排除，否则重跑会强制换图）。
- * @returns { eventKeys: Set<string>, excludeIds: Set<string> }
+ * @returns excludeIds：已入选 photoId 集合（含 hero 与 members）
  */
-export async function getRecentPickedEventKeys(
+export async function getPickedPhotoIds(
   daysBack: number | "all" = 30,
   now: Date = new Date(),
-): Promise<{ eventKeys: Set<string>; excludeIds: Set<string> }> {
+): Promise<Set<string>> {
   // 窗口边界与目标日均按北京日期计算，与 dailyPicks.pickDate（formatPickDate 用北京时区）
   // 保持一致。若改用 UTC 日期（now.toISOString()），在北京凌晨时段（= UTC 前一日）会与
   // pickDate 跨天错位，导致 ne(pickDate, nowDate) 误把"昨天的精选"排除出去重池。
@@ -179,50 +168,14 @@ export async function getRecentPickedEventKeys(
     }
   }
 
-  // JOIN photos 表获取 file_path + taken_at，计算事件键
-  const eventKeys = new Set<string>();
-  if (excludeIds.size > 0) {
-    const excludeList = [...excludeIds];
-    const photoRows = await db
-      .select({
-        photoId: schema.photos.id,
-        filePath: schema.photos.filePath,
-        takenAt: schema.photos.takenAt,
-      })
-      .from(schema.photos)
-      .where(
-        sql`${schema.photos.id} IN (${sql.join(
-          excludeList.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      );
-
-    for (const r of photoRows) {
-      const key = computeEventKey(r.filePath, r.takenAt);
-      if (key) eventKeys.add(key);
-    }
-  }
-
-  return { eventKeys, excludeIds };
-}
-
-/**
- * @deprecated 使用 getRecentPickedEventKeys().excludeIds 替代
- */
-export async function getRecentPickedPhotoIds(
-  daysBack = 30,
-  now: Date = new Date(),
-): Promise<Set<string>> {
-  const { excludeIds } = await getRecentPickedEventKeys(daysBack, now);
   return excludeIds;
 }
 
 /** 构建候选池参数 */
 export interface BuildCandidatePoolOptions {
   now?: Date;
+  /** 已入选 photoId 集合：候选照片若命中则跳过（getPickedPhotoIds 产出） */
   excludeIds?: Set<string>;
-  /** 事件键集合：30 天内已选照片的事件键，候选照片若命中则跳过 */
-  eventKeys?: Set<string>;
   maxN?: number;
   /** 近期拍摄第 5 源开关。缺省读 config.dailyRecentSourceEnabled（默认关）；
    *  显式传入可覆盖 config——dry run CLI 用同一份真实代码做开关 A/B 对比。 */
@@ -282,7 +235,6 @@ export async function buildCandidatePool(
   const {
     now = new Date(),
     excludeIds = new Set<string>(),
-    eventKeys = new Set<string>(),
     maxN = MAX_N,
     includeRecentSource,
   } = options;
@@ -464,7 +416,7 @@ export async function buildCandidatePool(
   // 近 30 天照片日均不足 1 席。独立成源让近期照片在自己的人群内竞争。
   const recentRows: typeof historyTodayRows = [];
   if (recentSourceEnabled) {
-    // 北京日历日 cutoff，与 getRecentPickedEventKeys 的 toBeijingDate 换算保持一致；
+    // 北京日历日 cutoff，与 getPickedPhotoIds 的 toBeijingDate 换算保持一致；
     // substr(1,10) 日期字符串比较对 'YYYY-MM-DD HH:MM:SS' 与 ISO 两种 takenAt 存储格式都成立
     const recentCutoff = new Date(
       now.getTime() - config.dailyRecentSourceDays * 86400_000 + 8 * 3600_000,
@@ -537,20 +489,11 @@ export async function buildCandidatePool(
       });
   }
 
-  /** 事件键过滤器：候选命中已知事件键则跳过（takenAt 为 null 时不过滤） */
-  function filterByEventKey(candidates: EnrichedCandidate[]): EnrichedCandidate[] {
-    if (eventKeys.size === 0) return candidates;
-    return candidates.filter((c) => {
-      const key = computeEventKey(c.filePath, c.takenAt);
-      return !key || !eventKeys.has(key);
-    });
-  }
-
-  const historyToday = filterByEventKey(toEnriched(historyTodayRows, "historyToday"));
-  const sameMonth = filterByEventKey(toEnriched(sameMonthRows, "sameMonth"));
-  const sameSeason = filterByEventKey(toEnriched(sameSeasonRows, "sameSeason"));
-  const randomSample = filterByEventKey(toEnriched(randomSampleRows, "randomSample"));
-  const recent = filterByEventKey(toEnriched(recentRows, "recent"));
+  const historyToday = toEnriched(historyTodayRows, "historyToday");
+  const sameMonth = toEnriched(sameMonthRows, "sameMonth");
+  const sameSeason = toEnriched(sameSeasonRows, "sameSeason");
+  const randomSample = toEnriched(randomSampleRows, "randomSample");
+  const recent = toEnriched(recentRows, "recent");
 
   // ---- per-source quota 合并（不截断）----
   // 按设计文档要求："merged.slice(0, maxN) 这一截断需要在聚类之后做，
@@ -675,7 +618,7 @@ export async function buildCandidatePool(
   }
 
   // 转换 fillUp 原始行为 EnrichedCandidate，source 标 "fillUp"
-  const fillUpCandidates = filterByEventKey(toEnriched(fillUpRawRows, "fillUp"));
+  const fillUpCandidates = toEnriched(fillUpRawRows, "fillUp");
 
   // fillUp 候选单独跑聚类
   const fillUpClusters = clusterByDirnameAndTime(fillUpCandidates);
@@ -746,12 +689,17 @@ export async function buildCandidatePool(
 export type DedupMode = "all" | "window-30";
 
 /**
- * 全量历史去重构造候选池，空池时回退 30 天窗口兜底。
+ * photoId 全量历史去重构造候选池，空池时回退 30 天窗口兜底。
  *
  * 背景（2026-11-02）：原实现固定 30 天滑动窗口去重，照片 30 天后重新 eligible，
  * 高分层照片（8.5+ 全库仅 ~76 张）每月循环霸榜——单张最多重复入选 7 次，
- * 近 30 天 63% 的 entries 是历史重复照片。改为全量历史去重后照片终生不再重复；
+ * 近 30 天 63% 的 entries 是历史重复照片。改为 photoId 全量历史去重后照片终生不再重复；
  * 仅当全量去重把池子耗尽（候选为空，多年后才会发生）才回退 30 天窗口保底出片。
+ *
+ * 事件键层撤销（2026-11-22）：全量去重最初叠加了事件键（dirname::拍摄日）过滤，
+ * 一张入选连坐整个事件目录当天照片。生产 200 天后 371 个事件键把主路径高分池
+ * 全部连坐（详见文件头注释），触发兜底 → 30 天循环重复回归。事件键层已删除，
+ * 兜底仅剩 photoId 耗尽这一真实触发条件。
  *
  * 生产入口：daily-selection worker；诊断入口：dry-run-real-pool CLI。
  * 两者共用本函数，保证 dry run 与生产行为一致。
@@ -764,37 +712,32 @@ export async function buildCandidatePoolWithDedup(options: {
 }): Promise<{
   pool: ClusteredCandidate[];
   mode: DedupMode;
-  eventKeys: Set<string>;
   excludeIds: Set<string>;
 }> {
   const { now, maxN = MAX_N, includeRecentSource, log = () => {} } = options;
 
-  const buildWith = async (exclusions: {
-    eventKeys: Set<string>;
-    excludeIds: Set<string>;
-  }): Promise<ClusteredCandidate[]> =>
+  const buildWith = async (excludeIds: Set<string>): Promise<ClusteredCandidate[]> =>
     buildCandidatePool({
       now,
-      excludeIds: exclusions.excludeIds,
-      eventKeys: exclusions.eventKeys,
+      excludeIds,
       maxN,
       includeRecentSource,
     });
 
   // 首选：全量历史去重
-  const allTime = await getRecentPickedEventKeys("all", now);
-  log(`全量历史去重池: ${allTime.excludeIds.size} 个 photoId, ${allTime.eventKeys.size} 个事件键`);
+  const allTime = await getPickedPhotoIds("all", now);
+  log(`全量历史去重池: ${allTime.size} 个 photoId`);
   const pool = await buildWith(allTime);
 
   // 兜底：全量去重耗尽池子（排除集非空才有意义——空库时窗口模式结果相同，不重复查）
-  if (pool.length === 0 && allTime.excludeIds.size > 0) {
+  if (pool.length === 0 && allTime.size > 0) {
     log("全量历史去重后候选池为空，回退 30 天滑动窗口兜底（允许近期重复以保底出片）");
-    const recent = await getRecentPickedEventKeys(30, now);
+    const recent = await getPickedPhotoIds(30, now);
     const fallbackPool = await buildWith(recent);
-    return { pool: fallbackPool, mode: "window-30", ...recent };
+    return { pool: fallbackPool, mode: "window-30", excludeIds: recent };
   }
 
-  return { pool, mode: "all", ...allTime };
+  return { pool, mode: "all", excludeIds: allTime };
 }
 
 /**

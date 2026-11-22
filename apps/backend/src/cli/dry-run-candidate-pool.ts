@@ -7,11 +7,12 @@
  *
  * 与线上实现的差异：
  * - 复刻 getBeijingDateInfo / 4 源 SQL / fillUp（这些是 buildCandidatePool 私有实现），
- *   dedupAndQuotaMerge / clusterByDirnameAndTime / computeEventKey / parseTakenAtMs
+ *   dedupAndQuotaMerge / clusterByDirnameAndTime / parseTakenAtMs
  *   直接 import 线上导出，保证聚类与配额语义一致。
  * - 跳过 peopleNicknames 注入（不影响年代分布统计）。
  * - randomSample / fillUp 的 ABS(RANDOM()%3) 抖动使单次结果有随机性，
  *   默认跑 5 轮取均值。
+ * - 2026-11-22 随生产撤销事件键去重：本脚本的 eventKeys 复刻同步删除。
  *
  * 用法：pnpm --filter @relight/backend tsx src/cli/dry-run-candidate-pool.ts [startDate] [endDate] [rounds]
  *   默认 startDate=2026-09-05 endDate=2026-09-12 rounds=5
@@ -24,7 +25,6 @@ import {
   type CandidateSource,
   type EnrichedCandidate,
   type PrimaryCandidateSource,
-  computeEventKey,
   dedupAndQuotaMerge,
 } from "../jobs/daily-selection/candidate-pool";
 import { clusterByDirnameAndTime, parseTakenAtMs } from "../jobs/daily-selection/cluster";
@@ -118,7 +118,7 @@ function pickNowFor(dateStr: string): Date {
 }
 
 // ---------------------------------------------------------------------------
-// 排除集：pick_date < D 的真实历史（30 天窗口），复刻 getRecentPickedEventKeys
+// 排除集：pick_date < D 的真实历史（30 天窗口），复刻 getPickedPhotoIds
 // 但只向前看——真实当日凌晨跑批时未来记录尚不存在
 // ---------------------------------------------------------------------------
 
@@ -160,27 +160,7 @@ async function getPastExclusions(pickDate: string) {
     for (const m of (r.members as { photoId: string }[] | null) ?? []) excludeIds.add(m.photoId);
   }
 
-  const eventKeys = new Set<string>();
-  if (excludeIds.size > 0) {
-    const photoRows = await db
-      .select({
-        photoId: schema.photos.id,
-        filePath: schema.photos.filePath,
-        takenAt: schema.photos.takenAt,
-      })
-      .from(schema.photos)
-      .where(
-        sql`${schema.photos.id} IN (${sql.join(
-          [...excludeIds].map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      );
-    for (const r of photoRows) {
-      const key = computeEventKey(r.filePath, r.takenAt);
-      if (key) eventKeys.add(key);
-    }
-  }
-  return { excludeIds, eventKeys };
+  return { excludeIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +216,7 @@ async function fetchSource(
 async function buildPool(variant: Variant, pickDate: string, maxN = 12) {
   const pickNow = pickNowFor(pickDate);
   const pickNowMs = pickNow.getTime();
-  const { excludeIds, eventKeys } = await getPastExclusions(pickDate);
+  const { excludeIds } = await getPastExclusions(pickDate);
   const { month, day, monthDay, seasonMonths } = getBeijingDateInfo(pickNow);
   const K_PER_SOURCE = Math.ceil(maxN * 1.5);
   const floorMs =
@@ -325,19 +305,11 @@ async function buildPool(variant: Variant, pickDate: string, maxN = 12) {
         };
       });
 
-  const filterByEventKey = (cands: EnrichedCandidate[]): EnrichedCandidate[] => {
-    if (eventKeys.size === 0) return cands;
-    return cands.filter((c) => {
-      const key = computeEventKey(c.filePath, c.takenAt);
-      return !key || !eventKeys.has(key);
-    });
-  };
-
   const bySource = {
-    historyToday: filterByEventKey(toEnriched(historyTodayRows, "historyToday")),
-    sameMonth: filterByEventKey(toEnriched(sameMonthRows, "sameMonth")),
-    sameSeason: filterByEventKey(toEnriched(sameSeasonRows, "sameSeason")),
-    randomSample: filterByEventKey(toEnriched(randomSampleRows, "randomSample")),
+    historyToday: toEnriched(historyTodayRows, "historyToday"),
+    sameMonth: toEnriched(sameMonthRows, "sameMonth"),
+    sameSeason: toEnriched(sameSeasonRows, "sameSeason"),
+    randomSample: toEnriched(randomSampleRows, "randomSample"),
   };
 
   // 变体：第 5 源"近期拍摄"（近 N 天，达同样门槛，源内按 aes 竞争）
@@ -353,7 +325,7 @@ async function buildPool(variant: Variant, pickDate: string, maxN = 12) {
       K_PER_SOURCE,
       false,
     );
-    recent = filterByEventKey(toEnriched(recentRows, "recent" as CandidateSource));
+    recent = toEnriched(recentRows, "recent" as CandidateSource);
   }
 
   /** 5 源 quota 合并：每源保底 seats + 剩余槽按 weightedScore 抢占（照 dedupAndQuotaMerge 语义扩展） */
@@ -418,7 +390,7 @@ async function buildPool(variant: Variant, pickDate: string, maxN = 12) {
       return ms !== null && pickNowMs - ms <= 30 * DAY_MS;
     };
     console.log(`\n[debug ${pickDate} variant=${variant.name}]`);
-    console.log(`  excludeIds=${excludeIds.size} eventKeys=${eventKeys.size}`);
+    console.log(`  excludeIds=${excludeIds.size}`);
     for (const [src, rows] of [
       ["historyToday", historyTodayRows],
       ["sameMonth", sameMonthRows],
@@ -478,9 +450,7 @@ async function buildPool(variant: Variant, pickDate: string, maxN = 12) {
       )
     : and(fillUpFloor, burstRepOnly);
   const fillUpRawRows = await fetchSource(fillUpWhere, fillUpLimit, true);
-  const fillUpClusters = clusterByDirnameAndTime(
-    filterByEventKey(toEnriched(fillUpRawRows, "fillUp")),
-  );
+  const fillUpClusters = clusterByDirnameAndTime(toEnriched(fillUpRawRows, "fillUp"));
 
   const CONFLICT_DIRNAME_MS = 60 * 60 * 1000;
   const CONFLICT_GPS_M = 500;

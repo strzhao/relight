@@ -23,10 +23,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // 常量
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 主仓库根目录（绝对路径） */
+/** 当前源码根目录：在主仓跑就是主仓，在 worktree 跑就是 worktree */
 const REPO_ROOT = path.resolve(__dirname, "../../../../");
 
-/** sync 脚本路径（相对主仓库根） */
+/** 主仓库根目录：数据共享与 silent-exit 用例的基准，不能误用当前 worktree */
+const MAIN_REPO_ROOT = path.dirname(
+  execSync("git rev-parse --path-format=absolute --git-common-dir", {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+  }).trim(),
+);
+
+/** sync 脚本路径（相对当前源码根，确保测试覆盖当前工作区实现） */
 const SYNC_SCRIPT = "scripts/sync-worktree-env.mjs";
 
 /** 测试用 worktree 的分支名 */
@@ -160,8 +168,8 @@ afterAll(() => {
 describe("用例 1: sync 脚本在主仓库中 silent exit", () => {
   it("在主仓库根跑 sync 脚本，exit 0 且不生成任何 env 文件", { timeout: 30_000 }, () => {
     // 记录执行前的文件状态
-    const backendEnvPath = path.join(REPO_ROOT, "apps/backend/.env");
-    const webEnvPath = path.join(REPO_ROOT, "apps/web/.env.local");
+    const backendEnvPath = path.join(MAIN_REPO_ROOT, "apps/backend/.env");
+    const webEnvPath = path.join(MAIN_REPO_ROOT, "apps/web/.env.local");
 
     const backendEnvExistedBefore = fs.existsSync(backendEnvPath);
     const webEnvExistedBefore = fs.existsSync(webEnvPath);
@@ -170,7 +178,7 @@ describe("用例 1: sync 脚本在主仓库中 silent exit", () => {
     const backendMtimeBefore = backendEnvExistedBefore ? fs.statSync(backendEnvPath).mtimeMs : null;
     const webMtimeBefore = webEnvExistedBefore ? fs.statSync(webEnvPath).mtimeMs : null;
 
-    const { exitCode } = runSyncScript(REPO_ROOT);
+    const { exitCode } = runSyncScript(MAIN_REPO_ROOT);
 
     // 必须 exit 0
     expect(exitCode, "sync 脚本在主仓库运行应 exit 0").toBe(0);
@@ -284,8 +292,8 @@ describe("用例 2/3/5/7: worktree env 文件正确性验证", () => {
     expect(dbPath, "DATABASE_PATH 应存在").toBeTruthy();
     expect(path.isAbsolute(dbPath ?? ""), "DATABASE_PATH 应是绝对路径").toBe(true);
     expect(
-      (dbPath ?? "").startsWith(REPO_ROOT),
-      `DATABASE_PATH（${dbPath}）应以主仓库根（${REPO_ROOT}）为前缀`,
+      (dbPath ?? "").startsWith(MAIN_REPO_ROOT),
+      `DATABASE_PATH（${dbPath}）应以主仓库根（${MAIN_REPO_ROOT}）为前缀`,
     ).toBe(true);
   });
 
@@ -296,8 +304,8 @@ describe("用例 2/3/5/7: worktree env 文件正确性验证", () => {
     expect(storageRoot, "STORAGE_ROOT 应存在").toBeTruthy();
     expect(path.isAbsolute(storageRoot ?? ""), "STORAGE_ROOT 应是绝对路径").toBe(true);
     expect(
-      (storageRoot ?? "").startsWith(REPO_ROOT),
-      `STORAGE_ROOT（${storageRoot}）应以主仓库根（${REPO_ROOT}）为前缀`,
+      (storageRoot ?? "").startsWith(MAIN_REPO_ROOT),
+      `STORAGE_ROOT（${storageRoot}）应以主仓库根（${MAIN_REPO_ROOT}）为前缀`,
     ).toBe(true);
   });
 
