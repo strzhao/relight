@@ -46,8 +46,11 @@ const holder = vi.hoisted(() => ({
   h3cSsdStreaming: true,
   motionMinPeak: 2.0,
   motionMaxAttempts: 2,
-  /** measureVideoMotion mock 的 peak 序列（按调用次序弹出； Infinity=throw fail-open） */
+  motionMaxFlip: 8.5,
+  /** measureVideoMotion mock 的 peak / flipRate 序列（按调用次序弹出；
+   *  Infinity=throw fail-open） */
   motionPeaks: [] as number[],
+  motionFlips: [] as number[],
   firstFramePath: "/tmp/relight-none/first.png",
   /** spawn mock 产物登记表：`${width}x${height}` → 源 mp4 路径 */
   productByCanvas: new Map<string, string>(),
@@ -82,6 +85,9 @@ vi.mock("../lib/config", () => ({
     },
     get wallpaperVideoMotionMinPeak() {
       return holder.motionMinPeak;
+    },
+    get wallpaperVideoMotionMaxFlip() {
+      return holder.motionMaxFlip;
     },
     get wallpaperVideoMotionMaxAttempts() {
       return holder.motionMaxAttempts;
@@ -288,7 +294,8 @@ function wireMocks(): void {
     if (peak === undefined || !Number.isFinite(peak)) {
       throw new Error(`measureVideoMotion mock: 测量失败（${filePath}）`);
     }
-    return { peak, fdiffAvg: peak / 10, frames: 107 };
+    const flipRate = holder.motionFlips.shift() ?? 5;
+    return { peak, fdiffAvg: peak / 10, flipRate, frames: 107 };
   });
 
   mockPreprocessHeroFrame.mockImplementation(async () => holder.firstFramePath);
@@ -461,7 +468,9 @@ beforeEach(() => {
   holder.loopSeconds = 8;
   holder.motionMinPeak = 2.0;
   holder.motionMaxAttempts = 2;
+  holder.motionMaxFlip = 8.5;
   holder.motionPeaks = [10]; // 默认首发即达标（既有用例的常态路径）
+  holder.motionFlips = [5]; // 默认翻转落在自然带（双向门常态通过）
   wireMocks();
 });
 
@@ -554,17 +563,24 @@ describe("wallpaper-video h3c 引擎派发（1:1 hero）", () => {
 });
 
 // ============================================================================
-// 运动量验收门（20261014）：低峰值换 seed 重试 / 取优发布 / fail-open
+// 运动量双向验收门（20261014 峰值门 + 20261126 翻转率门）：定向重试 / 取优发布 / fail-open
 // ============================================================================
 
-describe("wallpaper-video 运动量验收门（h3c 换 seed 重试）", () => {
-  it("首发低于门槛 → 换 seed 重试（seed 42→43），次发达标发布，尝试产物清理", async () => {
+describe("wallpaper-video 运动量双向验收门（h3c 定向重试）", () => {
+  it("首发偏静（peak<门槛）→ L2 激进档重试（seed 42→43），次发达标发布，尝试产物清理", async () => {
     holder.motionPeaks = [0.5, 6.0];
+    holder.motionFlips = [5, 5];
     await runWallpaperVideo(PICK_SQUARE);
 
     expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(2);
     const seeds = mockSpawnH3cVideo.mock.calls.map((c) => (c?.[0] as { seed: number }).seed);
     expect(seeds).toEqual([42, 43]);
+    // 偏静败因定向：attempt 2 升 L2 激进档（字面量锁死，防误改回「速度很快」措辞漂移）
+    const prompts = mockSpawnH3cVideo.mock.calls.map((c) =>
+      String((c?.[0] as { prompt: string }).prompt),
+    );
+    expect(prompts[0]).toContain("动作幅度很大：");
+    expect(prompts[1]).toContain("动作幅度很大且速度很快：");
     // 尝试产物清理：发布成功后 raw/attempt 文件都不残留
     const dir = path.join(holder.storageRoot, "wallpaper-videos");
     const leftovers = fs.readdirSync(dir).filter((f) => f.includes("-native-raw"));
@@ -576,8 +592,33 @@ describe("wallpaper-video 运动量验收门（h3c 换 seed 重试）", () => {
     expect(row.wallpaper_video_native_url).toBe(receiptFor(nativeKey(PICK_SQUARE)));
   });
 
-  it("全部尝试低于门槛 → 耗尽次数取优发布（不空转、不失败）", async () => {
-    holder.motionPeaks = [1.0, 0.5];
+  it("首发偏快（flip>上界鬼畜带，peak 达标）→ 裸 prompt 重掷（去包覆），负面清单保留", async () => {
+    holder.motionPeaks = [5.0, 3.0];
+    holder.motionFlips = [12.0, 5.0];
+    await runWallpaperVideo(PICK_SQUARE);
+
+    expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(2);
+    const seeds = mockSpawnH3cVideo.mock.calls.map((c) => (c?.[0] as { seed: number }).seed);
+    expect(seeds).toEqual([42, 43]);
+    const prompts = mockSpawnH3cVideo.mock.calls.map((c) =>
+      String((c?.[0] as { prompt: string }).prompt),
+    );
+    expect(prompts[0]).toContain("动作幅度很大：");
+    // 偏快败因定向：attempt 2 去包覆（强度包覆是快进感主因，小蜜蜂实证 11.4→2.9/s），
+    // 但负面清单护栏独立保留
+    expect(prompts[1]).not.toContain("动作幅度很大");
+    expect(prompts[1]).not.toContain("头发衣角大幅飞扬");
+    expect(prompts[1]).toContain("全程单镜头不切镜");
+    const row = sqlite
+      .prepare("SELECT wallpaper_video_native_url FROM daily_picks WHERE pick_date = ?")
+      .get(PICK_SQUARE) as { wallpaper_video_native_url: string | null };
+    expect(row.wallpaper_video_native_url).toBe(receiptFor(nativeKey(PICK_SQUARE)));
+  });
+
+  it("全部尝试未过双向门 → 耗尽次数按坏度取优发布（不空转、不失败）", async () => {
+    // a1 双侧越界（坏度 0.5+0.41）、a2 仅翻转越界（坏度 0.41）→ a2 入选，仍正常发布
+    holder.motionPeaks = [1.0, 5.0];
+    holder.motionFlips = [12.0, 12.0];
     await runWallpaperVideo(PICK_SQUARE);
 
     expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(2);
@@ -594,6 +635,7 @@ describe("wallpaper-video 运动量验收门（h3c 换 seed 重试）", () => {
 
   it("首发达标 → 恰 1 次 spawn（seed 42），不触发重试", async () => {
     holder.motionPeaks = [5.0];
+    holder.motionFlips = [5];
     await runWallpaperVideo(PICK_SQUARE);
     expect(mockSpawnH3cVideo).toHaveBeenCalledTimes(1);
     expect((mockSpawnH3cVideo.mock.calls[0]?.[0] as { seed: number }).seed).toBe(42);

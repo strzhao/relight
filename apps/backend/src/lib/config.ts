@@ -175,6 +175,13 @@ export const config = {
   wallpaperVideoMotionMinPeak: Number.parseFloat(
     process.env.WALLPAPER_VIDEO_MOTION_MIN_PEAK ?? "2.0",
   ),
+  /** 方向翻转率上界（次/秒，20261126 双向门第二指标）。峰值门只拦「太静」，拦不住
+   *  「小幅高频振荡」型鬼畜——20261119~26 生产 8 支中 4 支翻转 ≥11/s（用户判「速度快
+   *  得鬼畜」）且其中 3 支 peak 达标放行。标尺沿 book-videos qc 实测定标：6-8.5/s
+   *  自然带、≥10.8/s「3 倍速快进感」。0 或 NaN = 关闭。env WALLPAPER_VIDEO_MOTION_MAX_FLIP 覆盖。 */
+  wallpaperVideoMotionMaxFlip: Number.parseFloat(
+    process.env.WALLPAPER_VIDEO_MOTION_MAX_FLIP ?? "8.5",
+  ),
   /** 运动量不达标时的最大生成尝试次数（每次换 seed：h3c.seed + attempt-1；
    *  honeydo seed 恒 42 重试无意义，恒为 1 次）。env WALLPAPER_VIDEO_MOTION_MAX_ATTEMPTS 覆盖。 */
   wallpaperVideoMotionMaxAttempts: Number.parseInt(

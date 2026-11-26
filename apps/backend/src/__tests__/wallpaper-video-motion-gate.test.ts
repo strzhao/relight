@@ -1,14 +1,17 @@
 /**
- * 单测：lib/wallpaper/video.ts — measureVideoMotion（20261014 运动量验收门）
+ * 单测：lib/wallpaper/video.ts — measureVideoMotion（20261014 运动量验收门；
+ * 20261126 增方向翻转率 flipRate——book-videos qc 判尺移植）
  *
  * 契约：
- *   measureVideoMotion(filePath) → {peak, fdiffAvg, frames}
+ *   measureVideoMotion(filePath) → {peak, fdiffAvg, flipRate, frames}
  *   - peak = max_i mean(|frame_i − frame_0|)/255×100；fdiffAvg = 平均帧间变化
+ *   - flipRate = d(peak_i) 过零计数 ÷ 时长（次/秒）；标尺：6-8.5/s 自然带、
+ *     ≥10.8/s「3 倍速快进感」（小幅高频振荡型鬼畜的量化判尺）
  *   - 无损 gray 320×180 rawvideo（禁 JPEG——压缩噪声污染测量）
  *   - ffmpeg 失败/帧数 <2 → throw（调用方 fail-open）
  *
- * 测试策略：真实 ffmpeg 造两类样本——testsrc2（持续运动）与纯色静帧（近零运动），
- * 锁「运动源 peak 显著高于静帧源」与静帧源 peak < 1%。
+ * 测试策略：真实 ffmpeg 造四类样本——testsrc2（持续运动）、纯色静帧（近零运动）、
+ * geq 周期 2 帧振荡（鬼畜代理，翻转 ≥10.8/s）、geq 周期 24 帧缓动（慢节奏代理）。
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
@@ -64,6 +67,37 @@ describe("measureVideoMotion", () => {
     const stats = await measureVideoMotion(still);
     expect(stats.peak).toBeLessThan(1);
     expect(stats.fdiffAvg).toBeLessThan(0.05);
+    expect(stats.flipRate).toBeLessThan(2);
+  });
+
+  it("鬼畜代理样本（周期 2 帧振荡）flipRate ≥10.8/s（「3 倍速快进感」判尺）", async () => {
+    const frantic = makeSample("frantic.mp4", [
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=0x808080:size=320x180:rate=24:duration=2",
+      "-vf",
+      "geq=lum='128+60*sin(2*PI*N/2)':cb=128:cr=128",
+      "-c:v",
+      "libx264",
+    ]);
+    const stats = await measureVideoMotion(frantic);
+    expect(stats.flipRate).toBeGreaterThanOrEqual(10.8);
+  });
+
+  it("慢节奏代理样本（周期 24 帧缓动）flipRate < 8.5/s（自然带上界内）", async () => {
+    const slow = makeSample("slow.mp4", [
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=0x808080:size=320x180:rate=24:duration=2",
+      "-vf",
+      "geq=lum='128+60*sin(2*PI*N/24)':cb=128:cr=128",
+      "-c:v",
+      "libx264",
+    ]);
+    const stats = await measureVideoMotion(slow);
+    expect(stats.flipRate).toBeLessThan(8.5);
   });
 
   it("ffmpeg 失败（非媒体文件）→ throw（调用方 fail-open 的前提）", async () => {

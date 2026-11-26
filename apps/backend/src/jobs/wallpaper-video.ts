@@ -131,19 +131,37 @@ async function produceNativeSide(opts: {
     // 2. spawn 生成引擎（20261014 双引擎：h3c = h3.c BF16 零量化（默认）/
     //    honeydo = mmh3turbo int8（回滚）；双锚定伪循环：--first-frame 与 --last-frame 同图；
     //    honeydo 契约 6：-r 720p 保留保 stdout 回执语义，画布两轴经 --width/--height 显式覆盖）
-    //    20261014 运动量验收门：生成后实测峰值偏移，低于门槛且引擎可换 seed（h3c）时重试——
-    //    同引擎同 prompt 不同 seed/画布的 draw 方差极大（实测 0.45%~9.32%），近静止样本不入库；
+    //    20261014 运动量验收门（20261126 升双向门）：生成后实测 peak（偏移峰值）+
+    //    flipRate（方向翻转率）双向门槛，未过且引擎可换 seed（h3c）时重试——
+    //    同引擎同 prompt 不同 seed/画布的 draw 方差极大（实测 0.45%~9.32%），
+    //    近静止样本与「小幅高频振荡」鬼畜样本不入库；
     //    全部尝试都不达标时取最优一支继续（发静态优于发空，门槛可经 env 归零关闭）。
     const seconds = clampWallpaperVideoSeconds(config.wallpaperVideoSeconds);
     const engine = config.wallpaperVideoEngine === "h3c" ? "h3c" : "honeydo";
     const maxAttempts = engine === "h3c" ? Math.max(1, config.wallpaperVideoMotionMaxAttempts) : 1;
     const minPeak = config.wallpaperVideoMotionMinPeak;
+    const maxFlip = config.wallpaperVideoMotionMaxFlip;
+    // 双向门：peak 下界拦「太静」，flipRate 上界拦鬼畜（判尺沿 book-videos qc：
+    // 6-8.5/s 自然带、≥10.8/s「3 倍速快进感」——peak 只量「偏多远」，鬼畜是「换向多频」）
+    const motionOk = (s: { peak: number; flipRate: number }): boolean =>
+      (minPeak <= 0 || s.peak >= minPeak) && (maxFlip <= 0 || s.flipRate <= maxFlip);
+    // 都未过门时的取优坏度：两侧越界各自归一化后求和（过门 = 0），双向对称不偏科
+    const motionPenalty = (s: { peak: number; flipRate: number }): number =>
+      (minPeak > 0 ? Math.max(0, minPeak - s.peak) / minPeak : 0) +
+      (maxFlip > 0 ? Math.max(0, s.flipRate - maxFlip) / maxFlip : 0);
     log(
-      `[wallpaper-video] ${pickDate} native ${canvas.width}×${canvas.height} 生成开始（engine=${engine} seconds=${seconds} 运动门≥${minPeak}%×${maxAttempts}次）`,
+      `[wallpaper-video] ${pickDate} native ${canvas.width}×${canvas.height} 生成开始（engine=${engine} seconds=${seconds} 运动门 peak≥${minPeak}% flip≤${maxFlip}/s ×${maxAttempts}次）`,
     );
     let attemptRawPath = rawPath;
-    // peak -1 = 尚无实测；Infinity = 测量失败 fail-open 放行
-    let best: { path: string; peak: number } = { path: rawPath, peak: -1 };
+    // penalty Infinity = 尚无实测 / 测量失败 fail-open 放行
+    let best: { path: string; peak: number; flipRate: number; penalty: number } = {
+      path: rawPath,
+      peak: -1,
+      flipRate: -1,
+      penalty: Number.POSITIVE_INFINITY,
+    };
+    // 上一支实测（attempt≥2 强化档位的定向依据：偏静升 L2 / 偏快回裸 prompt）
+    let lastStats: { peak: number } | null = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       attemptRawPath =
         maxAttempts > 1
@@ -151,17 +169,22 @@ async function produceNativeSide(opts: {
           : rawPath;
       if (engine === "h3c") {
         const seed = config.h3c.seed + attempt - 1;
-        // 动作强化阶梯：attempt 1 = L1 常规放大；attempt 2 = L2 激进修正
-        // （重试换的是力度档位，不只是 seed——纯换 seed 实测无效）
-        const boostLevel = attempt >= 2 ? 2 : 1;
+        // 定向强化阶梯（20261126 book-videos 修复树移植）：attempt 1 = L1 常规放大；
+        // attempt ≥2 看上一支败因定方向——偏静升 L2 激进档（重试换力度档位，纯换
+        // seed 实测无效）；偏快/低幅高频回裸 prompt 重掷（强度包覆正是快进感主因
+        // 之一，小蜜蜂实证去包覆 + 换 seed 翻转率 11.4→2.9/s）
+        const boostLevel: 0 | 1 | 2 =
+          attempt === 1 ? 1 : lastStats !== null && lastStats.peak < minPeak ? 2 : 0;
         const boosted =
-          engine === "h3c" && config.h3c.motionPromptBoost
+          engine === "h3c" && config.h3c.motionPromptBoost && boostLevel !== 0
             ? withMotionBoost(prompt, boostLevel)
             : prompt;
         // 负面清单护栏独立于动作强化开关（防幻觉加字/切镜/变形/自加配乐）
         const attemptPrompt = withH3NegativeList(boosted);
         log(
-          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}${config.h3c.motionPromptBoost ? ` 动作强化L${boostLevel}` : ""}）`,
+          `[wallpaper-video] ${pickDate} 尝试 ${attempt}/${maxAttempts}（seed=${seed}${config.h3c.lastFrameAnchor ? " 双锚定" : " 单锚定"}${
+            boostLevel > 0 ? ` 动作强化L${boostLevel}` : " 裸prompt"
+          }）`,
         );
         await spawnH3cVideo({
           binPath: config.h3c.binPath,
@@ -209,17 +232,30 @@ async function produceNativeSide(opts: {
         );
       }
       if (motion) {
+        lastStats = motion;
         log(
-          `[wallpaper-video] ${pickDate} 运动量 peak=${motion.peak.toFixed(2)}% 帧间avg=${motion.fdiffAvg.toFixed(3)}%（门槛 ${minPeak}%）`,
+          `[wallpaper-video] ${pickDate} 运动量 peak=${motion.peak.toFixed(2)}% 帧间avg=${motion.fdiffAvg.toFixed(3)}% 翻转=${motion.flipRate.toFixed(1)}/s（门槛 peak≥${minPeak}% flip≤${maxFlip}/s）`,
         );
-        if (motion.peak > best.peak) best = { path: attemptRawPath, peak: motion.peak };
-        if (motion.peak >= minPeak) break;
+        const penalty = motionPenalty(motion);
+        if (penalty < best.penalty) {
+          best = { path: attemptRawPath, peak: motion.peak, flipRate: motion.flipRate, penalty };
+        }
+        if (motionOk(motion)) break;
         if (attempt < maxAttempts) {
-          log(`[wallpaper-video] ${pickDate} 运动量低于门槛，换 seed 重试`);
+          log(
+            motion.peak < minPeak
+              ? `[wallpaper-video] ${pickDate} 运动量偏静（peak<${minPeak}%），升档重试`
+              : `[wallpaper-video] ${pickDate} 翻转偏快（flip>${maxFlip}/s 鬼畜带），裸 prompt 重掷`,
+          );
         }
       } else {
         // 测量失败 fail-open：视为达标放行（不再重试）
-        best = { path: attemptRawPath, peak: Number.POSITIVE_INFINITY };
+        best = {
+          path: attemptRawPath,
+          peak: Number.POSITIVE_INFINITY,
+          flipRate: -1,
+          penalty: Number.POSITIVE_INFINITY,
+        };
         break;
       }
     }
@@ -235,9 +271,11 @@ async function produceNativeSide(opts: {
       const p = path.join(wallpaperVideoDir(), `${pickDate}-native-raw-a${i}.mp4`);
       if (p !== best.path) await rm(p, { force: true }).catch(() => {});
     }
-    if (best.peak !== Number.POSITIVE_INFINITY && best.peak >= 0) {
+    if (Number.isFinite(best.peak) && best.peak >= 0) {
       log(
-        `[wallpaper-video] ${pickDate} 运动门通过/取优：peak=${best.peak.toFixed(2)}%（门槛 ${minPeak}%）`,
+        `[wallpaper-video] ${pickDate} 运动门通过/取优：peak=${best.peak.toFixed(2)}% 翻转=${best.flipRate.toFixed(1)}/s（门槛 peak≥${minPeak}% flip≤${maxFlip}/s${
+          best.penalty > 0 ? "，全部尝试未达标取最优一支" : ""
+        }）`,
       );
     }
     log(`[wallpaper-video] ${pickDate} native 生成完成 → ${rawPath}`);
