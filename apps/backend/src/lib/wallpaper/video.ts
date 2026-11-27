@@ -857,6 +857,10 @@ export interface VideoMotionStats {
   peak: number;
   /** 相邻帧平均变化（0-100；衡量「动不动」而非「偏多远」） */
   fdiffAvg: number;
+  /** 方向翻转率（次/秒）：d(peak_i) 过零计数 ÷ 时长。20261126 自 book-videos qc 移植
+   *  （小蜜蜂 guri-gura 27 页 + 壁纸实测定标）：6-8.5/s 自然带、≥10.8/s =「3 倍速快进感」；
+   *  比 peak 更对齐人眼节奏感——peak 只量「偏多远」，鬼畜是「换向多频」。 */
+  flipRate: number;
   frames: number;
 }
 
@@ -866,6 +870,7 @@ export interface VideoMotionStats {
  *
  * - peak = max_i mean(|frame_i − frame_0|) / 255 × 100
  * - fdiffAvg = mean_i mean(|frame_{i+1} − frame_i|) / 255 × 100
+ * - flipRate = count_j sign(d(peak)_{j+1}) ≠ sign(d(peak)_j) / (n / fps)
  *
  * 失败（ffprobe/ffmpeg 异常）throw 由调用方 fail-open（运动门是质量增强不是硬依赖，
  * 测量失败不得阻塞发布）。
@@ -916,6 +921,7 @@ export async function measureVideoMotion(filePath: string): Promise<VideoMotionS
   let peak = 0;
   let fdiffSum = 0;
   let prev: number[] = first;
+  const peakSeries: number[] = [0];
   for (let i = 1; i < n; i++) {
     const cur = Array.from(raw.subarray(i * frameLen, (i + 1) * frameLen));
     let sumFirst = 0;
@@ -928,12 +934,33 @@ export async function measureVideoMotion(filePath: string): Promise<VideoMotionS
     }
     const avgFirst = sumFirst / frameLen;
     if (avgFirst > peak) peak = avgFirst;
+    peakSeries.push(avgFirst);
     fdiffSum += sumDiff / frameLen;
     prev = cur;
+  }
+  // 方向翻转率：d(peak_i) 过零计数 ÷ 秒（signbit 语义同 numpy：0 视作正）。
+  // peakSeries 与 book-videos qc 同口径含首帧 0；fps 取 ffprobe 实测（h3.c 恒
+  // 24fps；转码链路可能变化），探测失败回退 24。
+  let flipRate = 0;
+  if (peakSeries.length >= 3) {
+    let zc = 0;
+    for (let i = 2; i < peakSeries.length; i++) {
+      const d0 = (peakSeries[i - 1] ?? 0) - (peakSeries[i - 2] ?? 0);
+      const d1 = (peakSeries[i] ?? 0) - (peakSeries[i - 1] ?? 0);
+      if (d0 < 0 !== d1 < 0) zc++;
+    }
+    let fps = 24;
+    try {
+      fps = (await probeVideoFile(filePath)).fps;
+    } catch {
+      // 探测失败回退 24（h3.c 产物恒 24fps，误差可忽略）
+    }
+    flipRate = zc / (n / fps);
   }
   return {
     peak: (peak / 255) * 100,
     fdiffAvg: (fdiffSum / (n - 1) / 255) * 100,
+    flipRate,
     frames: n,
   };
 }
